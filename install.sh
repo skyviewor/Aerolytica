@@ -26,7 +26,7 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 case "$OS" in
     Darwin)
-        OS_LABEL="macOS"
+        CONDA_OS="MacOSX"
         case "$ARCH" in
             arm64|aarch64) CONDA_ARCH="arm64" ;;
             x86_64)        CONDA_ARCH="x86_64" ;;
@@ -34,7 +34,7 @@ case "$OS" in
         esac
         ;;
     Linux)
-        OS_LABEL="Linux"
+        CONDA_OS="Linux"
         case "$ARCH" in
             aarch64) CONDA_ARCH="aarch64" ;;
             x86_64)  CONDA_ARCH="x86_64" ;;
@@ -46,7 +46,7 @@ case "$OS" in
         exit 1
         ;;
 esac
-info "检测到: ${OS_LABEL} / ${ARCH}"
+info "检测到: ${CONDA_OS} / ${ARCH}"
 
 # ── Step 1: Ensure conda ────────────────────────────────────────────────
 banner ""
@@ -63,7 +63,7 @@ elif [ -f "$MINICONDA_DIR/bin/conda" ]; then
 else
     warn "未找到 conda。开始安装 Miniconda..."
 
-    MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${OS_LABEL}-${CONDA_ARCH}.sh"
+    MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     info "下载: $MINICONDA_URL"
     INSTALLER="$(mktemp /tmp/miniconda.XXXXXX.sh)"
     curl -fsSL "$MINICONDA_URL" -o "$INSTALLER" || {
