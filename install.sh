@@ -66,7 +66,7 @@ else
     MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     info "下载: $MINICONDA_URL"
     INSTALLER="$(mktemp /tmp/miniconda.XXXXXX.sh)"
-    curl -fsSL "$MINICONDA_URL" -o "$INSTALLER" || {
+    curl -fskL "$MINICONDA_URL" -o "$INSTALLER" || {
         err "Miniconda 下载失败"
         rm -f "$INSTALLER"
         exit 1
