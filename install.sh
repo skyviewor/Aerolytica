@@ -65,7 +65,7 @@ else
 
     MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     info "下载: $MINICONDA_URL"
-    INSTALLER="$(mktemp /tmp/miniconda.XXXXXX.sh)"
+    INSTALLER="/tmp/miniconda-$$.sh"
     curl -fskL "$MINICONDA_URL" -o "$INSTALLER" || {
         err "Miniconda 下载失败"
         rm -f "$INSTALLER"
@@ -90,7 +90,8 @@ banner ""
 banner "  Step 2/3: 安装 Meteora"
 banner ""
 
-TMP_DIR="$(mktemp -d /tmp/meteora.XXXXXX)"
+TMP_DIR="/tmp/meteora-$$"
+rm -rf "$TMP_DIR"
 info "克隆仓库: $METOORA_REPO"
 git clone "$METOORA_REPO" "$TMP_DIR" || {
     err "仓库克隆失败。请检查网络连接。"
