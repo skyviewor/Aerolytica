@@ -1,0 +1,3 @@
+display_name: cnmaps
+short_description: Draw China and global boundaries compliant with territorial claims.
+default_prompt: Use cnmaps to query and draw administrative boundaries compliant with China's territorial claims.

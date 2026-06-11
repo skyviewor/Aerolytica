@@ -1,0 +1,35 @@
+llm:
+  provider: deepseek
+  model: deepseek-chat
+  reasoning_effort: ""
+  base_url: ""
+  providers: {}
+
+vision:
+  provider: bailian
+  model: qwen3.7-plus
+  api_key: ""
+  base_url: ""
+  cache_ttl_hours: 3
+
+email:
+  enabled: false
+  smtp_host: ""
+  smtp_port: 587
+  smtp_tls: true
+  smtp_user: ""
+  smtp_password: ""
+  from_name: Meteora
+  default_to: ""
+
+credentials:
+  cds:
+    url: https://cds.climate.copernicus.eu/api
+    key: ""
+
+output:
+  data_dir: data
+
+language: zh
+mode: execute
+max_tool_rounds: 999

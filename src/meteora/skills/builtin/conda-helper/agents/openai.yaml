@@ -1,0 +1,3 @@
+display_name: conda-helper
+short_description: Install missing CLI tools into the meteora-agent conda sandbox on demand.
+default_prompt: When a shell command or data tool fails because a CLI tool is missing, use conda-helper to install it into the meteora-agent sandbox. Always ask the user for consent before installing.

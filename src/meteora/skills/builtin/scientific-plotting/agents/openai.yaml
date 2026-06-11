@@ -1,0 +1,6 @@
+interface:
+  display_name: "Scientific Plotting"
+  short_description: "Meteorological and atmospheric-science plotting rules for maps, colormaps, units, China boundaries, and publication-quality scientific figures."
+  default_prompt: "Use the scientific-plotting skill to create or review this meteorological figure for physical correctness, map boundaries, colormap choice, CJK font rendering, units, valid time, and publication quality. If the figure involves China's territory or China-region maps, always load and follow the cnmaps skill first; use cnmaps boundary data and never substitute Cartopy/NaturalEarth borders for China."
+policy:
+  allow_implicit_invocation: true
