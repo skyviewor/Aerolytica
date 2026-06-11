@@ -67,7 +67,7 @@ else
     MINICONDA_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     info "下载: $MINICONDA_URL"
     INSTALLER="/tmp/miniconda-$$.sh"
-    curl -fkL --progress-bar --connect-timeout 10 "$MINICONDA_URL" -o "$INSTALLER" 2>&1 || {
+    curl -fkL --progress-bar --connect-timeout 10 --max-time 120 "$MINICONDA_URL" -o "$INSTALLER" 2>&1 || {
         warn "主源下载失败，尝试清华镜像..."
         curl -fkL --progress-bar "$MINICONDA_MIRROR" -o "$INSTALLER" || {
             err "Miniconda 下载失败，请手动安装 conda 后重试。"
