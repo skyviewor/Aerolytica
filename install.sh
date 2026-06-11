@@ -64,13 +64,18 @@ else
     warn "未找到 conda。开始安装 Miniconda..."
 
     MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
+    MINICONDA_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     info "下载: $MINICONDA_URL"
     INSTALLER="/tmp/miniconda-$$.sh"
-    curl -fskL "$MINICONDA_URL" -o "$INSTALLER" || {
-        err "Miniconda 下载失败"
-        rm -f "$INSTALLER"
-        exit 1
+    curl -fkL --progress-bar --connect-timeout 10 "$MINICONDA_URL" -o "$INSTALLER" 2>&1 || {
+        warn "主源下载失败，尝试清华镜像..."
+        curl -fkL --progress-bar "$MINICONDA_MIRROR" -o "$INSTALLER" || {
+            err "Miniconda 下载失败，请手动安装 conda 后重试。"
+            rm -f "$INSTALLER"
+            exit 1
+        }
     }
+    echo ""
     bash "$INSTALLER" -b -p "$MINICONDA_DIR" || {
         err "Miniconda 安装失败"
         rm -f "$INSTALLER"
@@ -93,14 +98,14 @@ banner ""
 TMP_DIR="/tmp/meteora-$$"
 rm -rf "$TMP_DIR"
 info "克隆仓库: $METOORA_REPO"
-git clone "$METOORA_REPO" "$TMP_DIR" || {
+git clone --progress "$METOORA_REPO" "$TMP_DIR" 2>&1 || {
     err "仓库克隆失败。请检查网络连接。"
     rm -rf "$TMP_DIR"
     exit 1
 }
 
 info "pip install..."
-"$CONDA_BIN" run -n base python -m pip install --quiet "$TMP_DIR" 2>&1 || {
+"$CONDA_BIN" run -n base python -m pip install --progress-bar on "$TMP_DIR" 2>&1 || {
     err "pip install 失败。请检查网络和 conda 环境。"
     rm -rf "$TMP_DIR"
     exit 1
