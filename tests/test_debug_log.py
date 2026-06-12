@@ -4,8 +4,8 @@ import json
 
 import structlog
 
-from meteora.core.debug_log import configure_debug_logging, debug_exception, debug_log
-from meteora.core.logging import configure as configure_logging
+from aero.core.debug_log import configure_debug_logging, debug_exception, debug_log
+from aero.core.logging import configure as configure_logging
 
 
 def test_debug_log_writes_jsonl(tmp_path):
@@ -54,7 +54,7 @@ def test_debug_exception_writes_traceback(tmp_path):
 
 def test_structlog_warning_writes_file_and_debug_log(tmp_path):
     debug_path = tmp_path / "debug.log"
-    standard_path = tmp_path / "meteora.log"
+    standard_path = tmp_path / "aero.log"
 
     configure_debug_logging(path=debug_path)
     configure_logging(log_file=str(standard_path))

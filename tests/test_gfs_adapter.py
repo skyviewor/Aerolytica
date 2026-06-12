@@ -1,6 +1,6 @@
 import pytest
 
-from meteora.adapters.gfs_adapter import (
+from aero.adapters.gfs_adapter import (
     GFSAdapter,
     parse_gfs_idx,
     select_gfs_entries,
@@ -93,7 +93,7 @@ def test_download_ranges_uses_http_range_headers(tmp_path, monkeypatch):
             seen_ranges.append(headers["Range"])
             return FakeStream(headers)
 
-    monkeypatch.setattr("meteora.adapters.gfs_adapter.httpx.Client", FakeClient)
+    monkeypatch.setattr("aero.adapters.gfs_adapter.httpx.Client", FakeClient)
 
     size = GFSAdapter._download_ranges("https://example.com/gfs", entries, dest, 100)
 

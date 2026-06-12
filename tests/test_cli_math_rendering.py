@@ -1,5 +1,5 @@
-from meteora.cli.main import (
-    MeteoraApp,
+from aero.cli.main import (
+    AeroApp,
     _command_suggestions,
     _compacted_context_messages,
     _estimate_context_tokens,
@@ -21,11 +21,11 @@ from meteora.cli.main import (
     _theme_options,
     _usage_meta_text,
 )
-from meteora.data import pricing
-from meteora.data.pricing import ModelPrice, TokenTracker
-from meteora.core.config import MeteoraConfig
-from meteora.core.types import Message, ToolCall
-from meteora.i18n import t
+from aero.data import pricing
+from aero.data.pricing import ModelPrice, TokenTracker
+from aero.core.config import AeroConfig
+from aero.core.types import Message, ToolCall
+from aero.i18n import t
 
 
 def test_render_terminal_math_removes_display_latex_markers():
@@ -120,10 +120,10 @@ def test_render_status_lines_places_activity_before_last_line():
 
 
 def test_runtime_tool_confirmation_message_is_human_readable():
-    app = MeteoraApp.__new__(MeteoraApp)
-    app.config = MeteoraConfig.create_default()
+    app = AeroApp.__new__(AeroApp)
+    app.config = AeroConfig.create_default()
 
-    message = MeteoraApp._build_confirm_message(
+    message = AeroApp._build_confirm_message(
         app,
         "ensure_runtime_tools",
         {"tools": ["cdo", "grib_to_netcdf"]},
@@ -131,7 +131,7 @@ def test_runtime_tool_confirmation_message_is_human_readable():
 
     assert "安装命令行工具" in message
     assert "cdo、grib_to_netcdf" in message
-    assert "meteora-agent" in message
+    assert "aero-agent" in message
     assert "mamba" in message
     assert "conda-forge" in message
     assert "参数" not in message
@@ -246,14 +246,14 @@ def test_subagent_tool_status_is_not_auto_handoff_trigger():
 
 
 def test_set_max_tool_rounds_reports_in_footer():
-    app = MeteoraApp.__new__(MeteoraApp)
-    app.config = MeteoraConfig.create_default()
+    app = AeroApp.__new__(AeroApp)
+    app.config = AeroConfig.create_default()
     app.agent = type("Agent", (), {"max_tool_rounds": 20})()
     app.last_error = ""
     messages = []
     app._set_footer_status = lambda message: messages.append(message)
 
-    MeteoraApp._handle_set_command(app, "/set max_tool_rounds 100")
+    AeroApp._handle_set_command(app, "/set max_tool_rounds 100")
 
     assert app.agent.max_tool_rounds == 100
     assert messages == ["max_tool_rounds 已设置为 100"]
@@ -342,13 +342,13 @@ def test_token_tracker_restores_legacy_vision_cache_field():
 
 
 def test_exit_session_save_is_idempotent():
-    app = MeteoraApp.__new__(MeteoraApp)
+    app = AeroApp.__new__(AeroApp)
     app._session_saved_on_exit = False
     calls = []
     app._auto_save_session = lambda: calls.append("saved")
 
-    MeteoraApp._save_session_on_exit(app)
-    MeteoraApp._save_session_on_exit(app)
+    AeroApp._save_session_on_exit(app)
+    AeroApp._save_session_on_exit(app)
 
     assert calls == ["saved"]
 
@@ -407,7 +407,7 @@ def test_session_title_prompt_uses_first_exchange():
 def test_user_theme_preference_persists(tmp_path, monkeypatch):
     pref_path = tmp_path / "preferences.yaml"
     pref_path.write_text("language: zh\nui:\n  density: compact\n")
-    monkeypatch.setenv("METEORA_PREFERENCES_PATH", str(pref_path))
+    monkeypatch.setenv("AERO_PREFERENCES_PATH", str(pref_path))
 
     _save_user_theme("dracula")
 

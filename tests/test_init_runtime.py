@@ -1,9 +1,9 @@
-"""Tests for interactive runtime setup during ``meteora init``."""
+"""Tests for interactive runtime setup during ``aero init``."""
 
 import subprocess
 from pathlib import Path
 
-from meteora.cli import init_runtime
+from aero.cli import init_runtime
 
 
 def completed(command: list[str], returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -15,7 +15,7 @@ def test_setup_runtime_uses_existing_conda_and_installs_common_packages(
 ):
     root = tmp_path / "miniconda3"
     conda = root / "bin" / "conda"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     conda.parent.mkdir(parents=True)
     conda.write_text("")
     answers = iter(("y",))
@@ -34,8 +34,8 @@ def test_setup_runtime_uses_existing_conda_and_installs_common_packages(
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
 
     assert init_runtime.setup_runtime() is True
-    assert calls[0][:4] == [str(conda), "create", "-n", "meteora-agent"]
-    assert calls[1][:4] == [str(conda), "install", "-n", "meteora-agent"]
+    assert calls[0][:4] == [str(conda), "create", "-n", "aero-agent"]
+    assert calls[1][:4] == [str(conda), "install", "-n", "aero-agent"]
     assert Path(calls[2][0]).resolve() == (env_bin / "mamba").resolve()
     assert calls[2][1:3] == ["env", "update"]
     assert str(init_runtime.CONDA_ENVIRONMENT_FILE) in calls[2]
@@ -59,7 +59,7 @@ def test_setup_runtime_uses_existing_conda_and_installs_common_packages(
 def test_install_common_packages_fails_when_mplfonts_init_fails(monkeypatch, tmp_path):
     root = tmp_path / "miniconda3"
     conda = root / "bin" / "conda"
-    env_path = root / "envs" / "meteora-agent"
+    env_path = root / "envs" / "aero-agent"
     (env_path / "bin").mkdir(parents=True)
     calls: list[list[str]] = []
 
@@ -75,7 +75,7 @@ def test_install_common_packages_fails_when_mplfonts_init_fails(monkeypatch, tmp
 
 
 def test_initialize_mplfonts_persists_configuration_after_init(monkeypatch, tmp_path):
-    env_path = tmp_path / "meteora-agent"
+    env_path = tmp_path / "aero-agent"
     calls: list[list[str]] = []
 
     def fake_run(command: list[str], *, timeout: int):

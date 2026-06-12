@@ -3,9 +3,9 @@ import asyncio
 from PIL import Image
 from textual.app import App, ComposeResult
 
-from meteora.cli.main import InlineImageAttachment, MeteoraApp
-from meteora.cli.image_widget import terminal_half_block_preview, terminal_image_preview
-from meteora.core.config import MeteoraConfig
+from aero.cli.main import InlineImageAttachment, AeroApp
+from aero.cli.image_widget import terminal_half_block_preview, terminal_image_preview
+from aero.core.config import AeroConfig
 
 
 def test_inline_image_paths_and_attachment_indexes(tmp_path, monkeypatch):
@@ -15,7 +15,7 @@ def test_inline_image_paths_and_attachment_indexes(tmp_path, monkeypatch):
     image_path.write_bytes(b"not a real image")
     monkeypatch.chdir(tmp_path)
 
-    app = MeteoraApp(MeteoraConfig(), persist_config=False)
+    app = AeroApp(AeroConfig(), persist_config=False)
 
     paths = app._resolve_inline_image_paths("结果图：![map](figures/map.png)")
 
@@ -63,7 +63,7 @@ def test_inline_image_attachment_can_collapse_and_expand(tmp_path):
     Image.new("RGB", (120, 80), (20, 40, 180)).save(image_path)
 
     class ImageApp(App):
-        CSS = MeteoraApp.CSS
+        CSS = AeroApp.CSS
 
         def compose(self) -> ComposeResult:
             yield InlineImageAttachment(image_path, 1)

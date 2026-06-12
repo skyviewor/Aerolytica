@@ -15,7 +15,7 @@ def _fake_grib2_message(discipline: int = 0, category: int = 0, parameter: int =
 
 
 def test_parse_grib2_messages_reads_product_metadata():
-    from meteora.toolbox.tools.grib import _parse_grib2_messages
+    from aero.toolbox.tools.grib import _parse_grib2_messages
 
     data = (
         _fake_grib2_message(category=0, parameter=0)
@@ -37,7 +37,7 @@ def test_parse_grib2_messages_reads_product_metadata():
 
 @pytest.mark.asyncio
 async def test_inspect_grib2_returns_structural_metadata(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     path = tmp_path / "sample.grib2"
     path.write_bytes(_fake_grib2_message(category=0, parameter=0))
@@ -52,9 +52,9 @@ async def test_inspect_grib2_returns_structural_metadata(tmp_path, monkeypatch):
             }
         }
 
-    monkeypatch.setattr("meteora.toolbox.tools.grib._load_gfs_parameter_lookup", fake_lookup)
+    monkeypatch.setattr("aero.toolbox.tools.grib._load_gfs_parameter_lookup", fake_lookup)
     monkeypatch.setattr(
-        "meteora.toolbox.tools.grib._inspect_grib2_with_cfgrib",
+        "aero.toolbox.tools.grib._inspect_grib2_with_cfgrib",
         lambda p: {"available": False, "message": "cfgrib unavailable"},
     )
 
@@ -69,7 +69,7 @@ async def test_inspect_grib2_returns_structural_metadata(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_inspect_grib2_rejects_non_grib_file(tmp_path):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     path = tmp_path / "not_grib2.txt"
     path.write_text("hello")

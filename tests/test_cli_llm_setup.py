@@ -1,16 +1,16 @@
 """Tests for local LLM setup helpers."""
 
-from meteora.cli.main import (
+from aero.cli.main import (
     _extract_llm_api_key,
     _mask_secret_text,
     _parse_llm_clear_from_text,
     _parse_llm_setup_from_text,
 )
-from meteora.core.config import MeteoraConfig
+from aero.core.config import AeroConfig
 
 
 def test_parse_qwen_setup_uses_bailian():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
 
     setup = _parse_llm_setup_from_text(
         "配置一下 qwen3.7 模型，API key: sk-test-0004",
@@ -25,7 +25,7 @@ def test_parse_qwen_setup_uses_bailian():
 
 
 def test_parse_kimi_provider_does_not_use_provider_name_as_model():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
 
     setup = _parse_llm_setup_from_text(
         "帮我配置一下 kimi 模型，api key 是: sk-test-0005",
@@ -40,7 +40,7 @@ def test_parse_kimi_provider_does_not_use_provider_name_as_model():
 
 
 def test_parse_explicit_kimi_model():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
 
     setup = _parse_llm_setup_from_text(
         "配置 kimi-k2-thinking，API key: sk-test-0006",
@@ -53,7 +53,7 @@ def test_parse_explicit_kimi_model():
 
 
 def test_parse_key_only_keeps_current_provider_model():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     config.llm.provider = "deepseek"
     config.llm.model = "deepseek-chat"
 
@@ -66,7 +66,7 @@ def test_parse_key_only_keeps_current_provider_model():
 
 
 def test_parse_clear_key_intent_takes_priority_over_setup():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
 
     clear = _parse_llm_clear_from_text("帮我清理掉模型的 API key")
     setup = _parse_llm_setup_from_text("帮我清理掉模型的 API key", config)
@@ -76,7 +76,7 @@ def test_parse_clear_key_intent_takes_priority_over_setup():
 
 
 def test_parse_vision_model_setup_does_not_route_to_main_llm():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
 
     setup = _parse_llm_setup_from_text("视觉模型配置了吗？", config)
     clear = _parse_llm_clear_from_text("清除视觉模型 API key")

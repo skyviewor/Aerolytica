@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from meteora.data.ifs_availability import (
+from aero.data.ifs_availability import (
     normalize_source,
     _parse_ifs_date_prefixes,
     _parse_ifs_cycle_prefixes,

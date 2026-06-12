@@ -1,12 +1,12 @@
 from pathlib import Path
 
 
-def test_runtime_exec_env_prepends_meteora_agent_bin(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
+def test_runtime_exec_env_prepends_aero_agent_bin(monkeypatch, tmp_path):
+    from aero.agent.runtime import Runtime
 
     root = tmp_path / "miniconda3"
     conda_bin = root / "bin"
-    tool_bin = root / "envs" / "meteora-agent" / "bin"
+    tool_bin = root / "envs" / "aero-agent" / "bin"
     conda_bin.mkdir(parents=True)
     tool_bin.mkdir(parents=True)
     conda = conda_bin / "conda"
@@ -27,7 +27,7 @@ def test_runtime_exec_env_prepends_meteora_agent_bin(monkeypatch, tmp_path):
 
 
 def test_run_subprocess_uses_pipefail():
-    from meteora.agent.runtime import Runtime
+    from aero.agent.runtime import Runtime
 
     result = Runtime().run_subprocess("false | true")
 

@@ -1,4 +1,4 @@
-from meteora.agent.subagent import (
+from aero.agent.subagent import (
     SubAgentManager,
     cancel_subagent_from_context,
     launch_subagent_from_context,
@@ -7,7 +7,7 @@ from meteora.agent.subagent import (
     use_subagent_launcher,
     use_subagent_status_provider,
 )
-from meteora.cli.main import (
+from aero.cli.main import (
     _collect_artifact_paths,
     _requests_background_execution,
     _subagent_title_from_text,

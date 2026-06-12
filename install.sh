@@ -12,12 +12,12 @@ err()   { echo -e "  ${RED}[✗]${NC} $*"; }
 banner(){ echo -e "${BOLD}${CYAN}$*${NC}"; }
 
 # ── Config ──────────────────────────────────────────────────────────────
-METOORA_REPO="${METOORA_REPO:-https://github.com/skyviewor/meteora.git}"
+AERO_REPO="${AERO_REPO:-https://github.com/skyviewor/aero.git}"
 MINICONDA_DIR="${MINICONDA_DIR:-$HOME/miniconda3}"
 
 
 banner ""
-banner "  Meteora — 气象科研 AI Agent IDE"
+banner "  Aero — 气象科研 AI Agent IDE"
 banner "  一键安装脚本"
 banner ""
 
@@ -90,15 +90,15 @@ else
     ok "Miniconda 已安装: $MINICONDA_DIR"
 fi
 
-# ── Step 2: Install meteora ─────────────────────────────────────────────
+# ── Step 2: Install aero ─────────────────────────────────────────────
 banner ""
-banner "  Step 2/3: 安装 Meteora"
+banner "  Step 2/3: 安装 Aero"
 banner ""
 
-TMP_DIR="/tmp/meteora-$$"
+TMP_DIR="/tmp/aero-$$"
 rm -rf "$TMP_DIR"
-info "克隆仓库: $METOORA_REPO"
-git clone --progress "$METOORA_REPO" "$TMP_DIR" 2>&1 || {
+info "克隆仓库: $AERO_REPO"
+git clone --progress "$AERO_REPO" "$TMP_DIR" 2>&1 || {
     err "仓库克隆失败。请检查网络连接。"
     rm -rf "$TMP_DIR"
     exit 1
@@ -112,25 +112,25 @@ info "pip install..."
 }
 
 rm -rf "$TMP_DIR"
-ok "Meteora 安装完成"
+ok "Aero 安装完成"
 
-# ── Step 3: meteora init ─────────────────────────────────────────────────
+# ── Step 3: aero init ─────────────────────────────────────────────────
 banner ""
-banner "  Step 3/3: 初始化 Meteora 运行时 (meteora init)"
+banner "  Step 3/3: 初始化 Aero 运行时 (aero init)"
 banner ""
 
-info "创建/更新 meteora-agent conda 环境..."
-"$CONDA_BIN" run -n base python -m meteora.cli.main init || {
-    err "meteora init 失败"
+info "创建/更新 aero-agent conda 环境..."
+"$CONDA_BIN" run -n base python -m aero.cli.main init || {
+    err "aero init 失败"
     exit 1
 }
-ok "meteora init 完成"
+ok "aero init 完成"
 
 # ── Done ─────────────────────────────────────────────────────────────────
 banner ""
 banner "  安装完成！"
 banner ""
-echo -e "  启动对话:  ${BOLD}cd <工作目录> && meteora init && meteora chat${NC}"
+echo -e "  启动对话:  ${BOLD}cd <工作目录> && aero init && aero chat${NC}"
 echo ""
 echo -e "  请将 conda 加入 PATH (如尚未加入):"
 CONDA_BIN_DIR="$(dirname "$CONDA_BIN")"

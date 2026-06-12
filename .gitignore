@@ -24,22 +24,22 @@ pixi.lock
 .DS_Store
 Thumbs.db
 
-# Meteora data
+# Aero data
 data/
-meteora-project/data/
+aero-project/data/
 test/data/
-!src/meteora/data/
-!src/meteora/data/**
-src/meteora/data/__pycache__/
-meteora_downloads.db*
-my-meteora-test/
+!src/aero/data/
+!src/aero/data/**
+src/aero/data/__pycache__/
+aero_downloads.db*
+my-aero-test/
 lab/
 scripts/tmp/
 
 # Credentials (contains API keys)
-/meteora.yaml
+/aero.yaml
 # but keep the template
-!templates/**/meteora.yaml
+!templates/**/aero.yaml
 
 # Logs
 *.log

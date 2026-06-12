@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytest
 
-from meteora.data import gfs_params
+from aero.data import gfs_params
 
 INDEX_HTML = """
 <html><body>

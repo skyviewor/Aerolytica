@@ -2,7 +2,7 @@
 
 import subprocess
 
-from meteora.toolbox.runtime_manager import RuntimeToolManager
+from aero.toolbox.runtime_manager import RuntimeToolManager
 
 
 def test_runtime_manager_detects_managed_commands():
@@ -17,7 +17,7 @@ def test_runtime_manager_uses_injected_command_runner(tmp_path):
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
-        return subprocess.CompletedProcess(cmd, 0, stdout="meteora-agent ready\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="aero-agent ready\n", stderr="")
 
     manager = RuntimeToolManager(command_runner=fake_run)
     conda = tmp_path / "bin" / "conda"

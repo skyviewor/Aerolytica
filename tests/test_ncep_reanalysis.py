@@ -6,9 +6,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from meteora.datasets.catalog import DatasetCatalog
-from meteora.datasets.models import DatasetDownloadRequest
-from meteora.datasets.providers.ncep_reanalysis import (
+from aero.datasets.catalog import DatasetCatalog
+from aero.datasets.models import DatasetDownloadRequest
+from aero.datasets.providers.ncep_reanalysis import (
     NCEP_REANALYSIS_SPECS,
     PRODUCTS,
     CatalogEntry,
@@ -192,14 +192,14 @@ async def test_variable_search_filters_to_requested_time_scale():
 
 @pytest.mark.asyncio
 async def test_unified_variable_search_tool_returns_filtered_ncep_variables(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     provider = NcepReanalysisProvider()
     provider._catalog_cache["ncep-reanalysis-2-6-hourly"] = (
         CatalogEntry("Dailies/pressure", "hgt", "Dailies/pressure/hgt.2025.nc", 2025),
         CatalogEntry("pressure", "hgt", "pressure/hgt.2025.nc", 2025),
     )
-    monkeypatch.setattr("meteora.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
+    monkeypatch.setattr("aero.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
 
     result = await builtin_tools.search_dataset_variables("ncep-reanalysis-2-6-hourly", "hgt")
 
@@ -214,14 +214,14 @@ async def test_unified_variable_search_tool_returns_filtered_ncep_variables(monk
 
 @pytest.mark.asyncio
 async def test_ambiguous_download_returns_structured_variable_query_guidance(monkeypatch, tmp_path):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     provider = NcepReanalysisProvider()
     provider._catalog_cache["ncep-reanalysis-2-6-hourly"] = (
         CatalogEntry("pressure", "air", "pressure/air.2025.nc", 2025),
         CatalogEntry("surface", "air", "surface/air.2025.nc", 2025),
     )
-    monkeypatch.setattr("meteora.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
+    monkeypatch.setattr("aero.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
 
     result = await builtin_tools.download_dataset(
         "ncep-reanalysis-2-6-hourly",
@@ -364,7 +364,7 @@ async def test_ncss_failure_falls_back_to_source_file_and_local_subset(tmp_path)
     assert (
         tmp_path
         / "output"
-        / ".meteora-cache"
+        / ".aero-cache"
         / "ncep"
         / "ncep.reanalysis"
         / "pressure"
@@ -399,7 +399,7 @@ async def test_source_download_resumes_after_connection_closes(monkeypatch, tmp_
             headers={"content-length": str(len(content) - offset)},
         )
 
-    monkeypatch.setattr("meteora.datasets.providers.ncep_reanalysis.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("aero.datasets.providers.ncep_reanalysis.asyncio.sleep", no_sleep)
     destination = tmp_path / "source.nc"
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         await NcepReanalysisProvider._download_stream(
@@ -433,7 +433,7 @@ async def test_ncss_download_restarts_after_connection_closes(monkeypatch, tmp_p
             )
         return httpx.Response(200, content=b"0123456789", headers={"content-length": "10"})
 
-    monkeypatch.setattr("meteora.datasets.providers.ncep_reanalysis.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("aero.datasets.providers.ncep_reanalysis.asyncio.sleep", no_sleep)
     destination = tmp_path / "subset.nc"
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         await NcepReanalysisProvider._download_stream(

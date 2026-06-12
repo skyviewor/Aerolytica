@@ -5,8 +5,8 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from meteora.core.debug_log import configure_debug_logging
-from meteora.data.literature_arxiv import (
+from aero.core.debug_log import configure_debug_logging
+from aero.data.literature_arxiv import (
     _parse_arxiv_atom,
     _extract_arxiv_entry,
     search_arxiv,

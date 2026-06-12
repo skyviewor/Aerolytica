@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from meteora.agent.llm_client import (
+from aero.agent.llm_client import (
     LLMClient,
     LLMConfig,
     _find_tool_call_marker_start,
@@ -12,7 +12,7 @@ from meteora.agent.llm_client import (
     _raise_for_status_stream,
     _safe_content_stream_end,
 )
-from meteora.core.types import Message
+from aero.core.types import Message
 
 
 def test_parse_args_string():
@@ -91,7 +91,7 @@ def test_parse_inline_spaced_dsml_content_tool_calls():
         "让我看一下数据的详细信息：\n"
         '<｜ | DSML | | tool_calls> <｜ | DSML | | invoke name="inspect_nc"> '
         '<｜ | DSML | | parameter name="file_path" string="false">'
-        "my-meteora-test/data/era5_2m_temperature_sfc_202505.nc"
+        "my-aero-test/data/era5_2m_temperature_sfc_202505.nc"
         "</｜ | DSML | | parameter> </｜ | DSML | | invoke> "
         "</｜ | DSML | | tool_calls>"
     )
@@ -102,7 +102,7 @@ def test_parse_inline_spaced_dsml_content_tool_calls():
     assert len(calls) == 1
     assert calls[0].name == "inspect_nc"
     assert calls[0].arguments == {
-        "file_path": "my-meteora-test/data/era5_2m_temperature_sfc_202505.nc",
+        "file_path": "my-aero-test/data/era5_2m_temperature_sfc_202505.nc",
     }
 
 

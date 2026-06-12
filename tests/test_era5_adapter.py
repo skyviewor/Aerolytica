@@ -4,7 +4,7 @@ import zipfile
 
 import pytest
 
-from meteora.adapters.cds_adapter import CDSAdapter, _detect_file_format
+from aero.adapters.cds_adapter import CDSAdapter, _detect_file_format
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_download_unpacks_netcdf_zip(tmp_path, monkeypatch):
         inner.write_bytes(b"CDF " + b"\0" * 2048)
         with zipfile.ZipFile(dest_path, "w") as archive:
             archive.write(inner, arcname="data.nc")
-        from meteora.adapters.cds_adapter import _normalize_downloaded_file
+        from aero.adapters.cds_adapter import _normalize_downloaded_file
 
         _normalize_downloaded_file(dest_path)
         return dest_path.stat().st_size
@@ -121,7 +121,7 @@ async def test_subset_netcdf_crops_time_and_area(tmp_path):
     import pandas as pd
     import xarray as xr
 
-    from meteora.toolbox.builtin_tools import subset_netcdf
+    from aero.toolbox.builtin_tools import subset_netcdf
 
     source = tmp_path / "month.nc"
     times = pd.date_range("2019-02-01T00:00", periods=48, freq="h")
@@ -169,7 +169,7 @@ async def test_subset_netcdf_crops_time_and_area(tmp_path):
 async def test_subset_netcdf_crops_vertical_levels(tmp_path):
     import xarray as xr
 
-    from meteora.toolbox.builtin_tools import subset_netcdf
+    from aero.toolbox.builtin_tools import subset_netcdf
 
     source = tmp_path / "pressure.nc"
     xr.Dataset(

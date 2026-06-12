@@ -1,0 +1,19 @@
+name: aero-agent
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - cdo
+  - nco
+  - eccodes
+  - libnetcdf
+  - netcdf4
+  - gdal
+  - xarray
+  - dask
+  - scipy
+  - pandas
+  - matplotlib
+  - cartopy
+  - cfgrib

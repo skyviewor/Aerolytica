@@ -5,9 +5,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from meteora.datasets.catalog import DatasetCatalog, get_dataset_catalog
-from meteora.datasets.models import DatasetDownloadRequest
-from meteora.datasets.providers.chirps import CHIRPS_SPEC, ChirpsProvider, months_between
+from aero.datasets.catalog import DatasetCatalog, get_dataset_catalog
+from aero.datasets.models import DatasetDownloadRequest
+from aero.datasets.providers.chirps import CHIRPS_SPEC, ChirpsProvider, months_between
 
 
 def test_catalog_searches_dataset_variables_and_aliases():
@@ -19,8 +19,8 @@ def test_catalog_searches_dataset_variables_and_aliases():
 
 
 def test_dataset_tool_descriptions_use_catalogue_as_source_of_truth():
-    from meteora.toolbox import builtin_tools  # noqa: F401
-    from meteora.toolbox.registry import get_registry
+    from aero.toolbox import builtin_tools  # noqa: F401
+    from aero.toolbox.registry import get_registry
 
     search = get_registry().get("search_datasets")
     download = get_registry().get("download_dataset")
@@ -54,7 +54,7 @@ def test_default_catalogue_lists_all_supported_datasets_and_download_routes():
 
 @pytest.mark.asyncio
 async def test_search_datasets_returns_download_route_for_every_supported_dataset():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.search_datasets()
 
@@ -205,7 +205,7 @@ async def test_chirps_download_checks_month_availability_before_download(tmp_pat
 
 @pytest.mark.asyncio
 async def test_unified_dataset_tools_dispatch(monkeypatch, tmp_path):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     provider = ChirpsProvider(
         base_url="https://example.test/chirps",
@@ -218,7 +218,7 @@ async def test_unified_dataset_tools_dispatch(monkeypatch, tmp_path):
         ),
     )
     catalog = DatasetCatalog((provider,))
-    monkeypatch.setattr("meteora.datasets.catalog._DEFAULT_CATALOG", catalog)
+    monkeypatch.setattr("aero.datasets.catalog._DEFAULT_CATALOG", catalog)
 
     found = await builtin_tools.search_datasets(query="降水")
     described = await builtin_tools.describe_dataset(CHIRPS_SPEC.dataset_id)

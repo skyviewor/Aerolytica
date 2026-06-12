@@ -1,15 +1,15 @@
-"""Tests for Meteora agent modules."""
+"""Tests for Aero agent modules."""
 
 import pytest
 
-from meteora.agent.session import SessionManager
-from meteora.agent.system_prompt import build_system_prompt
-from meteora.core.config import MeteoraConfig
-from meteora.core.types import Message, ToolCall
+from aero.agent.session import SessionManager
+from aero.agent.system_prompt import build_system_prompt
+from aero.core.config import AeroConfig
+from aero.core.types import Message, ToolCall
 
 
 def test_session_save_load(tmp_path):
-    from meteora.agent.session import SessionMeta
+    from aero.agent.session import SessionMeta
 
     sm = SessionManager(tmp_path)
     messages = [
@@ -35,7 +35,7 @@ def test_session_save_load(tmp_path):
 
 
 def test_sanitize_tool_message_sequence_drops_orphan_tool_messages():
-    from meteora.agent.loop import _sanitize_tool_message_sequence
+    from aero.agent.loop import _sanitize_tool_message_sequence
 
     messages = [
         Message(role="system", content="system"),
@@ -61,7 +61,7 @@ def test_sanitize_tool_message_sequence_drops_orphan_tool_messages():
 
 
 def test_sanitize_tool_message_sequence_drops_incomplete_tool_call_blocks():
-    from meteora.agent.loop import _sanitize_tool_message_sequence
+    from aero.agent.loop import _sanitize_tool_message_sequence
 
     messages = [
         Message(role="system", content="system"),
@@ -106,7 +106,7 @@ def test_session_delete_removes_from_index(tmp_path):
 
 
 def test_build_system_prompt():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     prompt = build_system_prompt(config)
     assert "数据库" in prompt or "data" in prompt.lower()
     assert "必须优先调用工具箱里的工具" in prompt
@@ -127,7 +127,7 @@ def test_build_system_prompt():
     assert "运行这些命令前，先为本次需要的具体命令调用 ensure_runtime_tools" in prompt
     assert "不要因为 `which` 在 base conda 或用户其他环境里找到了同名命令就直接使用" in prompt
     assert "先安装并尝试 CLI，只有 CLI 不适合或失败时才用 Python 兜底" in prompt
-    assert "`meteora-agent` conda 环境" in prompt
+    assert "`aero-agent` conda 环境" in prompt
     assert "参考资料" in prompt
     assert "source_url" in prompt
     assert "引用参考文献" in prompt
@@ -150,7 +150,7 @@ def test_build_system_prompt():
 
 
 def test_build_system_prompt_prefers_tools_in_english():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     prompt = build_system_prompt(config, language="en")
     assert "use that tool first" in prompt
     assert "local NetCDF contents" in prompt
@@ -170,7 +170,7 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "call ensure_runtime_tools" in prompt
     assert "Do NOT rely on `which` finding a command in base conda" in prompt
     assert "then use Python only as an explicit fallback when CLI is unsuitable or fails" in prompt
-    assert "`meteora-agent` conda environment" in prompt
+    assert "`aero-agent` conda environment" in prompt
     assert "References" in prompt
     assert "source_url" in prompt
     assert "Citing references" in prompt
@@ -192,7 +192,7 @@ def test_build_system_prompt_prefers_tools_in_english():
 
 
 def test_build_system_prompt_injects_selected_skill_context():
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     prompt = build_system_prompt(
         config,
         skill_context="### scientific-plotting\nUse publication-quality labels.",
@@ -204,7 +204,7 @@ def test_build_system_prompt_injects_selected_skill_context():
 
 
 def test_user_facing_text_hides_internal_tool_names():
-    from meteora.agent.loop import _sanitize_user_facing_text
+    from aero.agent.loop import _sanitize_user_facing_text
 
     text = (
         "你可以用 `inspect_nc` 查看具体内容，也可以调用 download_era5。"
@@ -224,7 +224,7 @@ def test_user_facing_text_hides_internal_tool_names():
 
 
 def test_streaming_text_sanitizer_hides_split_tool_names():
-    from meteora.agent.loop import _StreamingTextSanitizer
+    from aero.agent.loop import _StreamingTextSanitizer
 
     sanitizer = _StreamingTextSanitizer()
     chunks = [
@@ -241,7 +241,7 @@ def test_streaming_text_sanitizer_hides_split_tool_names():
 
 
 def test_progress_text_hides_internal_tool_names():
-    from meteora.agent.loop import _sanitize_progress_text
+    from aero.agent.loop import _sanitize_progress_text
 
     cases = {
         "调用工具: retry_download": "开始重试下载",
@@ -300,7 +300,7 @@ def test_progress_text_hides_internal_tool_names():
 
 
 def test_unknown_tool_progress_does_not_expose_internal_name():
-    from meteora.agent.loop import _tool_progress_message
+    from aero.agent.loop import _tool_progress_message
 
     assert _tool_progress_message("new_internal_tool", "start") == "正在执行当前步骤"
     assert _tool_progress_message("new_internal_tool", "done") == "执行当前步骤完成"
@@ -308,7 +308,7 @@ def test_unknown_tool_progress_does_not_expose_internal_name():
 
 
 def test_run_shell_progress_includes_command():
-    from meteora.agent.loop import _tool_progress_message
+    from aero.agent.loop import _tool_progress_message
 
     args = {"command": "cdo -f nc copy data/in.grib2 data/out.nc"}
 
@@ -323,7 +323,7 @@ def test_run_shell_progress_includes_command():
 
 
 def test_run_shell_progress_truncates_long_command():
-    from meteora.agent.loop import _tool_progress_message
+    from aero.agent.loop import _tool_progress_message
 
     command = "curl " + " ".join(f"https://example.com/file-{i}.grib2" for i in range(20))
 
@@ -335,7 +335,7 @@ def test_run_shell_progress_truncates_long_command():
 
 
 def test_run_shell_progress_hides_missing_guessed_cd():
-    from meteora.agent.loop import _tool_progress_message
+    from aero.agent.loop import _tool_progress_message
 
     message = _tool_progress_message(
         "run_shell",
@@ -347,7 +347,7 @@ def test_run_shell_progress_hides_missing_guessed_cd():
 
 
 def test_read_only_python_comparison_does_not_need_confirmation():
-    from meteora.agent import loop
+    from aero.agent import loop
 
     command = """python - <<'PY'
 vals_pos = vals[vals > 0]
@@ -358,7 +358,7 @@ PY"""
 
 
 def test_read_only_python_csv_summary_does_not_need_confirmation():
-    from meteora.agent import loop
+    from aero.agent import loop
 
     command = """cd /project && python - <<'PY'
 import csv
@@ -371,7 +371,7 @@ PY"""
 
 
 def test_python_writes_need_confirmation():
-    from meteora.agent import loop
+    from aero.agent import loop
 
     assert loop._tool_call_needs_confirmation(
         "run_shell",
@@ -384,7 +384,7 @@ def test_python_writes_need_confirmation():
 
 
 def test_nested_destructive_shell_command_needs_confirmation():
-    from meteora.agent import loop
+    from aero.agent import loop
 
     assert loop._tool_call_needs_confirmation(
         "run_shell",
@@ -393,7 +393,7 @@ def test_nested_destructive_shell_command_needs_confirmation():
 
 
 def test_real_shell_redirect_needs_confirmation():
-    from meteora.agent import loop
+    from aero.agent import loop
 
     assert loop._tool_call_needs_confirmation(
         "run_shell",
@@ -402,7 +402,7 @@ def test_real_shell_redirect_needs_confirmation():
 
 
 def test_existing_mkdir_parents_does_not_need_confirmation(tmp_path):
-    from meteora.agent import loop
+    from aero.agent import loop
 
     (tmp_path / "figures").mkdir()
     (tmp_path / "scripts" / "tmp").mkdir(parents=True)
@@ -417,7 +417,7 @@ def test_existing_mkdir_parents_does_not_need_confirmation(tmp_path):
 
 
 def test_missing_mkdir_target_needs_confirmation(tmp_path):
-    from meteora.agent import loop
+    from aero.agent import loop
 
     (tmp_path / "figures").mkdir()
 
@@ -431,7 +431,7 @@ def test_missing_mkdir_target_needs_confirmation(tmp_path):
 
 
 def test_existing_mkdir_with_another_write_still_needs_confirmation(tmp_path):
-    from meteora.agent import loop
+    from aero.agent import loop
 
     (tmp_path / "figures").mkdir()
 
@@ -445,7 +445,7 @@ def test_existing_mkdir_with_another_write_still_needs_confirmation(tmp_path):
 
 
 def test_streamed_shell_output_reuses_status_lines():
-    from meteora.cli.main import _is_same_status_slot, _status_progress_slot
+    from aero.cli.main import _is_same_status_slot, _status_progress_slot
 
     assert _status_progress_slot("stdout: collecting cartopy") == "stdout"
     assert _status_progress_slot("stderr: warning from pip") == "stderr"
@@ -455,11 +455,11 @@ def test_streamed_shell_output_reuses_status_lines():
 
 
 def test_ensure_runtime_tools_confirmation_skipped_when_ready(monkeypatch, tmp_path):
-    from meteora.agent import loop
-    from meteora.agent.runtime import Runtime
+    from aero.agent import loop
+    from aero.agent.runtime import Runtime
 
     root = tmp_path / "miniconda3"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     env_bin.mkdir(parents=True)
     for tool in ("cdo", "grib_to_netcdf"):
         path = env_bin / tool
@@ -479,11 +479,11 @@ def test_ensure_runtime_tools_confirmation_skipped_when_ready(monkeypatch, tmp_p
 
 
 def test_ensure_runtime_tools_confirmation_required_when_missing(monkeypatch, tmp_path):
-    from meteora.agent import loop
-    from meteora.agent.runtime import Runtime
+    from aero.agent import loop
+    from aero.agent.runtime import Runtime
 
     root = tmp_path / "miniconda3"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     env_bin.mkdir(parents=True)
     cdo = env_bin / "cdo"
     cdo.write_text("#!/bin/sh\n")
@@ -502,9 +502,9 @@ def test_ensure_runtime_tools_confirmation_required_when_missing(monkeypatch, tm
 
 
 def test_write_file_progress_includes_file_name():
-    from meteora.agent.loop import _tool_progress_message
+    from aero.agent.loop import _tool_progress_message
 
-    args = {"file_path": "/Users/clarmylee/gitlab/products/meteora/lab/scripts/tmp/merge_gfs.py"}
+    args = {"file_path": "/Users/clarmylee/gitlab/products/aero/lab/scripts/tmp/merge_gfs.py"}
 
     assert (
         _tool_progress_message("write_file", "start", args)
@@ -517,7 +517,7 @@ def test_write_file_progress_includes_file_name():
 
 
 def test_tool_result_error_status_is_not_success():
-    from meteora.agent.loop import _tool_result_has_error_status
+    from aero.agent.loop import _tool_result_has_error_status
 
     assert _tool_result_has_error_status({"status": "error", "message": "failed"}) is True
     assert _tool_result_has_error_status({"status": "success"}) is False
@@ -528,8 +528,8 @@ def test_tool_result_error_status_is_not_success():
 async def test_download_progress_reports_fractional_start():
     import asyncio
 
-    from meteora.agent.progress import ProgressReporter, use_progress_reporter
-    from meteora.toolbox.builtin_tools import _download_progress_reporter
+    from aero.agent.progress import ProgressReporter, use_progress_reporter
+    from aero.toolbox.builtin_tools import _download_progress_reporter
 
     queue: asyncio.Queue[str] = asyncio.Queue()
     reporter = ProgressReporter(asyncio.get_running_loop(), queue)
@@ -545,7 +545,7 @@ async def test_download_progress_reports_fractional_start():
 
 
 def test_direct_tool_response_preserves_vision_setup_message():
-    from meteora.agent.loop import _direct_tool_response
+    from aero.agent.loop import _direct_tool_response
 
     message = (
         "控制台入口：[阿里云百炼 API Key](https://example.com)\n"
@@ -569,17 +569,17 @@ def test_direct_tool_response_preserves_vision_setup_message():
 
 
 def test_agent_applies_llm_config_update(tmp_path, monkeypatch):
-    from meteora.agent.loop import AgentLoop
-    from meteora.core.config import clear_llm_api_key, save_llm_api_key
+    from aero.agent.loop import AgentLoop
+    from aero.core.config import clear_llm_api_key, save_llm_api_key
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
-    config = MeteoraConfig.create_default()
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+    config = AeroConfig.create_default()
     save_llm_api_key("deepseek", "sk-old")
-    config_path = tmp_path / "meteora.yaml"
+    config_path = tmp_path / "aero.yaml"
     config.save(config_path)
     monkeypatch.chdir(tmp_path)
 
-    fresh = MeteoraConfig.load(config_path)
+    fresh = AeroConfig.load(config_path)
     fresh.llm.provider = "deepseek"
     fresh.llm.model = "deepseek-v4-flash"
     fresh.llm.base_url = "https://api.deepseek.com"
@@ -618,14 +618,14 @@ def test_agent_applies_llm_config_update(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_downloads_returns_retry_parameters(tmp_path, monkeypatch):
-    from meteora.data.download_store import CDSDownloadStore
-    from meteora.toolbox.builtin_tools import list_downloads
+    from aero.data.download_store import CDSDownloadStore
+    from aero.toolbox.builtin_tools import list_downloads
 
-    config = MeteoraConfig.create_default()
-    config.save(tmp_path / "meteora.yaml")
+    config = AeroConfig.create_default()
+    config.save(tmp_path / "aero.yaml")
     monkeypatch.chdir(tmp_path)
 
-    store = CDSDownloadStore(tmp_path / "meteora_downloads.db")
+    store = CDSDownloadStore(tmp_path / "aero_downloads.db")
     store.insert(
         source="era5-gcs",
         request_id="gcs-1",
@@ -659,7 +659,7 @@ async def test_list_downloads_returns_retry_parameters(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_runtime_execution():
-    from meteora.agent.runtime import Runtime
+    from aero.agent.runtime import Runtime
 
     rt = Runtime()
 
@@ -673,7 +673,7 @@ async def test_runtime_execution():
 
 @pytest.mark.asyncio
 async def test_runtime_execution_error():
-    from meteora.agent.runtime import Runtime
+    from aero.agent.runtime import Runtime
 
     rt = Runtime()
 
@@ -687,7 +687,7 @@ async def test_runtime_execution_error():
 
 @pytest.mark.asyncio
 async def test_delete_file_success(tmp_path):
-    from meteora.toolbox.builtin_tools import delete_file
+    from aero.toolbox.builtin_tools import delete_file
 
     test_file = tmp_path / "test.nc"
     test_file.write_text("data")
@@ -700,7 +700,7 @@ async def test_delete_file_success(tmp_path):
 
 @pytest.mark.asyncio
 async def test_delete_file_not_found():
-    from meteora.toolbox.builtin_tools import delete_file
+    from aero.toolbox.builtin_tools import delete_file
 
     result = await delete_file("/nonexistent/path/file.nc")
     assert result["status"] == "error"
@@ -709,7 +709,7 @@ async def test_delete_file_not_found():
 
 @pytest.mark.asyncio
 async def test_delete_file_not_a_file(tmp_path):
-    from meteora.toolbox.builtin_tools import delete_file
+    from aero.toolbox.builtin_tools import delete_file
 
     result = await delete_file(str(tmp_path))
     assert result["status"] == "error"
@@ -718,15 +718,15 @@ async def test_delete_file_not_a_file(tmp_path):
 
 @pytest.mark.asyncio
 async def test_confirmation_deny():
-    from meteora.agent.loop import AgentLoop
-    from meteora.core.config import MeteoraConfig
-    from meteora.core.types import ToolCall
+    from aero.agent.loop import AgentLoop
+    from aero.core.config import AeroConfig
+    from aero.core.types import ToolCall
 
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     config.llm.api_key = "test-key"
     loop = AgentLoop(config)
 
-    from meteora.toolbox.builtin_tools import delete_file  # noqa: F401
+    from aero.toolbox.builtin_tools import delete_file  # noqa: F401
 
     tc = ToolCall(id="tc1", name="delete_file", arguments={"file_path": "/tmp/test.nc"})
 
@@ -746,15 +746,15 @@ async def test_confirmation_deny():
 
 @pytest.mark.asyncio
 async def test_confirmation_allow(tmp_path):
-    from meteora.agent.loop import AgentLoop
-    from meteora.core.config import MeteoraConfig
-    from meteora.core.types import ToolCall
+    from aero.agent.loop import AgentLoop
+    from aero.core.config import AeroConfig
+    from aero.core.types import ToolCall
 
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     config.llm.api_key = "test-key"
     loop = AgentLoop(config)
 
-    from meteora.toolbox.builtin_tools import delete_file  # noqa: F401
+    from aero.toolbox.builtin_tools import delete_file  # noqa: F401
 
     test_file = tmp_path / "to_delete.nc"
     test_file.write_text("data")
@@ -778,15 +778,15 @@ async def test_confirmation_allow(tmp_path):
 
 @pytest.mark.asyncio
 async def test_confirmation_always_skips_next(tmp_path):
-    from meteora.agent.loop import AgentLoop
-    from meteora.core.config import MeteoraConfig
-    from meteora.core.types import ToolCall
+    from aero.agent.loop import AgentLoop
+    from aero.core.config import AeroConfig
+    from aero.core.types import ToolCall
 
-    config = MeteoraConfig.create_default()
+    config = AeroConfig.create_default()
     config.llm.api_key = "test-key"
     loop = AgentLoop(config)
 
-    from meteora.toolbox.builtin_tools import delete_file  # noqa: F401
+    from aero.toolbox.builtin_tools import delete_file  # noqa: F401
 
     file1 = tmp_path / "file1.nc"
     file1.write_text("data1")

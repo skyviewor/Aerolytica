@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from meteora.adapters.ifs_adapter import (
+from aero.adapters.ifs_adapter import (
     _build_grib_url,
     _build_index_url,
     _friendly_http_error,
@@ -173,7 +173,7 @@ class TestRetryMessages:
                 request=httpx.Request("GET", "https://example.com/file"),
             )
 
-        monkeypatch.setattr("meteora.adapters.ifs_adapter.time.sleep", fake_sleep)
+        monkeypatch.setattr("aero.adapters.ifs_adapter.time.sleep", fake_sleep)
 
         response = _request_with_retry(
             request,

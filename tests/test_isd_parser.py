@@ -2,8 +2,8 @@
 
 import csv
 
-from meteora.data.isd_parser import decode_isd_row, parse_isd_csv
-from meteora.toolbox.tools.observations import _inspect_csv_table
+from aero.data.isd_parser import decode_isd_row, parse_isd_csv
+from aero.toolbox.tools.observations import _inspect_csv_table
 
 
 def test_decode_isd_row_converts_conventional_weather_fields():

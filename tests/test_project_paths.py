@@ -4,12 +4,12 @@ import pytest
 
 
 def test_find_project_dir_uses_pyproject_from_nested_lab(monkeypatch, tmp_path):
-    from meteora.toolbox.paths import find_project_dir
+    from aero.toolbox.paths import find_project_dir
 
-    project = tmp_path / "meteora"
+    project = tmp_path / "aero"
     nested = project / "lab"
-    (project / "src" / "meteora").mkdir(parents=True)
-    (project / "pyproject.toml").write_text("[project]\nname = 'meteora'\n")
+    (project / "src" / "aero").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\nname = 'aero'\n")
     nested.mkdir()
 
     monkeypatch.chdir(nested)
@@ -19,13 +19,13 @@ def test_find_project_dir_uses_pyproject_from_nested_lab(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_write_file_resolves_relative_path_from_project_root(monkeypatch, tmp_path):
-    from meteora.toolbox.file_access import READ_FILES
-    from meteora.toolbox.tools.files import write_file
+    from aero.toolbox.file_access import READ_FILES
+    from aero.toolbox.tools.files import write_file
 
-    project = tmp_path / "meteora"
+    project = tmp_path / "aero"
     nested = project / "lab"
-    (project / "src" / "meteora").mkdir(parents=True)
-    (project / "pyproject.toml").write_text("[project]\nname = 'meteora'\n")
+    (project / "src" / "aero").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\nname = 'aero'\n")
     nested.mkdir()
     monkeypatch.chdir(nested)
     READ_FILES.clear()
@@ -37,19 +37,19 @@ async def test_write_file_resolves_relative_path_from_project_root(monkeypatch, 
     assert not (nested / "scripts" / "tmp" / "plot.py").exists()
 
 
-def test_dataset_default_output_dir_uses_meteora_project_data(monkeypatch, tmp_path):
-    from meteora.toolbox.tools.datasets import _default_dataset_output_dir
+def test_dataset_default_output_dir_uses_aero_project_data(monkeypatch, tmp_path):
+    from aero.toolbox.tools.datasets import _default_dataset_output_dir
 
-    project = tmp_path / "meteora" / "lab"
+    project = tmp_path / "aero" / "lab"
     project.mkdir(parents=True)
-    (project / "meteora.yaml").write_text("language: zh\n")
+    (project / "aero.yaml").write_text("language: zh\n")
     monkeypatch.chdir(project)
 
     assert _default_dataset_output_dir() == project / "data"
 
 
 def test_init_workspace_dirs_creates_structure(tmp_path):
-    from meteora.cli.main import _create_workspace_dirs
+    from aero.cli.main import _create_workspace_dirs
 
     _create_workspace_dirs(tmp_path)
 
@@ -58,15 +58,15 @@ def test_init_workspace_dirs_creates_structure(tmp_path):
 
 
 def test_init_operates_on_current_directory(monkeypatch, tmp_path):
-    from meteora.cli.main import _init
+    from aero.cli.main import _init
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("meteora.cli.init_runtime.setup_runtime", lambda: True)
+    monkeypatch.setattr("aero.cli.init_runtime.setup_runtime", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("unexpected init prompt"))
 
     _init()
 
-    assert (tmp_path / "meteora.yaml").is_file()
-    assert not (tmp_path / "meteora-project").exists()
+    assert (tmp_path / "aero.yaml").is_file()
+    assert not (tmp_path / "aero-project").exists()
     for relative_path in ("data", "figures", "scripts/tmp", "plans", "literature"):
         assert (tmp_path / relative_path).is_dir()

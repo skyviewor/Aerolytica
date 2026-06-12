@@ -7,9 +7,9 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from meteora.datasets.catalog import DatasetCatalog
-from meteora.datasets.models import DatasetDownloadRequest, DatasetStation
-from meteora.datasets.providers.noaa_isd import (
+from aero.datasets.catalog import DatasetCatalog
+from aero.datasets.models import DatasetDownloadRequest, DatasetStation
+from aero.datasets.providers.noaa_isd import (
     DATASET_ID,
     ISD_SPEC,
     MAX_AUTO_STATIONS,
@@ -227,7 +227,7 @@ async def test_download_falls_back_to_yearly_archive_and_local_subset(tmp_path):
     part = (
         tmp_path
         / "output"
-        / ".meteora-cache"
+        / ".aero-cache"
         / "isd"
         / "2025"
         / "72503014732.csv.part"
@@ -332,13 +332,13 @@ async def test_one_station_failure_does_not_discard_successful_station(tmp_path)
 
 @pytest.mark.asyncio
 async def test_unified_station_tool_and_catalog_route(monkeypatch, tmp_path):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     provider = NoaaIsdProvider(
         cache_dir=tmp_path / "cache",
         transport=httpx.MockTransport(lambda request: _catalog_response(request)),
     )
-    monkeypatch.setattr("meteora.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
+    monkeypatch.setattr("aero.datasets.catalog._DEFAULT_CATALOG", DatasetCatalog((provider,)))
 
     result = await builtin_tools.search_dataset_stations(DATASET_ID, "LAGUARDIA")
 

@@ -1,15 +1,15 @@
 import httpx
 import pytest
 
-from meteora.core.config import MeteoraConfig
+from aero.core.config import AeroConfig
 
 
 def test_check_vision_model_config_not_configured_guides_bailian(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "empty-secrets.yaml"))
-    config_path = tmp_path / "meteora.yaml"
-    MeteoraConfig.create_default().save(config_path)
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "empty-secrets.yaml"))
+    config_path = tmp_path / "aero.yaml"
+    AeroConfig.create_default().save(config_path)
     monkeypatch.chdir(tmp_path)
 
     result = builtin_tools.check_vision_model_config()
@@ -23,12 +23,12 @@ def test_check_vision_model_config_not_configured_guides_bailian(tmp_path, monke
 
 
 def test_check_vision_model_config_configured_uses_vision_config(tmp_path, monkeypatch):
-    from meteora.core.config import save_vision_api_key
-    from meteora.toolbox import builtin_tools
+    from aero.core.config import save_vision_api_key
+    from aero.toolbox import builtin_tools
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
-    config_path = tmp_path / "meteora.yaml"
-    config = MeteoraConfig.create_default()
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+    config_path = tmp_path / "aero.yaml"
+    config = AeroConfig.create_default()
     config.vision.provider = "bailian"
     config.vision.model = "qwen-vl-max"
     config.save(config_path)
@@ -47,11 +47,11 @@ def test_check_vision_model_config_configured_uses_vision_config(tmp_path, monke
 
 @pytest.mark.asyncio
 async def test_analyze_image_not_configured_guides_bailian_api_key_setup(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "empty-secrets.yaml"))
-    config_path = tmp_path / "meteora.yaml"
-    MeteoraConfig.create_default().save(config_path)
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "empty-secrets.yaml"))
+    config_path = tmp_path / "aero.yaml"
+    AeroConfig.create_default().save(config_path)
     monkeypatch.chdir(tmp_path)
 
     result = await builtin_tools.analyze_image(
@@ -70,17 +70,17 @@ async def test_analyze_image_not_configured_guides_bailian_api_key_setup(tmp_pat
 
 @pytest.mark.asyncio
 async def test_analyze_image_reports_blank_exception_type(tmp_path, monkeypatch):
-    from meteora.core.config import save_vision_api_key
-    from meteora.toolbox import builtin_tools
-    from meteora.toolbox.tools import vision
+    from aero.core.config import save_vision_api_key
+    from aero.toolbox import builtin_tools
+    from aero.toolbox.tools import vision
 
     image = tmp_path / "figures" / "plot.png"
     image.parent.mkdir()
     image.write_bytes(b"fake image bytes")
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
-    config_path = tmp_path / "meteora.yaml"
-    config = MeteoraConfig.create_default()
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+    config_path = tmp_path / "aero.yaml"
+    config = AeroConfig.create_default()
     config.vision.model = "qwen-vl-max"
     config.save(config_path)
     save_vision_api_key("sk-vision-test")
@@ -106,18 +106,18 @@ async def test_analyze_image_reports_blank_exception_type(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_analyze_image_reports_vision_http_details(tmp_path, monkeypatch):
-    from meteora.agent.vision_client import VisionAnalysisError
-    from meteora.core.config import save_vision_api_key
-    from meteora.toolbox import builtin_tools
-    from meteora.toolbox.tools import vision
+    from aero.agent.vision_client import VisionAnalysisError
+    from aero.core.config import save_vision_api_key
+    from aero.toolbox import builtin_tools
+    from aero.toolbox.tools import vision
 
     image = tmp_path / "figures" / "plot.png"
     image.parent.mkdir()
     image.write_bytes(b"fake image bytes")
 
-    monkeypatch.setenv("METEORA_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
-    config_path = tmp_path / "meteora.yaml"
-    config = MeteoraConfig.create_default()
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+    config_path = tmp_path / "aero.yaml"
+    config = AeroConfig.create_default()
     config.vision.model = "qwen-vl-max"
     config.save(config_path)
     save_vision_api_key("sk-vision-test")
@@ -147,8 +147,8 @@ async def test_analyze_image_reports_vision_http_details(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_vision_client_http_error_includes_response_excerpt(tmp_path):
-    from meteora.agent.vision_client import VisionAnalysisError, VisionClient
-    from meteora.core.config import VisionConfig
+    from aero.agent.vision_client import VisionAnalysisError, VisionClient
+    from aero.core.config import VisionConfig
 
     image = tmp_path / "plot.png"
     image.write_bytes(b"fake image bytes")
@@ -178,9 +178,9 @@ async def test_vision_client_http_error_includes_response_excerpt(tmp_path):
 
 @pytest.mark.asyncio
 async def test_list_figures_only_reads_figures_directory(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
-    MeteoraConfig.create_default().save(tmp_path / "meteora.yaml")
+    AeroConfig.create_default().save(tmp_path / "aero.yaml")
     figures = tmp_path / "figures"
     data = tmp_path / "data"
     figures.mkdir()
@@ -201,9 +201,9 @@ async def test_list_figures_only_reads_figures_directory(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_figures_creates_directory(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
-    MeteoraConfig.create_default().save(tmp_path / "meteora.yaml")
+    AeroConfig.create_default().save(tmp_path / "aero.yaml")
     monkeypatch.chdir(tmp_path)
 
     result = await builtin_tools.list_figures()

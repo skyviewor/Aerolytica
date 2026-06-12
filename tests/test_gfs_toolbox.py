@@ -1,7 +1,7 @@
 import pytest
 
-from meteora.adapters.gfs_adapter import GFSDownloadFile, GFSIndexEntry
-from meteora.data.gfs_availability import GFSAvailabilityDecision, GFSObjectAvailability
+from aero.adapters.gfs_adapter import GFSDownloadFile, GFSIndexEntry
+from aero.data.gfs_availability import GFSAvailabilityDecision, GFSObjectAvailability
 
 
 def _decision(source="nomads"):
@@ -39,7 +39,7 @@ def _decision(source="nomads"):
 
 @pytest.mark.asyncio
 async def test_download_gfs_records_can_be_listed_and_queried(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     entry = GFSIndexEntry(
         index=1,
@@ -68,11 +68,11 @@ async def test_download_gfs_records_can_be_listed_and_queried(tmp_path, monkeypa
             downloaded_bytes=4,
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
-    monkeypatch.setattr("meteora.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
-    monkeypatch.setattr("meteora.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
+    monkeypatch.setattr("aero.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "meteora.toolbox.tools.download_records.find_project_dir",
+        "aero.toolbox.tools.download_records.find_project_dir",
         lambda: tmp_path,
     )
 
@@ -99,12 +99,12 @@ async def test_download_gfs_records_can_be_listed_and_queried(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_download_gfs_reports_validation_errors(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     async def fake_resolve(**kwargs):
         raise ValueError("cycle 只支持 00、06、12、18")
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
 
     result = await builtin_tools.download_gfs(
         date="20260604",
@@ -119,7 +119,7 @@ async def test_download_gfs_reports_validation_errors(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_download_gfs_records_aws_fallback_source(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     entry = GFSIndexEntry(
         index=1,
@@ -149,9 +149,9 @@ async def test_download_gfs_records_aws_fallback_source(tmp_path, monkeypatch):
             downloaded_bytes=4,
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
-    monkeypatch.setattr("meteora.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
-    monkeypatch.setattr("meteora.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
+    monkeypatch.setattr("aero.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
 
     result = await builtin_tools.download_gfs(
         date="20210102",
@@ -167,7 +167,7 @@ async def test_download_gfs_records_aws_fallback_source(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_download_gfs_skips_forecast_hour_without_matching_field(tmp_path, monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     entry = GFSIndexEntry(
         index=1,
@@ -204,9 +204,9 @@ async def test_download_gfs_skips_forecast_hour_without_matching_field(tmp_path,
             downloaded_bytes=4,
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
-    monkeypatch.setattr("meteora.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
-    monkeypatch.setattr("meteora.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.adapters.gfs_adapter.GFSAdapter.download_one", fake_download_one)
+    monkeypatch.setattr("aero.toolbox.tools.gfs.find_project_dir", lambda: tmp_path)
 
     result = await builtin_tools.download_gfs(
         date="20260610",
@@ -223,7 +223,7 @@ async def test_download_gfs_skips_forecast_hour_without_matching_field(tmp_path,
 
 @pytest.mark.asyncio
 async def test_inspect_gfs_inventory_unavailable_is_not_tool_error(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     async def fake_resolve(**kwargs):
         selected = GFSObjectAvailability(
@@ -248,7 +248,7 @@ async def test_inspect_gfs_inventory_unavailable_is_not_tool_error(monkeypatch):
             reason="官网和 AWS 历史归档都没有找到这个目标文件。",
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
 
     result = await builtin_tools.inspect_gfs_inventory(
         date="20260610",
@@ -263,7 +263,7 @@ async def test_inspect_gfs_inventory_unavailable_is_not_tool_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_gfs_variables_warns_when_only_grib_definition_exists(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     async def fake_inventory():
         return {"records": []}
@@ -281,8 +281,8 @@ async def test_search_gfs_variables_warns_when_only_grib_definition_exists(monke
             }
         ]
 
-    monkeypatch.setattr("meteora.data.gfs_products.get_gfs_product_inventory", fake_inventory)
-    monkeypatch.setattr("meteora.data.gfs_params.get_gfs_parameters", fake_parameters)
+    monkeypatch.setattr("aero.data.gfs_products.get_gfs_product_inventory", fake_inventory)
+    monkeypatch.setattr("aero.data.gfs_params.get_gfs_parameters", fake_parameters)
 
     result = await builtin_tools.search_gfs_variables(keyword="SST")
 
@@ -293,7 +293,7 @@ async def test_search_gfs_variables_warns_when_only_grib_definition_exists(monke
 
 @pytest.mark.asyncio
 async def test_check_gfs_availability_returns_cached_ranges(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     async def fake_summary(refresh=False):
         assert refresh is True
@@ -318,7 +318,7 @@ async def test_check_gfs_availability_returns_cached_ranges(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("meteora.data.gfs_availability.get_gfs_availability", fake_summary)
+    monkeypatch.setattr("aero.data.gfs_availability.get_gfs_availability", fake_summary)
 
     result = await builtin_tools.check_gfs_availability(refresh=True)
 
@@ -329,7 +329,7 @@ async def test_check_gfs_availability_returns_cached_ranges(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_inspect_gfs_inventory_reports_variable_levels(monkeypatch):
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     idx_text = "\n".join(
         [
@@ -346,9 +346,9 @@ async def test_inspect_gfs_inventory_reports_variable_levels(monkeypatch):
         assert url.endswith(".idx")
         return idx_text
 
-    monkeypatch.setattr("meteora.data.gfs_availability.resolve_gfs_source", fake_resolve)
+    monkeypatch.setattr("aero.data.gfs_availability.resolve_gfs_source", fake_resolve)
     monkeypatch.setattr(
-        "meteora.adapters.gfs_adapter.GFSAdapter._fetch_text", staticmethod(fake_fetch_text)
+        "aero.adapters.gfs_adapter.GFSAdapter._fetch_text", staticmethod(fake_fetch_text)
     )
 
     result = await builtin_tools.inspect_gfs_inventory(
@@ -370,7 +370,7 @@ async def test_inspect_gfs_inventory_reports_variable_levels(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_gfs_forecast_schedule_uses_hourly_first_120_hours():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.get_gfs_forecast_schedule(duration_hours=12)
 
@@ -381,7 +381,7 @@ async def test_get_gfs_forecast_schedule_uses_hourly_first_120_hours():
 
 @pytest.mark.asyncio
 async def test_get_gfs_forecast_schedule_uses_three_hourly_for_0p50_product():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.get_gfs_forecast_schedule(
         duration_hours=12,
@@ -395,7 +395,7 @@ async def test_get_gfs_forecast_schedule_uses_three_hourly_for_0p50_product():
 
 @pytest.mark.asyncio
 async def test_get_gfs_forecast_schedule_uses_historical_0p25_date_rule():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.get_gfs_forecast_schedule(
         start_hour=238,
@@ -412,7 +412,7 @@ async def test_get_gfs_forecast_schedule_uses_historical_0p25_date_rule():
 
 @pytest.mark.asyncio
 async def test_get_gfs_forecast_schedule_accepts_cycle_context():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.get_gfs_forecast_schedule(
         duration_hours=12,
@@ -427,7 +427,7 @@ async def test_get_gfs_forecast_schedule_accepts_cycle_context():
 
 @pytest.mark.asyncio
 async def test_get_gfs_forecast_schedule_rejects_invalid_cycle():
-    from meteora.toolbox import builtin_tools
+    from aero.toolbox import builtin_tools
 
     result = await builtin_tools.get_gfs_forecast_schedule(
         duration_hours=12,

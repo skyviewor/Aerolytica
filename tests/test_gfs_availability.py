@@ -1,6 +1,6 @@
 import pytest
 
-from meteora.data.gfs_availability import (
+from aero.data.gfs_availability import (
     AWS_GFS_BASE,
     NOMADS_GFS_BASE,
     GFSObjectAvailability,
@@ -93,7 +93,7 @@ async def test_resolve_gfs_source_prefers_nomads(monkeypatch):
             reason="ok" if kwargs["source"] == "nomads" else "missing",
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.check_gfs_object", fake_check)
+    monkeypatch.setattr("aero.data.gfs_availability.check_gfs_object", fake_check)
 
     decision = await resolve_gfs_source(
         date="2026-06-04",
@@ -120,7 +120,7 @@ async def test_resolve_gfs_source_falls_back_to_aws(monkeypatch):
             status_code=200 if kwargs["source"] == "aws" else 404,
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.check_gfs_object", fake_check)
+    monkeypatch.setattr("aero.data.gfs_availability.check_gfs_object", fake_check)
 
     decision = await resolve_gfs_source(
         date="2021-01-02",
@@ -151,7 +151,7 @@ async def test_resolve_gfs_source_honors_explicit_nomads(monkeypatch):
             status_code=404,
         )
 
-    monkeypatch.setattr("meteora.data.gfs_availability.check_gfs_object", fake_check)
+    monkeypatch.setattr("aero.data.gfs_availability.check_gfs_object", fake_check)
 
     decision = await resolve_gfs_source(
         date="2021-01-02",

@@ -2,7 +2,7 @@
 
 import pytest
 
-from meteora.data import literature_pdf
+from aero.data import literature_pdf
 
 
 @pytest.mark.asyncio

@@ -1,16 +1,16 @@
-"""Tests for Meteora toolbox registry."""
+"""Tests for Aero toolbox registry."""
 
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from meteora.toolbox.registry import ToolRegistry, get_registry
+from aero.toolbox.registry import ToolRegistry, get_registry
 
 
 def test_register_tool_decorator():
-    from meteora.core.types import ToolSpec
-    from meteora.toolbox.registry import ToolRegistry
+    from aero.core.types import ToolSpec
+    from aero.toolbox.registry import ToolRegistry
 
     reg = ToolRegistry()
 
@@ -37,7 +37,7 @@ def test_register_tool_decorator():
 def test_tool_registry():
     reg = ToolRegistry()
 
-    from meteora.core.types import ToolSpec
+    from aero.core.types import ToolSpec
 
     spec = ToolSpec(
         name="calc",
@@ -51,7 +51,7 @@ def test_tool_registry():
 
 
 def test_tool_to_llm_function():
-    from meteora.core.types import ToolSpec
+    from aero.core.types import ToolSpec
 
     spec = ToolSpec(
         name="calc",
@@ -69,7 +69,7 @@ def test_tool_to_llm_function():
 
 
 def test_registry_list_functions():
-    from meteora.core.types import ToolSpec
+    from aero.core.types import ToolSpec
 
     reg = ToolRegistry()
     spec = ToolSpec(
@@ -85,7 +85,7 @@ def test_registry_list_functions():
 
 
 def test_tool_requires_confirmation():
-    from meteora.core.types import ToolSpec
+    from aero.core.types import ToolSpec
 
     spec = ToolSpec(
         name="dangerous",
@@ -101,8 +101,8 @@ def test_tool_requires_confirmation():
 
 
 def test_register_tool_with_confirmation():
-    from meteora.core.types import ToolSpec
-    from meteora.toolbox.registry import ToolRegistry
+    from aero.core.types import ToolSpec
+    from aero.toolbox.registry import ToolRegistry
 
     reg = ToolRegistry()
     spec = ToolSpec(
@@ -119,7 +119,7 @@ def test_register_tool_with_confirmation():
 
 
 def test_run_shell_description_prefers_cli_data_tools():
-    from meteora.toolbox import builtin_tools  # noqa: F401
+    from aero.toolbox import builtin_tools  # noqa: F401
 
     spec = get_registry().get("run_shell")
 
@@ -136,19 +136,19 @@ def test_run_shell_description_prefers_cli_data_tools():
     assert "grib_to_netcdf" in spec.description
     assert "ensure_runtime_tools" in spec.description
     assert "通常不需要手动 conda activate" in spec.description
-    assert "meteora-agent" in spec.description
-    assert "run_shell 会拒绝使用未纳入 meteora-agent 的受管数据工具" in spec.description
+    assert "aero-agent" in spec.description
+    assert "run_shell 会拒绝使用未纳入 aero-agent 的受管数据工具" in spec.description
     assert "先安装并尝试 CLI，再按需用脚本兜底" in spec.description
 
 
 @pytest.mark.asyncio
 async def test_ensure_runtime_tools_skips_install_when_ready(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     root = tmp_path / "miniconda3"
     base_bin = root / "bin"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     base_bin.mkdir(parents=True)
     env_bin.mkdir(parents=True)
     conda = base_bin / "conda"
@@ -168,7 +168,7 @@ async def test_ensure_runtime_tools_skips_install_when_ready(monkeypatch, tmp_pa
         "_build_exec_env",
         staticmethod(lambda: {"PATH": f"{env_bin}:{base_bin}", "CONDA_EXE": str(conda)}),
     )
-    from meteora.toolbox.runtime_manager import get_runtime_tool_manager
+    from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
     manager = get_runtime_tool_manager()
     monkeypatch.setattr(manager, "find_conda_executable", lambda env: str(conda))
@@ -184,12 +184,12 @@ async def test_ensure_runtime_tools_skips_install_when_ready(monkeypatch, tmp_pa
 
 @pytest.mark.asyncio
 async def test_ensure_runtime_tools_installs_missing_and_symlinks(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     root = tmp_path / "miniconda3"
     base_bin = root / "bin"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     base_bin.mkdir(parents=True)
     env_bin.mkdir(parents=True)
     conda = base_bin / "conda"
@@ -212,7 +212,7 @@ async def test_ensure_runtime_tools_installs_missing_and_symlinks(monkeypatch, t
         "_build_exec_env",
         staticmethod(lambda: {"PATH": f"{env_bin}:{base_bin}", "CONDA_EXE": str(conda)}),
     )
-    from meteora.toolbox.runtime_manager import get_runtime_tool_manager
+    from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
     manager = get_runtime_tool_manager()
     monkeypatch.setattr(manager, "find_conda_executable", lambda env: str(conda))
@@ -231,12 +231,12 @@ async def test_ensure_runtime_tools_installs_missing_and_symlinks(monkeypatch, t
 
 @pytest.mark.asyncio
 async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     root = tmp_path / "miniconda3"
     base_bin = root / "bin"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     base_bin.mkdir(parents=True)
     env_bin.mkdir(parents=True)
     conda = base_bin / "conda"
@@ -251,7 +251,7 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        if cmd[:5] == [str(conda), "install", "-n", "meteora-agent", "-c"]:
+        if cmd[:5] == [str(conda), "install", "-n", "aero-agent", "-c"]:
             mamba.write_text("#!/bin/sh\n")
             mamba.chmod(0o755)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -259,7 +259,7 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
     monkeypatch.setattr(
         Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": f"{env_bin}:{base_bin}"})
     )
-    from meteora.toolbox.runtime_manager import get_runtime_tool_manager
+    from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
     manager = get_runtime_tool_manager()
     monkeypatch.setattr(manager, "find_conda_executable", lambda env: str(conda))
@@ -273,7 +273,7 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
         str(conda),
         "create",
         "-n",
-        "meteora-agent",
+        "aero-agent",
         "-c",
         "conda-forge",
         "--override-channels",
@@ -284,7 +284,7 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
         str(conda),
         "install",
         "-n",
-        "meteora-agent",
+        "aero-agent",
         "-c",
         "conda-forge",
         "--override-channels",
@@ -301,12 +301,12 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
 async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails(
     monkeypatch, tmp_path
 ):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     root = tmp_path / "miniconda3"
     base_bin = root / "bin"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     base_bin.mkdir(parents=True)
     env_bin.mkdir(parents=True)
     conda = base_bin / "conda"
@@ -323,7 +323,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
             str(conda),
             "install",
             "-n",
-            "meteora-agent",
+            "aero-agent",
             "-c",
             "conda-forge",
             "--override-channels",
@@ -336,7 +336,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
     monkeypatch.setattr(
         Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": f"{env_bin}:{base_bin}"})
     )
-    from meteora.toolbox.runtime_manager import get_runtime_tool_manager
+    from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
     manager = get_runtime_tool_manager()
     monkeypatch.setattr(manager, "find_conda_executable", lambda env: str(conda))
@@ -350,7 +350,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
         str(conda),
         "create",
         "-n",
-        "meteora-agent",
+        "aero-agent",
         "-c",
         "conda-forge",
         "--override-channels",
@@ -361,7 +361,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
         str(conda),
         "install",
         "-n",
-        "meteora-agent",
+        "aero-agent",
         "-c",
         "conda-forge",
         "--override-channels",
@@ -372,7 +372,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
         str(conda),
         "install",
         "-n",
-        "meteora-agent",
+        "aero-agent",
         "-c",
         "conda-forge",
         "--override-channels",
@@ -384,9 +384,9 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
 
 
 @pytest.mark.asyncio
-async def test_run_shell_rejects_managed_tool_outside_meteora_agent(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+async def test_run_shell_rejects_managed_tool_outside_aero_agent(monkeypatch, tmp_path):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     base_bin = tmp_path / "miniconda3" / "bin"
     base_bin.mkdir(parents=True)
@@ -409,12 +409,12 @@ async def test_run_shell_rejects_managed_tool_outside_meteora_agent(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_run_shell_allows_managed_tool_inside_meteora_agent(monkeypatch, tmp_path):
-    from meteora.agent.runtime import Runtime
-    from meteora.toolbox import builtin_tools
+async def test_run_shell_allows_managed_tool_inside_aero_agent(monkeypatch, tmp_path):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
 
     root = tmp_path / "miniconda3"
-    env_bin = root / "envs" / "meteora-agent" / "bin"
+    env_bin = root / "envs" / "aero-agent" / "bin"
     env_bin.mkdir(parents=True)
     grib_to_netcdf = env_bin / "grib_to_netcdf"
     grib_to_netcdf.write_text("#!/bin/sh\n")
@@ -427,7 +427,7 @@ async def test_run_shell_allows_managed_tool_inside_meteora_agent(monkeypatch, t
         timeout_ms=120000,
         output_limit=20000,
     ):
-        from meteora.agent.runtime import ExecutionResult
+        from aero.agent.runtime import ExecutionResult
 
         return ExecutionResult(
             True, stdout="ok", stderr="", stdout_bytes=2, exit_code=0, duration_ms=1
@@ -436,7 +436,7 @@ async def test_run_shell_allows_managed_tool_inside_meteora_agent(monkeypatch, t
     def fake_env():
         return {"PATH": str(env_bin), "CONDA_EXE": str(root / "bin" / "conda")}
 
-    monkeypatch.setattr("meteora.agent.runtime.Runtime._build_exec_env", staticmethod(fake_env))
+    monkeypatch.setattr("aero.agent.runtime.Runtime._build_exec_env", staticmethod(fake_env))
     monkeypatch.setattr(Runtime, "run_subprocess_streaming", fake_run_subprocess_streaming)
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
 
@@ -451,8 +451,8 @@ async def test_run_shell_allows_managed_tool_inside_meteora_agent(monkeypatch, t
 
 @pytest.mark.asyncio
 async def test_run_shell_truncates_install_output_more_aggressively(monkeypatch):
-    from meteora.agent.runtime import ExecutionResult, Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import ExecutionResult, Runtime
+    from aero.toolbox import builtin_tools
 
     async def fake_run_subprocess_streaming(
         self,
@@ -486,8 +486,8 @@ async def test_run_shell_truncates_install_output_more_aggressively(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_run_shell_keeps_larger_non_install_output(monkeypatch):
-    from meteora.agent.runtime import ExecutionResult, Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import ExecutionResult, Runtime
+    from aero.toolbox import builtin_tools
 
     async def fake_run_subprocess_streaming(
         self,
@@ -520,8 +520,8 @@ async def test_run_shell_keeps_larger_non_install_output(monkeypatch):
 async def test_run_shell_streams_stdout_to_progress():
     import asyncio
 
-    from meteora.agent.progress import ProgressReporter, use_progress_reporter
-    from meteora.toolbox import builtin_tools
+    from aero.agent.progress import ProgressReporter, use_progress_reporter
+    from aero.toolbox import builtin_tools
 
     queue = asyncio.Queue()
     reporter = ProgressReporter(asyncio.get_running_loop(), queue)
@@ -545,10 +545,10 @@ async def test_run_shell_streams_stdout_to_progress():
 
 
 def test_normalize_shell_context_removes_missing_leading_cd(monkeypatch, tmp_path):
-    from meteora.toolbox.tools.runtime import _normalize_shell_context
+    from aero.toolbox.tools.runtime import _normalize_shell_context
 
     project = tmp_path / "project"
-    (project / "src" / "meteora").mkdir(parents=True)
+    (project / "src" / "aero").mkdir(parents=True)
     (project / "pyproject.toml").write_text("[project]\nname='test'\n")
     monkeypatch.chdir(project)
 
@@ -564,11 +564,11 @@ def test_normalize_shell_context_removes_missing_leading_cd(monkeypatch, tmp_pat
 
 @pytest.mark.asyncio
 async def test_run_shell_uses_project_root_for_missing_workdir(monkeypatch, tmp_path):
-    from meteora.agent.runtime import ExecutionResult, Runtime
-    from meteora.toolbox import builtin_tools
+    from aero.agent.runtime import ExecutionResult, Runtime
+    from aero.toolbox import builtin_tools
 
     project = tmp_path / "project"
-    (project / "src" / "meteora").mkdir(parents=True)
+    (project / "src" / "aero").mkdir(parents=True)
     (project / "pyproject.toml").write_text("[project]\nname='test'\n")
     monkeypatch.chdir(project)
     captured = {}

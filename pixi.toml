@@ -1,13 +1,13 @@
 [project]
-name = "meteora"
+name = "aero"
 version = "0.1.0"
-description = "Meteora — 气象科研 AI Agent IDE"
-authors = ["Meteora Team"]
+description = "Aero — 气象科研 AI Agent IDE"
+authors = ["Aero Team"]
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]
 
 [tasks]
-run = "python -m meteora.cli.main"
+run = "python -m aero.cli.main"
 test = "pytest tests/"
 lint = "ruff check src/ tests/"
 fmt = "ruff format src/ tests/"

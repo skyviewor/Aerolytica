@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from meteora.agent.skills import SkillLoader, SkillSelector, render_skill_context
+from aero.agent.skills import SkillLoader, SkillSelector, render_skill_context
 
 
 def _write_skill(

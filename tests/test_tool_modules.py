@@ -1,7 +1,7 @@
 """Compatibility checks for domain-focused built-in tool modules."""
 
-from meteora.toolbox import builtin_tools
-from meteora.toolbox.registry import get_registry
+from aero.toolbox import builtin_tools
+from aero.toolbox.registry import get_registry
 
 MIGRATED_TOOLS = (
     "launch_sub_agent",

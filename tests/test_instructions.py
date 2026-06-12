@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from meteora.data.instructions import (
+from aero.data.instructions import (
     GLOBAL_INSTRUCTIONS_PATH,
     append_instruction,
     clear_instructions,
@@ -14,7 +14,7 @@ from meteora.data.instructions import (
     _render_section,
     _resolve_scope_path,
 )
-from meteora.agent.system_prompt import (
+from aero.agent.system_prompt import (
     _instruction_section,
     build_system_prompt,
 )
@@ -110,9 +110,9 @@ class TestInstructionSection:
 
 class TestBuildSystemPromptWithInstructions:
     def test_includes_instructions_when_provided(self):
-        from meteora.core.config import MeteoraConfig
+        from aero.core.config import AeroConfig
 
-        config = MeteoraConfig()
+        config = AeroConfig()
         result = build_system_prompt(
             config, "zh", instructions_context="### 全局偏好\n- test",
         )
@@ -120,9 +120,9 @@ class TestBuildSystemPromptWithInstructions:
         assert "test" in result
 
     def test_excludes_instruction_section_when_empty(self):
-        from meteora.core.config import MeteoraConfig
+        from aero.core.config import AeroConfig
 
-        config = MeteoraConfig()
+        config = AeroConfig()
         result = build_system_prompt(config, "zh", instructions_context="")
         header_occurrences = result.count("## 用户指令")
         assert header_occurrences <= 2  # may appear in behavioral rules
