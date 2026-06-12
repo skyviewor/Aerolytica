@@ -50,6 +50,8 @@ def test_default_catalogue_lists_all_supported_datasets_and_download_routes():
     assert routes["ncep-reanalysis-2-6-hourly"] == "download_dataset"
     assert routes["ncep-reanalysis-2-monthly"] == "download_dataset"
     assert routes["noaa-isd-global-hourly"] == "download_dataset"
+    assert routes["himawari-ahi-l1b-full-disk"] == "download_dataset"
+    assert routes["himawari-ahi-l2-full-disk-clouds"] == "download_dataset"
 
 
 @pytest.mark.asyncio

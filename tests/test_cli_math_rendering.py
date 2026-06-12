@@ -176,7 +176,7 @@ def test_usage_meta_text_formats_cache_hit_as_status_segment():
     text = _usage_meta_text(tracker, "deepseek-v4-flash", "qwen3.7-plus")
 
     assert "[dim]上下文[/dim] 43.3K [dim]/ 4%[/dim]" in text
-    assert "[dim]缓存[/dim] 95%" in text
+    assert "[dim]命中缓存[/dim] 95%" in text
     assert "¥" in text
     assert "[dim]cost[/dim]" not in text
     assert "♻" not in text

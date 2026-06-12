@@ -123,11 +123,12 @@ def get_dataset_catalog() -> DatasetCatalog:
     if _DEFAULT_CATALOG is None:
         from aero.datasets.builtin_specs import BUILTIN_DATASET_SPECS
         from aero.datasets.providers.chirps import ChirpsProvider
+        from aero.datasets.providers.himawari import HimawariProvider
         from aero.datasets.providers.ncep_reanalysis import NcepReanalysisProvider
         from aero.datasets.providers.noaa_isd import NoaaIsdProvider
 
         _DEFAULT_CATALOG = DatasetCatalog(
-            (ChirpsProvider(), NcepReanalysisProvider(), NoaaIsdProvider())
+            (ChirpsProvider(), HimawariProvider(), NcepReanalysisProvider(), NoaaIsdProvider())
         )
         for dataset in BUILTIN_DATASET_SPECS:
             _DEFAULT_CATALOG.register_spec(dataset)

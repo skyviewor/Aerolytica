@@ -3818,9 +3818,21 @@ class AeroApp(App):
         if _is_replaceable_status(text):
             for index in range(len(panel.lines) - 1, -1, -1):
                 if _is_same_status_slot(panel.lines[index], text):
-                    panel.lines[index] = text
-                    return False
-        panel.lines.append(text)
+                    panel.lines.pop(index)
+                    panel.lines.append(text)
+                    return index != len(panel.lines) - 1
+            panel.lines.append(text)
+            return True
+
+        insert_at = next(
+            (
+                index
+                for index, line in enumerate(panel.lines)
+                if _is_replaceable_status(line)
+            ),
+            len(panel.lines),
+        )
+        panel.lines.insert(insert_at, text)
         return True
 
     def _collapse_status(self, done: bool = False) -> None:
@@ -4517,7 +4529,7 @@ def _usage_meta_text(tracker: TokenTracker, llm_model: str, vision_model: str) -
     ]
     hit_ratio = tracker.cache_ratio()
     if hit_ratio > 0:
-        parts.append(f"[dim]缓存[/dim] {hit_ratio:.0%}")
+        parts.append(f"[dim]命中缓存[/dim] {hit_ratio:.0%}")
     cost = tracker.total_cost(llm_model, vision_model)
     if cost > 0:
         parts.append(escape(format_cost(cost)))

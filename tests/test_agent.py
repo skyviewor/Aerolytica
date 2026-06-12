@@ -454,6 +454,34 @@ def test_streamed_shell_output_reuses_status_lines():
     assert _is_same_status_slot("stdout: one", "stderr: two") is False
 
 
+def test_live_status_lines_stay_below_regular_progress_messages():
+    from types import SimpleNamespace
+
+    from aero.cli.main import AeroApp
+
+    panel = SimpleNamespace(lines=[])
+
+    def upsert(text: str) -> bool:
+        return AeroApp._upsert_status_line(None, panel, text)
+
+    upsert("葵花卫星正在下载第 1/24 个文件")
+    upsert("下载进度#1 [░░░░] 20%")
+    upsert("葵花卫星正在下载第 2/24 个文件")
+    upsert("葵花卫星正在下载第 3/24 个文件")
+
+    assert panel.lines == [
+        "葵花卫星正在下载第 1/24 个文件",
+        "葵花卫星正在下载第 2/24 个文件",
+        "葵花卫星正在下载第 3/24 个文件",
+        "下载进度#1 [░░░░] 20%",
+    ]
+
+    upsert("下载进度#1 [██░░] 40%")
+
+    assert panel.lines[-1] == "下载进度#1 [██░░] 40%"
+    assert len(panel.lines) == 4
+
+
 def test_ensure_runtime_tools_confirmation_skipped_when_ready(monkeypatch, tmp_path):
     from aero.agent import loop
     from aero.agent.runtime import Runtime

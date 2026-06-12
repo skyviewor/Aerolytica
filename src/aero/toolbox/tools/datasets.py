@@ -293,6 +293,17 @@ async def download_dataset(
                     },
                 }
             )
+        if dataset_id.startswith("himawari-") and "变量" in str(exc):
+            payload.update(
+                {
+                    "retry_same_request": False,
+                    "suggested_tool": "search_dataset_variables",
+                    "suggested_args": {
+                        "dataset_id": dataset_id,
+                        "query": variables[0] if variables else "",
+                    },
+                }
+            )
         if dataset_id == "noaa-isd-global-hourly" and any(
             term in str(exc) for term in ("站点", "区域")
         ):
