@@ -50,8 +50,17 @@ def test_default_catalogue_lists_all_supported_datasets_and_download_routes():
     assert routes["ncep-reanalysis-2-6-hourly"] == "download_dataset"
     assert routes["ncep-reanalysis-2-monthly"] == "download_dataset"
     assert routes["noaa-isd-global-hourly"] == "download_dataset"
+    assert routes["noaa-ghcn-daily"] == "download_dataset"
     assert routes["himawari-ahi-l1b-full-disk"] == "download_dataset"
     assert routes["himawari-ahi-l2-full-disk-clouds"] == "download_dataset"
+    assert routes["goes-abi-l1b-full-disk"] == "download_dataset"
+    assert routes["goes-abi-l2-cmip-full-disk"] == "download_dataset"
+    assert routes["hrrr-conus-forecast"] == "download_dataset"
+    assert routes["jra3q-pressure-6-hourly-125"] == "download_dataset"
+    assert routes["jra3q-surface-6-hourly-125"] == "download_dataset"
+    assert routes["jra55-pressure-6-hourly-125"] == "download_dataset"
+    assert routes["jra55-surface-6-hourly-125"] == "download_dataset"
+    assert routes["noaa-mrms"] == "download_dataset"
 
 
 @pytest.mark.asyncio

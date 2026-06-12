@@ -1,5 +1,6 @@
 """Tests for Aero toolbox registry."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -136,6 +137,7 @@ def test_run_shell_description_prefers_cli_data_tools():
     assert "grib_to_netcdf" in spec.description
     assert "ensure_runtime_tools" in spec.description
     assert "通常不需要手动 conda activate" in spec.description
+    assert "执行 python/python3/pip/pip3/python -m pip，都必须解析到 aero-agent" in spec.description
     assert "aero-agent" in spec.description
     assert "run_shell 会拒绝使用未纳入 aero-agent 的受管数据工具" in spec.description
     assert "先安装并尝试 CLI，再按需用脚本兜底" in spec.description
@@ -450,6 +452,85 @@ async def test_run_shell_allows_managed_tool_inside_aero_agent(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
+async def test_run_shell_rejects_python_outside_aero_agent(monkeypatch, tmp_path):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    base_bin = tmp_path / "miniconda3" / "bin"
+    base_bin.mkdir(parents=True)
+    python = base_bin / "python"
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+
+    monkeypatch.setattr(Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": str(base_bin)}))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    result = await builtin_tools.run_shell("python plot.py", "plot figure")
+
+    assert result["status"] == "error"
+    assert result["python_runtime_invalid"] is True
+    assert result["failures"][0]["reason"] == "not_in_aero_agent"
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_absolute_system_python(monkeypatch, tmp_path):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    system_bin = tmp_path / "usr" / "bin"
+    system_bin.mkdir(parents=True)
+    python = system_bin / "python3"
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+
+    monkeypatch.setattr(Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": str(system_bin)}))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    result = await builtin_tools.run_shell(f"{python} plot.py", "plot figure")
+
+    assert result["status"] == "error"
+    assert result["python_runtime_invalid"] is True
+    assert result["failures"][0]["path"] == str(python)
+
+
+@pytest.mark.asyncio
+async def test_run_shell_allows_python_inside_aero_agent(monkeypatch, tmp_path):
+    from aero.agent.runtime import ExecutionResult, Runtime
+    from aero.toolbox import builtin_tools
+
+    root = tmp_path / "miniconda3"
+    env_bin = root / "envs" / "aero-agent" / "bin"
+    env_bin.mkdir(parents=True)
+    python = env_bin / "python"
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+
+    async def fake_run_subprocess_streaming(
+        self,
+        command,
+        workdir=".",
+        timeout_ms=120000,
+        output_limit=20000,
+    ):
+        return ExecutionResult(
+            True, stdout="ok", stderr="", stdout_bytes=2, exit_code=0, duration_ms=1
+        )
+
+    monkeypatch.setattr(
+        Runtime,
+        "_build_exec_env",
+        staticmethod(lambda: {"PATH": str(env_bin), "CONDA_EXE": str(root / "bin" / "conda")}),
+    )
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fake_run_subprocess_streaming)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    result = await builtin_tools.run_shell("python plot.py", "plot figure")
+
+    assert result["status"] == "success"
+    assert result["stdout"] == "ok"
+
+
+@pytest.mark.asyncio
 async def test_run_shell_truncates_install_output_more_aggressively(monkeypatch):
     from aero.agent.runtime import ExecutionResult, Runtime
     from aero.toolbox import builtin_tools
@@ -525,10 +606,11 @@ async def test_run_shell_streams_stdout_to_progress():
 
     queue = asyncio.Queue()
     reporter = ProgressReporter(asyncio.get_running_loop(), queue)
+    command = "printf 'one\\n'; sleep 0.1; printf 'two\\n'"
 
     with use_progress_reporter(reporter):
         result = await builtin_tools.run_shell(
-            'python -c \'import time; print("one", flush=True); time.sleep(0.1); print("two", flush=True)\'',
+            command,
             "stream stdout",
             timeout_ms=10000,
         )
@@ -542,6 +624,37 @@ async def test_run_shell_streams_stdout_to_progress():
     assert "two" in result["stdout"]
     assert any("stdout: one" in item for item in seen)
     assert any("stdout: two" in item for item in seen)
+
+
+@pytest.mark.asyncio
+async def test_run_shell_suppresses_benign_eccodes_time_warning_progress():
+    import asyncio
+
+    from aero.agent.progress import ProgressReporter, use_progress_reporter
+    from aero.toolbox import builtin_tools
+
+    queue = asyncio.Queue()
+    reporter = ProgressReporter(asyncio.get_running_loop(), queue)
+    warning = (
+        "ECCODES ERROR   :   Key dataTime (unpack_long): "
+        "Truncating time: non-zero seconds(37) ignored"
+    )
+    command = f"printf '%s\\n' {shlex.quote(warning)} >&2"
+
+    with use_progress_reporter(reporter):
+        result = await builtin_tools.run_shell(
+            command,
+            "stream stderr warning",
+            timeout_ms=10000,
+        )
+
+    seen = []
+    while not queue.empty():
+        seen.append(await queue.get())
+
+    assert result["status"] == "success"
+    assert warning in result["stderr"]
+    assert not any("ECCODES ERROR" in item for item in seen)
 
 
 def test_normalize_shell_context_removes_missing_leading_cd(monkeypatch, tmp_path):

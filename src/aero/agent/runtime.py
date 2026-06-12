@@ -40,7 +40,7 @@ class _TailBuffer:
         self.total_bytes += len(data)
         text = data.decode(errors="replace")
         if self.limit > 0:
-            self._text = (self._text + text)[-self.limit:]
+            self._text = (self._text + text)[-self.limit :]
         return text
 
     @property
@@ -55,6 +55,17 @@ def _progress_line(label: str, text: str, limit: int = 240) -> str:
     if len(compact) > limit:
         compact = "..." + compact[-limit:]
     return f"{label}: {compact}"
+
+
+def _suppress_progress_line(label: str, text: str) -> bool:
+    if label != "stderr":
+        return False
+    compact = " ".join(str(text).split())
+    return (
+        "ECCODES ERROR" in compact
+        and "Truncating time: non-zero seconds" in compact
+        and "ignored" in compact
+    )
 
 
 class Runtime:
@@ -210,7 +221,7 @@ class Runtime:
                     chunk = await stream.read(4096)
                     if not chunk:
                         tail = pending.strip()
-                        if tail:
+                        if tail and not _suppress_progress_line(label, tail):
                             emit_progress(_progress_line(label, tail))
                         elif last_suppressed:
                             emit_progress(_progress_line(label, last_suppressed))
@@ -220,7 +231,11 @@ class Runtime:
                     lines = pending.split("\n")
                     pending = lines.pop() if lines else ""
                     now = time.monotonic()
-                    complete = [line.strip() for line in lines if line.strip()]
+                    complete = [
+                        line.strip()
+                        for line in lines
+                        if line.strip() and not _suppress_progress_line(label, line)
+                    ]
                     if complete and now - last_emit >= 0.25:
                         emit_progress(_progress_line(label, complete[-1]))
                         last_emit = now

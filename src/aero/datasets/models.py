@@ -75,6 +75,10 @@ class DatasetDownloadRequest:
     levels: tuple[float, ...] = ()
     stations: tuple[str, ...] = ()
     area: tuple[float, float, float, float] | None = None
+    times: tuple[str, ...] = ()
+    platforms: tuple[str, ...] = ()
+    forecast_hours: tuple[int, ...] = ()
+    product: str = ""
 
 
 @dataclass(frozen=True)

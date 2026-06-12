@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 _ZH = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "就绪 ↑/↓ 滚动 PageUp/PageDown 翻页 /copy 复制回复 /quit 退出 /clear 清屏",
     "app.thinking": "思考中",
     "app.interrupted": "已中断当前对话",
@@ -188,7 +188,7 @@ _ZH = {
 }
 
 _EN = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "Ready  ↑/↓ scroll  PageUp/PageDown page  /copy copy reply  /quit exit  /clear clear",
     "app.thinking": "Thinking",
     "app.interrupted": "Interrupted current conversation",
@@ -373,7 +373,7 @@ _EN = {
 }
 
 _JA = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "準備完了 ↑/↓ スクロール PageUp/PageDown ページ /copy 返信をコピー /quit 終了 /clear 消去",
     "app.thinking": "思考中",
     "app.interrupted": "現在の会話を中断しました",
@@ -495,7 +495,7 @@ _JA = {
 }
 
 _KO = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "준비됨 ↑/↓ 스크롤 PageUp/PageDown 페이지 /copy 답변 복사 /quit 종료 /clear 지우기",
     "app.thinking": "생각 중",
     "app.interrupted": "현재 대화를 중단했습니다",
@@ -617,7 +617,7 @@ _KO = {
 }
 
 _FR = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "Prêt  ↑/↓ défiler  PageUp/PageDown page  /copy copier réponse  /quit quitter  /clear effacer",
     "app.thinking": "Réflexion",
     "app.interrupted": "Conversation en cours interrompue",
@@ -739,7 +739,7 @@ _FR = {
 }
 
 _DE = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "Bereit  ↑/↓ scrollen  PageUp/PageDown blättern  /copy Antwort kopieren  /quit beenden  /clear löschen",
     "app.thinking": "Denkt nach",
     "app.interrupted": "Aktuelle Konversation unterbrochen",
@@ -861,7 +861,7 @@ _DE = {
 }
 
 _ES = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "Listo  ↑/↓ desplazar  PageUp/PageDown página  /copy copiar respuesta  /quit salir  /clear limpiar",
     "app.thinking": "Pensando",
     "app.interrupted": "Conversación actual interrumpida",
@@ -983,7 +983,7 @@ _ES = {
 }
 
 _RU = {
-    "app.title": "[bold cyan]Aero[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
     "app.ready": "Готово  ↑/↓ прокрутка  PageUp/PageDown страница  /copy копировать ответ  /quit выход  /clear очистить",
     "app.thinking": "Думаю",
     "app.interrupted": "Текущий диалог прерван",

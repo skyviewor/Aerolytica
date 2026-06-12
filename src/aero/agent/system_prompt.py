@@ -111,6 +111,7 @@ def _intl_prompt(
    - For NCEP Reanalysis variables, use the unified dataset-variable query first. If a variable is ambiguous or missing, query variables and retry the dataset tool. If the built-in query or download path remains insufficient or fails, using run_shell, source metadata, or custom analysis as a fallback is allowed.
    - For local GRIB/GRIB2/NetCDF merging, conversion, concatenation, averaging, subsetting, or metadata edits, prefer established command-line tools such as CDO, NCO, eccodes, and netcdf-c via run_shell. Do not skip directly to a Python/cfgrib/xarray script for these routine file operations. Python scripts are allowed only when the user explicitly asks for a script, the CLI tools cannot express the operation well, or the CLI attempt/install path has failed.
    - CDO/NCO/eccodes/netcdf-c/GDAL commands must be managed by Aero's unified `aero-agent` conda environment. Before running these commands, call ensure_runtime_tools for the exact commands needed unless the same turn already verified them inside `aero-agent`. Do NOT rely on `which` finding a command in base conda or another user environment. After ensure_runtime_tools succeeds, retry the original CLI command. Missing CLI tools alone are not a reason to jump to Python; install the CLI first, then use Python only as an explicit fallback when CLI is unsuitable or fails.
+   - Any Python program run through run_shell — including `python`, `python3`, `pip`, `pip3`, and `python -m pip` — MUST execute from Aero's unified `aero-agent` conda environment. Do not use base conda, system Python, pixi's Python, or absolute Python paths to bypass this. If `aero-agent` does not exist or its Python is not first on PATH, fix/create the environment before running Python.
 1. When the user requests meteorological data or asks what data Aero supports, query the unified dataset catalogue first. Use the returned dataset id, metadata, and `download_tool` as the source of truth, then call that download capability. Do not rely on a memorized static list. Literature PDFs remain handled by download_literature_pdf. Do not write a downloader script first. For ERA5, do not pre-check CDS config.
 2. If download_era5 returns a CDS API key not configured error, guide the user:
    a. Visit https://cds.climate.copernicus.eu/ to register an account
@@ -151,7 +152,7 @@ def _intl_prompt(
       ln -sf ~/miniconda3/envs/aero-agent/bin/<tool> ~/miniconda3/bin/<tool>
     Prefer mamba for faster dependency solving, but never install mamba or runtime packages into base.
     The error message from the failed tool includes the exact package name and install commands.
-    All Aero runtime dependencies — NCO, CDO, eccodes, netcdf tools, GDAL, etc. — go into `aero-agent`.
+    All Aero runtime dependencies — Python scripts, NCO, CDO, eccodes, netcdf tools, GDAL, etc. — go into `aero-agent`.
     Installing system packages modifies the user's environment, so ALWAYS ask for explicit consent before executing.
 9. download_era5 supports dataset_id for CDS source:
    - Omit dataset_id → default ERA5 hourly data (auto-detected from pressure_level)
@@ -359,6 +360,7 @@ def _zh_prompt(
    - NCEP Reanalysis 变量优先通过统一数据集变量查询能力确认。变量歧义或不存在时，先查询变量再重试数据集工具；如果内置查询或下载能力仍然不足或失败，允许用 run_shell、源站元数据或自定义分析兜底。
    - 用户要求对本地 GRIB/GRIB2/NetCDF 做合并、转换、拼接、平均、裁剪、改元数据等常规文件处理时，必须优先通过 run_shell 使用成熟命令行工具，例如 CDO、NCO、eccodes、netcdf-c。不要跳过 CLI 直接写 Python/cfgrib/xarray 脚本。只有用户明确要求写脚本、命令行工具无法很好表达该操作，或已经尝试安装/执行 CLI 但失败时，才允许用 Python 脚本兜底。
    - CDO/NCO/eccodes/netcdf-c/GDAL 这类命令必须由 Aero 统一的 `aero-agent` conda 环境管理。运行这些命令前，先为本次需要的具体命令调用 ensure_runtime_tools，除非当前轮已经确认它们来自 `aero-agent`。不要因为 `which` 在 base conda 或用户其他环境里找到了同名命令就直接使用。成功后重试原 CLI 命令。缺少 CLI 本身不是改写 Python 脚本的理由；先安装并尝试 CLI，只有 CLI 不适合或失败时才用 Python 兜底。
+   - 所有通过 run_shell 执行的 Python 程序——包括 `python`、`python3`、`pip`、`pip3` 和 `python -m pip`——都必须来自 Aero 统一的 `aero-agent` conda 环境。不要用 base conda、系统 Python、pixi 的 Python 或绝对路径绕过。如果 `aero-agent` 不存在或它的 Python 不在 PATH 最前面，先修复/创建环境再运行 Python。
 1. 用户请求气象数据或询问「支持哪些数据」时，必须先查询统一数据集目录。以查询返回的数据集 ID、元数据和 download_tool 为唯一事实来源，再调用对应下载能力；不要依赖系统提示中的静态名单。文献 PDF 仍由 download_literature_pdf 处理。不要先写下载脚本。ERA5 不要提前检查 CDS 配置。
 2. 如果 download_era5 返回 CDS API key 未配置的错误，引导用户配置：
    a. 访问 https://cds.climate.copernicus.eu/ 注册账户
@@ -394,7 +396,7 @@ def _zh_prompt(
        conda install -n aero-agent -c conda-forge mamba -y                （仅在 aero-agent 内缺少 mamba 时）
        ~/miniconda3/envs/aero-agent/bin/mamba install -p ~/miniconda3/envs/aero-agent -c conda-forge <包名> -y
        ln -sf ~/miniconda3/envs/aero-agent/bin/<工具名> ~/miniconda3/bin/<工具名>
-     优先使用 mamba 加速依赖解析，但绝不能把 mamba 或运行时工具包装进 base。错误消息中已包含具体的包名和安装命令。Aero 所有运行时依赖——NCO、CDO、eccodes、netcdf 工具、GDAL 等——全部装进 aero-agent。
+     优先使用 mamba 加速依赖解析，但绝不能把 mamba 或运行时工具包装进 base。错误消息中已包含具体的包名和安装命令。Aero 所有运行时依赖——Python 脚本、NCO、CDO、eccodes、netcdf 工具、GDAL 等——全部装进 aero-agent。
      安装系统软件包会修改用户环境，必须先征求用户明确同意再执行。
 8. download_era5 支持 dataset_id 参数来指定 CDS 源下载的数据集：
    - 不传 dataset_id → 默认 ERA5 逐小时数据（根据 pressure_level 自动选）

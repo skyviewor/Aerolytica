@@ -15,9 +15,11 @@ def test_session_save_load(tmp_path):
     messages = [
         Message(role="system", content="You are a helpful assistant."),
         Message(role="user", content="Hello"),
-        Message(role="assistant", content="Hi!", tool_calls=[
-            ToolCall(id="c1", name="test", arguments={"x": 1})
-        ]),
+        Message(
+            role="assistant",
+            content="Hi!",
+            tool_calls=[ToolCall(id="c1", name="test", arguments={"x": 1})],
+        ),
         Message(role="tool", content='{"result":"ok"}', tool_call_id="c1"),
     ]
     sm.save("test-session", messages, SessionMeta(name="测试会话", title_source="auto"))
@@ -41,9 +43,9 @@ def test_sanitize_tool_message_sequence_drops_orphan_tool_messages():
         Message(role="system", content="system"),
         Message(role="tool", content="orphan", tool_call_id="missing"),
         Message(role="assistant", content=""),
-        Message(role="assistant", content="", tool_calls=[
-            ToolCall(id="c1", name="test", arguments={})
-        ]),
+        Message(
+            role="assistant", content="", tool_calls=[ToolCall(id="c1", name="test", arguments={})]
+        ),
         Message(role="tool", content="ok", tool_call_id="c1"),
         Message(role="tool", content="extra", tool_call_id="extra"),
         Message(role="assistant", content="done"),
@@ -65,9 +67,11 @@ def test_sanitize_tool_message_sequence_drops_incomplete_tool_call_blocks():
 
     messages = [
         Message(role="system", content="system"),
-        Message(role="assistant", content="starting", tool_calls=[
-            ToolCall(id="c1", name="launch_sub_agent", arguments={})
-        ]),
+        Message(
+            role="assistant",
+            content="starting",
+            tool_calls=[ToolCall(id="c1", name="launch_sub_agent", arguments={})],
+        ),
         Message(role="assistant", content="后台任务完成摘要"),
         Message(role="tool", content="late", tool_call_id="c1"),
         Message(role="user", content="next"),
@@ -127,6 +131,8 @@ def test_build_system_prompt():
     assert "运行这些命令前，先为本次需要的具体命令调用 ensure_runtime_tools" in prompt
     assert "不要因为 `which` 在 base conda 或用户其他环境里找到了同名命令就直接使用" in prompt
     assert "先安装并尝试 CLI，只有 CLI 不适合或失败时才用 Python 兜底" in prompt
+    assert "所有通过 run_shell 执行的 Python 程序" in prompt
+    assert "都必须来自 Aero 统一的 `aero-agent` conda 环境" in prompt
     assert "`aero-agent` conda 环境" in prompt
     assert "参考资料" in prompt
     assert "source_url" in prompt
@@ -170,6 +176,8 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "call ensure_runtime_tools" in prompt
     assert "Do NOT rely on `which` finding a command in base conda" in prompt
     assert "then use Python only as an explicit fallback when CLI is unsuitable or fails" in prompt
+    assert "Any Python program run through run_shell" in prompt
+    assert "MUST execute from Aero's unified `aero-agent` conda environment" in prompt
     assert "`aero-agent` conda environment" in prompt
     assert "References" in prompt
     assert "source_url" in prompt
@@ -316,10 +324,7 @@ def test_run_shell_progress_includes_command():
         _tool_progress_message("run_shell", "start", args)
         == "正在执行命令：cdo -f nc copy data/in.grib2 data/out.nc"
     )
-    assert (
-        _tool_progress_message("run_shell", "done", args)
-        == "命令执行完成"
-    )
+    assert _tool_progress_message("run_shell", "done", args) == "命令执行完成"
 
 
 def test_run_shell_progress_truncates_long_command():
@@ -373,32 +378,44 @@ PY"""
 def test_python_writes_need_confirmation():
     from aero.agent import loop
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {"command": """python - <<'PY'\nPath("out.txt").write_text("value")\nPY"""},
-    ) is True
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {"command": """python - <<'PY'\nopen("out.txt", "w").write("value")\nPY"""},
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {"command": """python - <<'PY'\nPath("out.txt").write_text("value")\nPY"""},
+        )
+        is True
+    )
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {"command": """python - <<'PY'\nopen("out.txt", "w").write("value")\nPY"""},
+        )
+        is True
+    )
 
 
 def test_nested_destructive_shell_command_needs_confirmation():
     from aero.agent import loop
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {"command": "cd /project && rm data.csv"},
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {"command": "cd /project && rm data.csv"},
+        )
+        is True
+    )
 
 
 def test_real_shell_redirect_needs_confirmation():
     from aero.agent import loop
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {"command": "python summary.py > output.txt"},
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {"command": "python summary.py > output.txt"},
+        )
+        is True
+    )
 
 
 def test_existing_mkdir_parents_does_not_need_confirmation(tmp_path):
@@ -407,13 +424,16 @@ def test_existing_mkdir_parents_does_not_need_confirmation(tmp_path):
     (tmp_path / "figures").mkdir()
     (tmp_path / "scripts" / "tmp").mkdir(parents=True)
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {
-            "command": "mkdir -p figures scripts/tmp",
-            "workdir": str(tmp_path),
-        },
-    ) is False
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {
+                "command": "mkdir -p figures scripts/tmp",
+                "workdir": str(tmp_path),
+            },
+        )
+        is False
+    )
 
 
 def test_missing_mkdir_target_needs_confirmation(tmp_path):
@@ -421,13 +441,16 @@ def test_missing_mkdir_target_needs_confirmation(tmp_path):
 
     (tmp_path / "figures").mkdir()
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {
-            "command": "mkdir -p figures scripts/tmp",
-            "workdir": str(tmp_path),
-        },
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {
+                "command": "mkdir -p figures scripts/tmp",
+                "workdir": str(tmp_path),
+            },
+        )
+        is True
+    )
 
 
 def test_existing_mkdir_with_another_write_still_needs_confirmation(tmp_path):
@@ -435,13 +458,16 @@ def test_existing_mkdir_with_another_write_still_needs_confirmation(tmp_path):
 
     (tmp_path / "figures").mkdir()
 
-    assert loop._tool_call_needs_confirmation(
-        "run_shell",
-        {
-            "command": "mkdir -p figures && touch figures/result.png",
-            "workdir": str(tmp_path),
-        },
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "run_shell",
+            {
+                "command": "mkdir -p figures && touch figures/result.png",
+                "workdir": str(tmp_path),
+            },
+        )
+        is True
+    )
 
 
 def test_streamed_shell_output_reuses_status_lines():
@@ -482,6 +508,31 @@ def test_live_status_lines_stay_below_regular_progress_messages():
     assert len(panel.lines) == 4
 
 
+def test_completed_download_progress_disappears_from_status_panel():
+    from types import SimpleNamespace
+
+    from aero.cli.main import AeroApp
+
+    panel = SimpleNamespace(
+        lines=[
+            "正在下载文件",
+            "下载进度#1 [██████████░░] 50%",
+            "下载进度#2 [████░░░░░░] 20%",
+        ]
+    )
+
+    AeroApp._upsert_status_line(None, panel, "下载进度#1 [████████████] 100%")
+
+    assert panel.lines == [
+        "正在下载文件",
+        "下载进度#2 [████░░░░░░] 20%",
+    ]
+
+    AeroApp._upsert_status_line(None, panel, "下载进度#3 [████████████] 100.0%")
+
+    assert all(not line.startswith("下载进度#3") for line in panel.lines)
+
+
 def test_ensure_runtime_tools_confirmation_skipped_when_ready(monkeypatch, tmp_path):
     from aero.agent import loop
     from aero.agent.runtime import Runtime
@@ -500,10 +551,13 @@ def test_ensure_runtime_tools_confirmation_skipped_when_ready(monkeypatch, tmp_p
         staticmethod(lambda: {"PATH": str(env_bin), "CONDA_EXE": str(root / "bin" / "conda")}),
     )
 
-    assert loop._tool_call_needs_confirmation(
-        "ensure_runtime_tools",
-        {"tools": ["cdo", "grib_to_netcdf"]},
-    ) is False
+    assert (
+        loop._tool_call_needs_confirmation(
+            "ensure_runtime_tools",
+            {"tools": ["cdo", "grib_to_netcdf"]},
+        )
+        is False
+    )
 
 
 def test_ensure_runtime_tools_confirmation_required_when_missing(monkeypatch, tmp_path):
@@ -523,10 +577,13 @@ def test_ensure_runtime_tools_confirmation_required_when_missing(monkeypatch, tm
         staticmethod(lambda: {"PATH": str(env_bin), "CONDA_EXE": str(root / "bin" / "conda")}),
     )
 
-    assert loop._tool_call_needs_confirmation(
-        "ensure_runtime_tools",
-        {"tools": ["cdo", "grib_to_netcdf"]},
-    ) is True
+    assert (
+        loop._tool_call_needs_confirmation(
+            "ensure_runtime_tools",
+            {"tools": ["cdo", "grib_to_netcdf"]},
+        )
+        is True
+    )
 
 
 def test_write_file_progress_includes_file_name():
@@ -538,10 +595,7 @@ def test_write_file_progress_includes_file_name():
         _tool_progress_message("write_file", "start", args)
         == "正在写入文件：scripts/tmp/merge_gfs.py"
     )
-    assert (
-        _tool_progress_message("write_file", "done", args)
-        == "文件写入完成"
-    )
+    assert _tool_progress_message("write_file", "done", args) == "文件写入完成"
 
 
 def test_tool_result_error_status_is_not_success():

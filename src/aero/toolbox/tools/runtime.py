@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from aero.agent.runtime import _conda_roots
 from aero.toolbox.paths import find_project_dir
 from aero.toolbox.registry import register_tool
 from aero.toolbox.runtime_manager import get_runtime_tool_manager
@@ -270,6 +271,8 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
         "命令默认直接在用户当前工作根目录执行，不要猜测目录或在命令前添加 cd。"
         "运行时会自动把统一 conda 环境 ~/miniconda3/envs/aero-agent/bin 放到 PATH 前面，"
         "通常不需要手动 conda activate。"
+        "凡是通过 run_shell 执行 python/python3/pip/pip3/python -m pip，都必须解析到 aero-agent；"
+        "不要用 base、系统 Python 或绝对路径绕过该环境。"
         "远程数据下载应优先用内置下载工具，内置工具覆盖不了时使用 curl、wget、aria2c "
         "或数据源官方 CLI，不要跳过下载工具和 CLI 直接写 Python HTTP/Range/下载脚本。"
         "GRIB/GRIB2/NetCDF 的合并、转换、拼接、裁剪、平均、元数据编辑应优先使用"
@@ -327,6 +330,9 @@ async def run_shell(
     manager = get_runtime_tool_manager()
     command, workdir, context_correction = _normalize_shell_context(command, workdir)
     env = runtime._build_exec_env()
+    python_error = _python_runtime_error(command, env)
+    if python_error:
+        return python_error
     managed_tools = manager.managed_tools_in_command(command)
     if managed_tools:
         ready, missing, verified = manager.tools_ready(managed_tools, env)
@@ -391,6 +397,65 @@ async def run_shell(
     }
 
 
+def _python_runtime_error(command: str, env: dict[str, str]) -> dict | None:
+    python_tokens = _python_command_tokens(command)
+    if not python_tokens:
+        return None
+    env_bins = [(root / "envs" / "aero-agent" / "bin").resolve() for root in _conda_roots(env)]
+    failures: list[dict[str, str]] = []
+    for token in python_tokens:
+        executable = _resolve_python_executable(token, env)
+        if executable is None:
+            failures.append({"tool": token, "reason": "not_found"})
+            continue
+        resolved = executable.resolve()
+        if not any(resolved.parent == env_bin for env_bin in env_bins):
+            failures.append(
+                {
+                    "tool": token,
+                    "path": str(executable),
+                    "reason": "not_in_aero_agent",
+                }
+            )
+    if not failures:
+        return None
+    return {
+        "status": "error",
+        "python_runtime_invalid": True,
+        "message": (
+            "run_shell 执行 Python 程序必须使用 aero-agent 环境中的 python/pip。"
+            "请先创建或修复 aero-agent 环境，然后重试；不要使用 base、系统 Python 或绝对路径。"
+        ),
+        "command": command,
+        "failures": failures,
+    }
+
+
+def _python_command_tokens(command: str) -> list[str]:
+    tokens: list[str] = []
+    for part in re.split(r"(?:&&|\|\||;|\|)", command):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            continue
+        if not words:
+            continue
+        executable = Path(words[0]).name
+        if executable in {"python", "python3", "pip", "pip3"} or re.fullmatch(
+            r"python3\.\d+", executable
+        ):
+            tokens.append(words[0])
+    return tokens
+
+
+def _resolve_python_executable(token: str, env: dict[str, str]) -> Path | None:
+    path = Path(token).expanduser()
+    if path.is_absolute() or "/" in token:
+        return path if path.exists() else None
+    found = shutil.which(token, path=env.get("PATH"))
+    return Path(found) if found else None
+
+
 def _normalize_shell_context(command: str, workdir: str) -> tuple[str, str, str]:
     """Run relative commands from the workspace and discard a missing leading cd."""
     project_dir = find_project_dir().resolve()
@@ -416,9 +481,7 @@ def _normalize_shell_context(command: str, workdir: str) -> tuple[str, str, str]
         if target_text and not target.is_absolute():
             target = requested_workdir / target
         target_outside_project = (
-            target_text
-            and target.is_dir()
-            and not target.resolve().is_relative_to(project_dir)
+            target_text and target.is_dir() and not target.resolve().is_relative_to(project_dir)
         )
         if target_text and (not target.is_dir() or target_outside_project):
             command = command[leading_cd.end() :]

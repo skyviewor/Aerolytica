@@ -1,5 +1,6 @@
 """Unified dataset catalogue tools."""
 
+import re
 from pathlib import Path
 
 import httpx
@@ -142,7 +143,7 @@ async def search_dataset_variables(dataset_id: str, query: str = "") -> dict:
     name="search_dataset_stations",
     description=(
         "查询站点型数据集的可用观测站。可按站号、站名、ICAO、国家或州搜索，"
-        "也可按区域和日期覆盖范围筛选；下载 NOAA ISD 前应先用本工具确认站点。"
+        "也可按区域和日期覆盖范围筛选；下载 NOAA ISD 或 GHCN-D 前应先用本工具确认站点。"
     ),
     parameters={
         "type": "object",
@@ -200,7 +201,7 @@ async def search_dataset_stations(
         "长时间或大体积下载应通过 launch_sub_agent 交给后台执行。"
         "工具会返回远端下载粒度和 warnings；如果 requires_local_subset=true，"
         "必须继续调用 subset_netcdf 做精确时间或空间裁剪，不能直接声称结果已完成裁剪。"
-        "NOAA ISD 下载会自动保留原始 CSV，并将可读版常规气象要素 CSV 作为主要结果返回。"
+        "NOAA ISD 和 GHCN-D 下载会自动保留原始文件，并将可读版气象要素 CSV 作为主要结果返回。"
     ),
     parameters={
         "type": "object",
@@ -213,6 +214,25 @@ async def search_dataset_stations(
                 "items": {"type": "string"},
                 "description": "可选变量列表。",
             },
+            "times": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": '可选 UTC 时次列表，使用 HH:MM 或 HHMM，如 ["03:00"]。',
+            },
+            "platforms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": '可选观测平台或卫星列表，如 ["GOES-19"]。',
+            },
+            "forecast_hours": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "可选预报时效列表，如 [0, 1, 6]。",
+            },
+            "product": {
+                "type": "string",
+                "description": "可选数据产品名，如 HRRR 的 wrfsfcf、wrfprsf 或 wrfnatf。",
+            },
             "levels": {
                 "type": "array",
                 "items": {"type": "number"},
@@ -221,7 +241,11 @@ async def search_dataset_stations(
             "stations": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "可选站点列表，可使用规范站号或无歧义的站名、ICAO。",
+                "description": "可选站点列表，推荐直接使用站点查询返回的规范 station_id。",
+            },
+            "station_id": {
+                "type": "string",
+                "description": "可选单个站点 ID；等价于 stations=[station_id]。",
             },
             "area": {
                 "type": "array",
@@ -243,8 +267,13 @@ async def download_dataset(
     start_date: str,
     end_date: str,
     variables: list[str] | None = None,
+    times: list[str] | None = None,
+    platforms: list[str] | None = None,
+    forecast_hours: list[int] | None = None,
+    product: str = "",
     levels: list[float] | None = None,
     stations: list[str] | None = None,
+    station_id: str = "",
     area: list[float] | None = None,
     output_dir: str | None = None,
 ) -> dict:
@@ -255,14 +284,21 @@ async def download_dataset(
     if area is not None and len(area) != 4:
         return {"status": "error", "message": "area 必须是 [north, west, south, east] 四个数值"}
     destination = Path(output_dir) if output_dir else _default_dataset_output_dir()
+    selected_stations = list(stations or ())
+    if station_id and station_id not in selected_stations:
+        selected_stations.append(station_id)
     request = DatasetDownloadRequest(
         dataset_id=dataset_id,
         start_date=start_date,
         end_date=end_date,
         output_dir=destination,
         variables=tuple(variables or ()),
+        times=tuple(times or ()),
+        platforms=tuple(platforms or ()),
+        forecast_hours=tuple(forecast_hours or ()),
+        product=product,
         levels=tuple(levels or ()),
-        stations=tuple(stations or ()),
+        stations=tuple(selected_stations),
         area=tuple(area) if area is not None else None,
     )
     progress_reporter = download_progress_reporter()
@@ -293,7 +329,9 @@ async def download_dataset(
                     },
                 }
             )
-        if dataset_id.startswith("himawari-") and "变量" in str(exc):
+        if dataset_id.startswith(
+            ("himawari-", "goes-", "hrrr-", "jra3q-", "jra55-", "noaa-mrms")
+        ) and "变量" in str(exc):
             payload.update(
                 {
                     "retry_same_request": False,
@@ -304,7 +342,7 @@ async def download_dataset(
                     },
                 }
             )
-        if dataset_id == "noaa-isd-global-hourly" and any(
+        if dataset_id in {"noaa-isd-global-hourly", "noaa-ghcn-daily"} and any(
             term in str(exc) for term in ("站点", "区域")
         ):
             payload.update(
@@ -313,7 +351,7 @@ async def download_dataset(
                     "suggested_tool": "search_dataset_stations",
                     "suggested_args": {
                         "dataset_id": dataset_id,
-                        "query": stations[0] if stations else "",
+                        "query": selected_stations[0] if selected_stations else "",
                         "area": area,
                         "start_date": start_date,
                         "end_date": end_date,
@@ -323,7 +361,27 @@ async def download_dataset(
         return payload
     except (OSError, RuntimeError) as exc:
         debug_exception("download_dataset failed", exc)
-        return {"status": "error", "message": f"数据集下载失败：{exc}"}
+        payload = {"status": "error", "message": f"数据集下载失败：{exc}"}
+        available = re.search(
+            r"实际可用范围为 (\d{4}-\d{2}-\d{2}) 至 (\d{4}-\d{2}-\d{2})", str(exc)
+        )
+        if dataset_id == "noaa-ghcn-daily" and available:
+            latest = available.group(2)
+            payload.update(
+                {
+                    "retry_same_request": False,
+                    "suggested_tool": "download_dataset",
+                    "suggested_args": {
+                        "dataset_id": dataset_id,
+                        "start_date": latest,
+                        "end_date": latest,
+                        "variables": variables or [],
+                        "stations": selected_stations,
+                        "output_dir": str(destination),
+                    },
+                }
+            )
+        return payload
     except Exception as exc:
         debug_exception("download_dataset unexpected failure", exc)
         return {"status": "error", "message": f"数据集下载遇到远端异常：{exc}"}

@@ -31,6 +31,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.geometry import Offset
 from textual.screen import ModalScreen
+from textual.scrollbar import ScrollBarRender
 from textual.widgets import (
     Button,
     ListItem,
@@ -102,6 +103,8 @@ DEEPSEEK_MODEL_ALIASES = {
 REASONING_EFFORTS = {"low", "medium", "high", "max", "xhigh"}
 DEEPSEEK_API_KEYS_URL = "https://platform.deepseek.com/api_keys"
 DEEPSEEK_DOCS_URL = "https://api-docs.deepseek.com/"
+
+STARTUP_LOGO = "── A E R O L Y T I C A ──"
 
 _CONFIRM_ACTION_LABELS = {
     "delete_file": "删除文件",
@@ -840,8 +843,17 @@ class CompactSummaryBlock(Static):
         self.set_collapsed(not self.collapsed)
 
 
+class ChatScrollBarRender(ScrollBarRender):
+    """Scrollbar renderer that avoids font-dependent fractional block glyphs."""
+
+    VERTICAL_BARS = [" "] * 8
+
+
 class ChatScroll(VerticalScroll):
     """Chat history scroller with explicit wheel forwarding."""
+
+    def on_mount(self) -> None:
+        self.vertical_scrollbar.renderer = ChatScrollBarRender
 
     def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
         event.stop()
@@ -988,6 +1000,7 @@ class AeroApp(App):
     #chat-area {
         height: 1fr;
         padding: 1 5 1 2;
+        scrollbar-size: 1 1;
     }
 
     .startup #chat-area {
@@ -1097,7 +1110,7 @@ class AeroApp(App):
     #startup-logo {
         display: none;
         width: 100%;
-        height: 6;
+        height: 1;
         content-align: center middle;
         color: $text-muted;
         text-style: bold;
@@ -1343,19 +1356,7 @@ class AeroApp(App):
         with Horizontal(id="command-row"):
             yield ListView(id="command-list")
         with Vertical(id="input-panel"):
-            yield Static(
-                "\n".join(
-                    [
-                        "███╗   ███╗███████╗████████╗███████╗ ██████╗ ██████╗  █████╗",
-                        "████╗ ████║██╔════╝╚══██╔══╝██╔════╝██╔═══██╗██╔══██╗██╔══██╗",
-                        "██╔████╔██║█████╗     ██║   █████╗  ██║   ██║██████╔╝███████║",
-                        "██║╚██╔╝██║██╔══╝     ██║   ██╔══╝  ██║   ██║██╔══██╗██╔══██║",
-                        "██║ ╚═╝ ██║███████╗   ██║   ███████╗╚██████╔╝██║  ██║██║  ██║",
-                        "╚═╝     ╚═╝╚══════╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝",
-                    ]
-                ),
-                id="startup-logo",
-            )
+            yield Static(STARTUP_LOGO, id="startup-logo")
             with Horizontal(id="input-row"):
                 with Vertical(id="input-box"):
                     yield ChatTextArea(id="user-input", show_line_numbers=False)
@@ -3816,6 +3817,11 @@ class AeroApp(App):
 
     def _upsert_status_line(self, panel: StatusPanel, text: str) -> bool:
         if _is_replaceable_status(text):
+            if _is_completed_download_progress(text):
+                panel.lines[:] = [
+                    line for line in panel.lines if not _is_same_status_slot(line, text)
+                ]
+                return False
             for index in range(len(panel.lines) - 1, -1, -1):
                 if _is_same_status_slot(panel.lines[index], text):
                     panel.lines.pop(index)
@@ -4898,6 +4904,10 @@ def _is_replaceable_status(text: str) -> bool:
 def _is_same_status_slot(old: str, new: str) -> bool:
     old_slot = _status_progress_slot(old)
     return old_slot is not None and old_slot == _status_progress_slot(new)
+
+
+def _is_completed_download_progress(text: str) -> bool:
+    return text.startswith(("下载进度#", "下载进度 ")) and bool(re.search(r"\b100(?:\.0+)?%", text))
 
 
 def _status_progress_slot(text: str) -> str | None:

@@ -2,10 +2,45 @@ import asyncio
 
 from PIL import Image
 from textual.app import App, ComposeResult
+from textual.widgets import Static
 
-from aero.cli.main import InlineImageAttachment, AeroApp
 from aero.cli.image_widget import terminal_half_block_preview, terminal_image_preview
+from aero.cli.main import (
+    STARTUP_LOGO,
+    AeroApp,
+    ChatScroll,
+    ChatScrollBarRender,
+    InlineImageAttachment,
+)
 from aero.core.config import AeroConfig
+
+
+def test_startup_logo_uses_aerolytica_branding():
+    assert len(STARTUP_LOGO.splitlines()) == 1
+    assert max(map(len, STARTUP_LOGO.splitlines())) <= 100
+    assert "METEORA" not in STARTUP_LOGO
+    assert STARTUP_LOGO == "── A E R O L Y T I C A ──"
+
+
+def test_chat_scrollbar_uses_full_cell_glyphs():
+    assert ChatScrollBarRender.VERTICAL_BARS == [" "] * 8
+
+    class ScrollApp(App):
+        CSS = AeroApp.CSS
+
+        def compose(self) -> ComposeResult:
+            with ChatScroll(id="chat-area"):
+                for index in range(100):
+                    yield Static(str(index))
+
+    async def check_renderer():
+        app = ScrollApp()
+        async with app.run_test(size=(80, 20)):
+            scroll = app.query_one(ChatScroll)
+            assert scroll.vertical_scrollbar.renderer is ChatScrollBarRender
+            assert scroll.styles.scrollbar_size_vertical == 1
+
+    asyncio.run(check_renderer())
 
 
 def test_inline_image_paths_and_attachment_indexes(tmp_path, monkeypatch):
