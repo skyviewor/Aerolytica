@@ -20,6 +20,87 @@ FORECAST_DATASET_ID = "cams-global-atmospheric-composition-forecasts"
 
 
 @register_tool(
+    name="get_cams_latest_forecast_cycle",
+    description=(
+        "通过 ADS 请求校验接口查询 CAMS 全球大气成分预报最新实际可下载的起报日期和时次，"
+        "只校验请求、不创建下载任务。"
+        "用户要求今天、当前或最新 CAMS 预报时，必须先调用本工具，再用返回的 "
+        "recommended_download_args 替换起报日期和时次，同时保留用户要求的变量和预报时效；"
+        "不要根据当前日期猜测起报时次。"
+        "远端查询失败时，才依据 CAMS 官方保证发布时间保守回退。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "reference_time_utc": {
+                "type": "string",
+                "description": (
+                    "可选参考时间，ISO 8601 UTC，例如 2026-06-13T03:25:00Z。"
+                    "通常不传，默认使用当前 UTC 时间。"
+                ),
+            },
+        },
+        "additionalProperties": False,
+    },
+)
+async def get_cams_latest_forecast_cycle(reference_time_utc: str = "") -> dict:
+    """Return the latest CAMS forecast cycle guaranteed available in ADS."""
+    from datetime import datetime
+
+    from aero.data.cams_availability import get_latest_available_cams_forecast_cycle
+
+    try:
+        reference = (
+            datetime.fromisoformat(reference_time_utc.replace("Z", "+00:00"))
+            if reference_time_utc
+            else None
+        )
+        availability = await get_latest_available_cams_forecast_cycle(reference)
+    except ValueError:
+        return {
+            "status": "error",
+            "message": "reference_time_utc 必须使用 ISO 8601 时间格式，例如 2026-06-13T03:25:00Z。",
+        }
+
+    latest = availability["latest_available"]
+    newer = [
+        item
+        for item in availability["newer_not_yet_guaranteed"]
+        if item["run_time_utc"] > latest["run_time_utc"]
+    ]
+    basis = availability["availability_basis"]
+    if basis == "ads_costing_api":
+        message = f"ADS 已确认 CAMS 最新可下载的起报时次是 {latest['date']} {latest['cycle']}Z。"
+    else:
+        message = (
+            f"ADS 实时查询失败；按官方保证发布时间，CAMS 最新保证可下载的起报时次是 "
+            f"{latest['date']} {latest['cycle']}Z。"
+        )
+    if newer:
+        pending = newer[0]
+        message += (
+            f" 更近的 {pending['date']} {pending['cycle']}Z 尚未到官方保证发布时间 "
+            f"{pending['guaranteed_available_at_utc']}。"
+        )
+    return {
+        "status": "success",
+        "message": message,
+        **availability,
+        "recommended_download_args": {
+            "dataset_id": FORECAST_DATASET_ID,
+            "start_date": latest["date"],
+            "end_date": latest["date"],
+            "times": [f"{latest['cycle']}:00"],
+        },
+        "download_hint": (
+            "把 recommended_download_args 与用户原本要求的 variables、leadtime_hours、"
+            "area 和 data_format 合并后调用 CAMS 下载；只替换起报日期和时次。"
+        ),
+        "references": _references(FORECAST_DATASET_ID),
+    }
+
+
+@register_tool(
     name="search_cams_variables",
     description=(
         "查询 CAMS ADS 数据集的可下载变量名。下载 CAMS 前如果变量不确定，"
@@ -433,7 +514,7 @@ def _cams_submit_error_response(dataset_id: str, exc: Exception) -> dict:
     references = _references(dataset_id)
 
     if _looks_like_request_schema_error(lower_error):
-        return {
+        response = {
             "status": "error",
             "message": (
                 "CAMS ADS 提交失败：请求参数不被该数据集接受。"
@@ -442,6 +523,19 @@ def _cams_submit_error_response(dataset_id: str, exc: Exception) -> dict:
             ),
             "references": references,
         }
+        if dataset_id == FORECAST_DATASET_ID:
+            response.update(
+                {
+                    "retry_same_request": False,
+                    "suggested_tool": "get_cams_latest_forecast_cycle",
+                    "suggested_args": {},
+                }
+            )
+            response["message"] += (
+                " 如果请求的是今天、当前或最新预报，请先查询最新保证可下载的起报时次，"
+                "不要重复提交相同请求。"
+            )
+        return response
 
     if _looks_like_terms_or_auth_error(lower_error):
         terms_url = _dataset_download_url(dataset_id)

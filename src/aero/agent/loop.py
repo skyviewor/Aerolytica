@@ -241,6 +241,7 @@ _TOOL_NAME_REPLACEMENTS = {
     "inspect_grib2": "查看 GRIB2 文件详情",
     "search_cds_variables": "查询可用变量",
     "search_cams_variables": "查询 CAMS 变量",
+    "get_cams_latest_forecast_cycle": "查询 CAMS 最新可用起报",
     "download_gfs": "下载 GFS 预报数据",
     "get_gfs_forecast_schedule": "解析 GFS 预报时效",
     "check_gfs_availability": "检查 GFS 可用时次",
@@ -320,6 +321,11 @@ _TOOL_PROGRESS_MESSAGES = {
         "正在查询 CAMS 可用变量",
         "CAMS 可用变量查询完成",
         "查询 CAMS 可用变量失败",
+    ),
+    "get_cams_latest_forecast_cycle": (
+        "正在查询 CAMS 最新可用起报",
+        "CAMS 最新可用起报查询完成",
+        "查询 CAMS 最新可用起报失败",
     ),
     "download_gfs": (
         "准备下载 GFS 预报数据",
@@ -1556,6 +1562,7 @@ def _tool_start_message(tool_name: str) -> str:
     messages = {
         "search_cds_variables": "正在查询数据变量信息...",
         "search_cams_variables": "正在查询 CAMS 可用变量...",
+        "get_cams_latest_forecast_cycle": "正在查询 CAMS 最新可用起报...",
         "search_gfs_variables": "正在查询 GFS 可用要素...",
         "lookup_gfs_parameter": "正在查阅 GFS 要素定义...",
         "check_gfs_availability": "正在检查 GFS 可用时次...",
@@ -1603,6 +1610,7 @@ def _tool_done_message(tool_name: str) -> str:
     messages = {
         "search_cds_variables": "数据变量信息查询完成",
         "search_cams_variables": "CAMS 可用变量查询完成",
+        "get_cams_latest_forecast_cycle": "CAMS 最新可用起报查询完成",
         "search_gfs_variables": "GFS 可用要素查询完成",
         "lookup_gfs_parameter": "GFS 要素定义查询完成",
         "check_gfs_availability": "GFS 可用时次检查完成",
@@ -1655,6 +1663,7 @@ def _tool_error_prefix(tool_name: str) -> str:
         "retry_download": "下载任务重试失败",
         "search_cds_variables": "数据变量信息查询失败",
         "search_cams_variables": "CAMS 可用变量查询失败",
+        "get_cams_latest_forecast_cycle": "CAMS 最新可用起报查询失败",
         "search_gfs_variables": "GFS 可用要素查询失败",
         "lookup_gfs_parameter": "GFS 要素定义查询失败",
         "check_gfs_availability": "GFS 可用时次检查失败",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -12,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from aero.core.network_region import apply_package_mirrors, detect_network_region
+
 ENV_NAME = "aero-agent"
 CONDA_ENVIRONMENT_FILE = Path(__file__).with_name("environment.yaml")
 PIP_REQUIREMENTS_FILE = Path(__file__).with_name("env-requirements.txt")
@@ -19,6 +22,11 @@ PIP_REQUIREMENTS_FILE = Path(__file__).with_name("env-requirements.txt")
 
 def setup_runtime() -> bool:
     """Ensure conda, the managed environment, mamba, and optional common packages."""
+    region = detect_network_region()
+    if region == "mainland_china":
+        print("检测到中国大陆网络，pip 和 conda/mamba 将使用大陆镜像。")
+    else:
+        print("检测到全球网络，pip 和 conda/mamba 将使用默认软件源。")
     conda = find_conda()
     if conda is None:
         if not _confirm("未找到 conda。是否安装 Miniconda？[Y/n] ", default=True):
@@ -257,7 +265,14 @@ def _confirm(prompt: str, *, default: bool) -> bool:
 
 
 def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=apply_package_mirrors(dict(os.environ)),
+    )
 
 
 def _print_command_error(message: str, result: subprocess.CompletedProcess[str]) -> None:

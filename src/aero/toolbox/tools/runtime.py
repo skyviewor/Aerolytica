@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from aero.agent.runtime import _conda_roots
+from aero.core.network_region import detect_network_region
 from aero.toolbox.paths import find_project_dir
 from aero.toolbox.registry import register_tool
 from aero.toolbox.runtime_manager import get_runtime_tool_manager
@@ -55,6 +56,8 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
         }
 
     env = Runtime._build_exec_env()
+    if detect_network_region() == "mainland_china":
+        emit_progress("检测到中国大陆网络，将使用大陆 conda/mamba 镜像")
     ready, missing, verified = manager.tools_ready(requested, env)
     if ready:
         emit_progress("运行时工具已安装并通过验证，无需重复安装")

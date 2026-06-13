@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
+import signal
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -95,6 +97,52 @@ def run_command(
     )
 
 
+async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (AttributeError, ProcessLookupError):
+        process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=1)
+    except TimeoutError:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (AttributeError, ProcessLookupError):
+            process.kill()
+        await process.wait()
+
+
+async def _run_command_async(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.CancelledError:
+        await _terminate_process_group(process)
+        raise
+    except TimeoutError as exc:
+        await _terminate_process_group(process)
+        raise subprocess.TimeoutExpired(cmd, timeout) from exc
+    return subprocess.CompletedProcess(
+        cmd,
+        process.returncode,
+        stdout=stdout.decode(errors="replace"),
+        stderr=stderr.decode(errors="replace"),
+    )
+
+
 class RuntimeToolManager:
     """Discover and install CLI tools in the managed aero-agent environment."""
 
@@ -169,6 +217,8 @@ class RuntimeToolManager:
         env: dict[str, str],
         timeout: int,
     ) -> subprocess.CompletedProcess:
+        if self.command_runner is run_command:
+            return await _run_command_async(cmd, env=env, timeout=timeout)
         return await asyncio.to_thread(self.command_runner, cmd, env=env, timeout=timeout)
 
 

@@ -67,7 +67,7 @@ def _intl_prompt(
 - Tool/function names are internal implementation details.
   Never expose names such as download_era5, check_era5_availability, subset_netcdf, data_source, inspect_nc, inspect_grib2, search_cds_variables,
    download_gfs, get_gfs_forecast_schedule, check_gfs_availability, inspect_gfs_inventory,
-   download_cams, check_ads_config, configure_ads_key,
+   download_cams, get_cams_latest_forecast_cycle, check_ads_config, configure_ads_key,
    search_gfs_variables, lookup_gfs_parameter,
    download_gefs, get_gefs_forecast_schedule, check_gefs_availability,
    search_gefs_variables, lookup_gefs_parameter,
@@ -186,6 +186,9 @@ def _intl_prompt(
     `total_column_ozone` is column ozone, while `ozone` is a multi-level field.
     If download_cams reports an unknown or ambiguous variable, do not inspect ADS
     pages with run_shell/curl/head/grep; query CAMS variables and retry the tool.
+    When the user requests today's, current, or latest CAMS forecast, call
+    get_cams_latest_forecast_cycle first and use its recommended date and cycle.
+    Do not assume the current day's 00Z or 12Z run is already available in ADS.
     If a CAMS ADS submission fails, do not write your own cdsapi/urllib/requests
     downloader. Fix the dedicated tool parameters or report the tool error.
 12. When the user asks for an accurate meteorological parameter definition, unit,
@@ -336,6 +339,7 @@ def _zh_prompt(
 - 工具名/函数名是内部实现细节，给用户的回复里不要暴露 download_era5、check_era5_availability、subset_netcdf、data_source、inspect_nc、inspect_grib2、
   search_cds_variables、download_gfs、get_gfs_forecast_schedule、inspect_gfs_inventory、
   search_gfs_variables、lookup_gfs_parameter、check_gfs_availability、
+  download_cams、get_cams_latest_forecast_cycle、check_ads_config、configure_ads_key、
   download_gefs、get_gefs_forecast_schedule、check_gefs_availability、
   search_gefs_variables、lookup_gefs_parameter、
   download_ifs、get_ifs_forecast_schedule、check_ifs_availability、search_ifs_variables、ensure_runtime_tools、
@@ -446,6 +450,8 @@ def _zh_prompt(
     常见歧义：`total_column_ozone` 是臭氧柱总量，`ozone` 是多层臭氧变量。
     如果 download_cams 返回变量未知或不明确，不要用 run_shell/curl/head/grep 查看 ADS 网页；
     必须查询 CAMS 变量后重试下载工具。
+    用户要求今天、当前或最新 CAMS 预报时，必须先调用 get_cams_latest_forecast_cycle，
+    使用其推荐的起报日期和时次；不要假设当天 00Z 或 12Z 已经在 ADS 中可用。
     如果 CAMS ADS 提交失败，不要自己写 cdsapi/urllib/requests 下载脚本；
     只能修正专用工具参数或向用户报告工具错误。
 12. 用户询问某个气象要素的准确含义、单位、paramId、shortName、GRIB 定义、

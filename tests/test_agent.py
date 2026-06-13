@@ -152,6 +152,7 @@ def test_build_system_prompt():
     assert "只要用户明确说“打开图片 / 打开这张图 / 帮我打开图”等自然表达" in prompt
     assert "但即使调用了 `preview_image`" in prompt
     assert "不要用 run_shell/curl/head/grep 查看 ADS 网页" in prompt
+    assert "必须先调用 get_cams_latest_forecast_cycle" in prompt
     assert "不要自己写 cdsapi/urllib/requests 下载脚本" in prompt
     assert "figures/precip_2023.png" in prompt
     assert "data/precip_2023.png" not in prompt

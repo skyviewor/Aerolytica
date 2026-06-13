@@ -13,6 +13,7 @@ from pathlib import Path
 import structlog
 
 from aero.core.debug_log import debug_exception, debug_log
+from aero.core.network_region import apply_package_mirrors
 
 logger = structlog.get_logger()
 
@@ -378,7 +379,7 @@ class Runtime:
 
     @staticmethod
     def _build_exec_env() -> dict:
-        env = os.environ.copy()
+        env = apply_package_mirrors(os.environ.copy())
         env.pop("PYTHONHOME", None)
         env.pop("PIXI_IN_SHELL", None)
         path_parts: list[str] = []

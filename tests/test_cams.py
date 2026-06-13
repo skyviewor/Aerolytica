@@ -1,7 +1,8 @@
 """Tests for CAMS ADS tools."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
+import httpx
 import pytest
 
 from aero.toolbox.tools.cams import (
@@ -10,6 +11,7 @@ from aero.toolbox.tools.cams import (
     _build_cams_request,
     _dest_path,
     download_cams,
+    get_cams_latest_forecast_cycle,
     search_cams_variables,
 )
 
@@ -87,6 +89,92 @@ def test_build_forecast_request_adds_type_and_leadtime():
     assert request["leadtime_hour"] == ["0", "24", "48"]
     assert request["pressure_level"] == ["850", "500"]
     assert request["data_format"] == "grib"
+
+
+def test_latest_guaranteed_cams_cycle_before_00z_publication_is_previous_12z():
+    from aero.data.cams_availability import latest_guaranteed_cams_forecast_cycle
+
+    result = latest_guaranteed_cams_forecast_cycle(
+        datetime(2026, 6, 13, 3, 25, tzinfo=timezone.utc)
+    )
+
+    assert result["latest_guaranteed"]["date"] == "2026-06-12"
+    assert result["latest_guaranteed"]["cycle"] == "12"
+    assert result["newer_not_yet_guaranteed"][0]["date"] == "2026-06-13"
+    assert result["newer_not_yet_guaranteed"][0]["cycle"] == "00"
+
+
+def test_latest_guaranteed_cams_cycle_after_12z_publication_is_current_12z():
+    from aero.data.cams_availability import latest_guaranteed_cams_forecast_cycle
+
+    result = latest_guaranteed_cams_forecast_cycle(
+        datetime(2026, 6, 13, 23, 0, tzinfo=timezone.utc)
+    )
+
+    assert result["latest_guaranteed"]["date"] == "2026-06-13"
+    assert result["latest_guaranteed"]["cycle"] == "12"
+    assert result["newer_not_yet_guaranteed"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_cams_latest_forecast_cycle_returns_download_args(monkeypatch):
+    from aero.data import cams_availability
+
+    async def fake_latest(reference):
+        schedule = cams_availability.latest_guaranteed_cams_forecast_cycle(reference)
+        return {
+            **schedule,
+            "latest_available": {
+                "date": "2026-06-13",
+                "cycle": "00",
+                "run_time_utc": "2026-06-13T00:00:00Z",
+            },
+            "availability_basis": "ads_costing_api",
+            "actual_ads_probe_performed": True,
+            "checks": [],
+        }
+
+    monkeypatch.setattr(cams_availability, "get_latest_available_cams_forecast_cycle", fake_latest)
+    result = await get_cams_latest_forecast_cycle("2026-06-13T15:00:00Z")
+
+    assert result["status"] == "success"
+    assert result["latest_guaranteed"]["date"] == "2026-06-13"
+    assert result["latest_guaranteed"]["cycle"] == "00"
+    assert result["recommended_download_args"] == {
+        "dataset_id": FORECAST_DATASET_ID,
+        "start_date": "2026-06-13",
+        "end_date": "2026-06-13",
+        "times": ["00:00"],
+    }
+    assert result["newer_not_yet_guaranteed"][0]["cycle"] == "12"
+
+
+@pytest.mark.asyncio
+async def test_cams_latest_cycle_probe_uses_ads_validation_without_downloading():
+    from aero.data.cams_availability import get_latest_available_cams_forecast_cycle
+
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = request.content.decode()
+        if "2026-06-13/2026-06-13" in body:
+            return httpx.Response(
+                200,
+                json={"request_is_valid": False, "invalid_reason": "not available"},
+            )
+        return httpx.Response(200, json={"id": "size", "cost": 1.0, "limit": 10000.0})
+
+    result = await get_latest_available_cams_forecast_cycle(
+        datetime(2026, 6, 13, 3, 25, tzinfo=timezone.utc),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result["latest_available"]["date"] == "2026-06-12"
+    assert result["latest_available"]["cycle"] == "12"
+    assert result["availability_basis"] == "ads_costing_api"
+    assert len(requests) == 2
+    assert all(request.url.path.endswith("/costing") for request in requests)
 
 
 def test_cams_dest_path_sanitizes_filename_parts(tmp_path, monkeypatch):
@@ -356,3 +444,32 @@ async def test_download_cams_schema_error_does_not_claim_terms(tmp_path, monkeyp
     assert "product_type" in result["message"]
     assert "Terms of Use" not in result["message"]
     assert "terms_url" not in result
+
+
+@pytest.mark.asyncio
+async def test_forecast_schema_error_suggests_latest_cycle_query(tmp_path, monkeypatch):
+    from aero.adapters.cds_adapter import CDSAdapter
+    from aero.core.config import save_ads_credentials
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+    (tmp_path / "aero.yaml").write_text("output:\n  data_dir: data\n")
+    save_ads_credentials("https://ads.atmosphere.copernicus.eu/api", "ads-token")
+
+    async def fake_submit(self, **kwargs):
+        raise RuntimeError("400 Client Error: Bad Request\ninvalid request")
+
+    monkeypatch.setattr(CDSAdapter, "submit", fake_submit)
+
+    result = await download_cams(
+        dataset_id=FORECAST_DATASET_ID,
+        variables=["particulate_matter_2.5um"],
+        start_date="2026-06-13",
+        end_date="2026-06-13",
+        times=["00:00"],
+        leadtime_hours=[24],
+    )
+
+    assert result["status"] == "error"
+    assert result["retry_same_request"] is False
+    assert result["suggested_tool"] == "get_cams_latest_forecast_cycle"

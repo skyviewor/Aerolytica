@@ -98,7 +98,11 @@ from aero.toolbox.tools.era5 import (
     check_era5_availability,
     download_era5,
 )
-from aero.toolbox.tools.cams import download_cams, search_cams_variables
+from aero.toolbox.tools.cams import (
+    download_cams,
+    get_cams_latest_forecast_cycle,
+    search_cams_variables,
+)
 from aero.toolbox.tools.gfs import (
     check_gfs_availability,
     download_gfs,
@@ -176,6 +180,7 @@ __all__ = [
     "download_literature_pdf",
     "edit_file",
     "get_gefs_forecast_schedule",
+    "get_cams_latest_forecast_cycle",
     "get_gfs_forecast_schedule",
     "get_ifs_forecast_schedule",
     "get_max_tool_rounds",

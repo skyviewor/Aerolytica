@@ -14,6 +14,37 @@ banner(){ echo -e "${BOLD}${CYAN}$*${NC}"; }
 # ── Config ──────────────────────────────────────────────────────────────
 AERO_REPO="${AERO_REPO:-https://github.com/skyviewor/aero.git}"
 MINICONDA_DIR="${MINICONDA_DIR:-$HOME/miniconda3}"
+PYPI_CHINA_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
+CONDA_CHINA_CHANNEL_ALIAS="https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud"
+
+detect_network_region() {
+    case "${AERO_NETWORK_REGION:-}" in
+        cn|china|mainland|mainland_china) echo "mainland_china"; return ;;
+        global|international|overseas|non_cn) echo "global"; return ;;
+    esac
+    local country timezone
+    country="$(curl -fsS --connect-timeout 2 --max-time 3 https://api.country.is/ 2>/dev/null \
+        | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' || true)"
+    if [ "$country" = "CN" ]; then
+        echo "mainland_china"
+        return
+    elif [ -n "$country" ]; then
+        echo "global"
+        return
+    fi
+    timezone="${TZ:-$(readlink /etc/localtime 2>/dev/null || true)}"
+    case "$timezone" in
+        *Asia/Shanghai|*Asia/Chongqing|*Asia/Harbin) echo "mainland_china" ;;
+        *) echo "global" ;;
+    esac
+}
+
+NETWORK_REGION="$(detect_network_region)"
+if [ "$NETWORK_REGION" = "mainland_china" ]; then
+    export PIP_INDEX_URL="${PIP_INDEX_URL:-$PYPI_CHINA_MIRROR}"
+    export CONDA_CHANNEL_ALIAS="${CONDA_CHANNEL_ALIAS:-$CONDA_CHINA_CHANNEL_ALIAS}"
+    export MAMBA_CHANNEL_ALIAS="${MAMBA_CHANNEL_ALIAS:-$CONDA_CHINA_CHANNEL_ALIAS}"
+fi
 
 
 banner ""
@@ -47,6 +78,7 @@ case "$OS" in
         ;;
 esac
 info "检测到: ${CONDA_OS} / ${ARCH}"
+info "网络区域: ${NETWORK_REGION}"
 
 # ── Step 1: Ensure conda ────────────────────────────────────────────────
 banner ""
@@ -63,13 +95,20 @@ elif [ -f "$MINICONDA_DIR/bin/conda" ]; then
 else
     warn "未找到 conda。开始安装 Miniconda..."
 
-    MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
+    MINICONDA_OFFICIAL="https://repo.anaconda.com/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
     MINICONDA_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-${CONDA_OS}-${CONDA_ARCH}.sh"
+    if [ "$NETWORK_REGION" = "mainland_china" ]; then
+        MINICONDA_URL="$MINICONDA_MIRROR"
+        MINICONDA_FALLBACK="$MINICONDA_OFFICIAL"
+    else
+        MINICONDA_URL="$MINICONDA_OFFICIAL"
+        MINICONDA_FALLBACK="$MINICONDA_MIRROR"
+    fi
     info "下载: $MINICONDA_URL"
     INSTALLER="/tmp/miniconda-$$.sh"
     curl -fkL --progress-bar --connect-timeout 10 --max-time 300 --speed-limit 1000 --speed-time 15 "$MINICONDA_URL" -o "$INSTALLER" 2>&1 || {
-        warn "主源下载失败，尝试清华镜像..."
-        curl -fkL --progress-bar "$MINICONDA_MIRROR" -o "$INSTALLER" || {
+        warn "首选源下载失败，尝试备用源..."
+        curl -fkL --progress-bar "$MINICONDA_FALLBACK" -o "$INSTALLER" || {
             err "Miniconda 下载失败，请手动安装 conda 后重试。"
             rm -f "$INSTALLER"
             exit 1
