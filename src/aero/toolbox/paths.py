@@ -4,16 +4,8 @@ from pathlib import Path
 
 
 def find_project_dir() -> Path:
-    """Walk up from cwd to find the Aero project root."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / "aero.yaml").exists():
-            return parent
-        if (parent / "pyproject.toml").exists() and (parent / "src" / "aero").exists():
-            return parent
-        if (parent / ".git").exists() and (parent / "src" / "aero").exists():
-            return parent
-    return cwd
+    """Return the current Aero workspace directory."""
+    return Path.cwd()
 
 
 def resolve_project_path(path: str | Path) -> Path:

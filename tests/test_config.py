@@ -262,3 +262,79 @@ def test_configure_cds_key_accepts_official_two_line_format(tmp_path, monkeypatc
     assert "https://cds.climate.copernicus.eu/api" in secrets_text
     assert "ee3a913f-03e7-4c83-bbbb-ed422aa0e091" in secrets_text
     assert "ee3a913f-03e7-4c83-bbbb-ed422aa0e091" not in config_path.read_text()
+
+
+def test_configure_ads_key_accepts_token_and_keeps_it_out_of_project_config(
+    tmp_path, monkeypatch
+):
+    from aero.toolbox.builtin_tools import check_ads_config, configure_ads_key
+
+    secrets_path = tmp_path / "secrets.yaml"
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(secrets_path))
+    config_path = tmp_path / "aero.yaml"
+    AeroConfig.create_default().save(config_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = configure_ads_key("ads-token-0001")
+
+    assert result["status"] == "success"
+    assert result["url"] == "https://ads.atmosphere.copernicus.eu/api"
+    assert "ads-token-0001" in secrets_path.read_text()
+    assert "ads-token-0001" not in config_path.read_text()
+
+    loaded = AeroConfig.load(config_path)
+    assert loaded.credentials.ads.key == "ads-token-0001"
+    assert check_ads_config()["status"] == "ready"
+
+
+def test_check_ads_config_lists_direct_cams_terms_urls(tmp_path, monkeypatch):
+    from aero.toolbox.builtin_tools import check_ads_config
+
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+
+    result = check_ads_config()
+
+    assert result["status"] == "not_configured"
+    assert (
+        "https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-reanalysis-eac4?tab=download"
+    ) in result["message"]
+    assert (
+        "https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-atmospheric-composition-forecasts?tab=download"
+    ) in result["message"]
+
+
+def test_configure_earthdata_token_saves_user_secret_only(tmp_path, monkeypatch):
+    from aero.toolbox.builtin_tools import check_earthdata_config, configure_earthdata_token
+
+    secrets_path = tmp_path / "secrets.yaml"
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(secrets_path))
+    config_path = tmp_path / "aero.yaml"
+    AeroConfig.create_default().save(config_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = configure_earthdata_token("Bearer earthdata-token-0001")
+
+    assert result["status"] == "success"
+    assert result["token_masked"] == "eart...0001"
+    assert "earthdata-token-0001" in secrets_path.read_text()
+    assert "earthdata-token-0001" not in config_path.read_text()
+
+    loaded = AeroConfig.load(config_path)
+    assert loaded.credentials.earthdata.token == "earthdata-token-0001"
+    assert check_earthdata_config()["status"] == "ready"
+
+
+def test_check_earthdata_config_uses_current_profile_labels(tmp_path, monkeypatch):
+    from aero.toolbox.builtin_tools import check_earthdata_config
+
+    monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
+
+    result = check_earthdata_config()
+
+    assert result["status"] == "not_configured"
+    assert "My Profile" in result["message"]
+    assert "Access Token" in result["message"]
+    assert "Generate Token" in result["message"]
+    assert "Create Token" not in result["message"]

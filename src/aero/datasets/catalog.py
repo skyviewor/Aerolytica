@@ -129,6 +129,7 @@ def get_dataset_catalog() -> DatasetCatalog:
         from aero.datasets.providers.hrrr import HrrrProvider
         from aero.datasets.providers.jra3q import Jra3qProvider
         from aero.datasets.providers.jra55 import Jra55Provider
+        from aero.datasets.providers.merra2 import Merra2Provider
         from aero.datasets.providers.mrms import MrmsProvider
         from aero.datasets.providers.ncep_reanalysis import NcepReanalysisProvider
         from aero.datasets.providers.noaa_isd import NoaaIsdProvider
@@ -142,6 +143,7 @@ def get_dataset_catalog() -> DatasetCatalog:
                 HrrrProvider(),
                 Jra3qProvider(),
                 Jra55Provider(),
+                Merra2Provider(),
                 MrmsProvider(),
                 NcepReanalysisProvider(),
                 NoaaIsdProvider(),

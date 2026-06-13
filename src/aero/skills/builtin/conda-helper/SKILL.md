@@ -62,7 +62,7 @@ conda info --envs | grep aero-agent
 If it does not exist, create it with base conda:
 
 ```
-conda create -n aero-agent -c conda-forge python -y
+conda create -n aero-agent -c conda-forge python=3.12 -y
 ```
 
 This is the only kind of base-environment operation allowed: creating or
@@ -99,12 +99,24 @@ main environment. Proceed?
 
 **First time (aero-agent does not exist):**
 ```
-conda create -n aero-agent -c conda-forge python -y
+conda create -n aero-agent -c conda-forge python=3.12 -y
 ```
 
 **Append (aero-agent already exists):**
 ```
 ~/miniconda3/envs/aero-agent/bin/mamba install -p ~/miniconda3/envs/aero-agent -c conda-forge <package> -y
+```
+
+**pip-only Python packages:**
+```
+~/miniconda3/envs/aero-agent/bin/python -m pip install -U <package>
+```
+
+`cnmaps` is pip-only for Aero. Never install `cnmaps` with conda or mamba,
+and never include `cnmaps` in a conda/mamba package list. Use:
+
+```
+~/miniconda3/envs/aero-agent/bin/python -m pip install -U cnmaps
 ```
 
 **Multiple packages at once (avoids redundant dependency resolution):**
@@ -148,7 +160,8 @@ See `references/troubleshooting.md` for:
 - `RemoveError: platformdirs` — base env conflict, use isolated env
 - `dyld: Library not loaded` — missing dynamic library, symlink or set DYLD_LIBRARY_PATH
 - Slow conda solve — install and use mamba instead
-- pip-only packages — install via `conda run -n aero-agent pip install <pkg>`
+- pip-only packages — install via `~/miniconda3/envs/aero-agent/bin/python -m pip install -U <pkg>`
+- `cnmaps` specifically is pip-only — never install it with conda or mamba
 
 ## Platform Notes
 

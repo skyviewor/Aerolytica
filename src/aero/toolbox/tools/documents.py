@@ -53,9 +53,9 @@ async def read_pdf(file_path: str) -> dict:
 @register_tool(
     name="preview_image",
     description=(
-        "用系统默认图片查看器打开预览一张图片。当用户说'帮我打开这张图'、"
-        "'让我看看这个图'，或你生成图片后用户想查看时，直接调用此工具，"
-        "不用让用户自己输 /preview 命令。"
+        "用系统默认图片查看器打开一张图片。当用户明确说打开图片、打开这张图、"
+        "帮我打开图等自然表达时调用。生成或修改图片后，回复仍必须同时使用 "
+        "Markdown 图片语法把图片嵌入对话框；此工具不能替代对话内预览。"
     ),
     parameters={
         "type": "object",

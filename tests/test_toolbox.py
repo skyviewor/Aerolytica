@@ -127,6 +127,7 @@ def test_run_shell_description_prefers_cli_data_tools():
     assert spec is not None
     assert "下载远程文件" in spec.description
     assert "不要跳过下载工具和 CLI 直接写 Python HTTP/Range/下载脚本" in spec.description
+    assert "不要用 curl/wget/head/grep 抓网页或 API 查参数" in spec.description
     assert "curl -L -C -" in spec.description
     assert "wget -c" in spec.description
     assert "aria2c" in spec.description
@@ -279,7 +280,7 @@ async def test_ensure_runtime_tools_installs_mamba_when_missing(monkeypatch, tmp
         "-c",
         "conda-forge",
         "--override-channels",
-        "python",
+        "python=3.12",
         "-y",
     ]
     assert calls[1] == [
@@ -356,7 +357,7 @@ async def test_ensure_runtime_tools_falls_back_to_conda_when_mamba_install_fails
         "-c",
         "conda-forge",
         "--override-channels",
-        "python",
+        "python=3.12",
         "-y",
     ]
     assert calls[1] == [
@@ -624,6 +625,117 @@ async def test_run_shell_streams_stdout_to_progress():
     assert "two" in result["stdout"]
     assert any("stdout: one" in item for item in seen)
     assert any("stdout: two" in item for item in seen)
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_scraping_cams_ads_pages(monkeypatch):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    async def fail_if_called(self, *args, **kwargs):
+        raise AssertionError("run_shell should reject covered CAMS/ADS pages before execution")
+
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
+
+    result = await builtin_tools.run_shell(
+        "curl -s -L https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-atmospheric-composition-forecasts?tab=download | head -200",
+        "inspect CAMS page",
+    )
+
+    assert result["status"] == "error"
+    assert result["covered_data_source"] is True
+    assert result["suggested_tools"] == ["search_cams_variables", "download_cams"]
+    assert "不要用 run_shell/curl/wget" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_ads_url_hidden_inside_python(monkeypatch):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    async def fail_if_called(self, *args, **kwargs):
+        raise AssertionError("run_shell should reject ADS URLs before execution")
+
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
+
+    result = await builtin_tools.run_shell(
+        "python3 -c \"url='https://ads.atmosphere.copernicus.eu/api/retrieve/v1/"
+        "datasets/cams-global-atmospheric-composition-forecasts'; print(url)\"",
+        "probe ADS API",
+    )
+
+    assert result["status"] == "error"
+    assert result["covered_data_source"] is True
+    assert result["suggested_tools"] == ["search_cams_variables", "download_cams"]
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_cdsapi_download_code(monkeypatch):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    async def fail_if_called(self, *args, **kwargs):
+        raise AssertionError("run_shell should reject cdsapi download code before execution")
+
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
+
+    result = await builtin_tools.run_shell(
+        "python3 - <<'PY'\n"
+        "import cdsapi\n"
+        "client = cdsapi.Client(url='https://ads.atmosphere.copernicus.eu/api', "
+        "key='ee3a913f-03e7-4c83-a3b9-ed422aa0e091')\n"
+        "client.retrieve('cams-global-atmospheric-composition-forecasts', {})\n"
+        "PY",
+        "manual cams download",
+    )
+
+    assert result["status"] == "error"
+    assert result["covered_download_code_blocked"] is True
+    assert result["suggested_tools"] == ["download_cams", "download_era5"]
+    assert "ee3a913f" not in result["command"]
+    assert "key='***'" in result["command"]
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_urllib_download_for_covered_source(monkeypatch):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    async def fail_if_called(self, *args, **kwargs):
+        raise AssertionError("run_shell should reject urllib covered-source download")
+
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
+
+    result = await builtin_tools.run_shell(
+        "python3 -c \"import urllib.request; "
+        "urllib.request.urlopen('https://ads.atmosphere.copernicus.eu/api/retrieve/v1/"
+        "datasets/cams-global-atmospheric-composition-forecasts')\"",
+        "manual ads request",
+    )
+
+    assert result["status"] == "error"
+    assert result["covered_download_code_blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_shell_rejects_secret_file_probe(monkeypatch):
+    from aero.agent.runtime import Runtime
+    from aero.toolbox import builtin_tools
+
+    async def fail_if_called(self, *args, **kwargs):
+        raise AssertionError("run_shell should reject secret file probes before execution")
+
+    monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
+
+    result = await builtin_tools.run_shell(
+        "cat ~/.aero/secrets.yaml 2>/dev/null || cat ~/.aerolytica/secrets.yaml 2>/dev/null",
+        "inspect secret file",
+    )
+
+    assert result["status"] == "error"
+    assert result["secret_access_blocked"] is True
+    assert "check_ads_config" in result["suggested_tools"]
 
 
 @pytest.mark.asyncio

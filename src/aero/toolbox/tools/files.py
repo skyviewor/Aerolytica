@@ -35,6 +35,17 @@ from aero.toolbox.registry import register_tool
 async def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> dict:
     """Read a file or directory."""
     path = resolve_project_path(file_path)
+    if _looks_like_secret_path(path):
+        return {
+            "status": "error",
+            "secret_access_blocked": True,
+            "message": (
+                "不要直接读取 Aero 密钥文件。请使用对应配置检查工具："
+                "CAMS/ADS 用 check_ads_config，ERA5/CDS 用 check_cds_config，"
+                "MERRA-2/Earthdata 用 check_earthdata_config。"
+            ),
+            "suggested_tools": ["check_ads_config", "check_cds_config", "check_earthdata_config"],
+        }
     resolved_file_path = str(path)
     if not path.exists():
         return {"status": "error", "message": f"路径不存在: {short_path(file_path)}"}
@@ -82,6 +93,16 @@ async def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> dict:
         "offset": start + 1,
         "content": content_lines,
     }
+
+
+def _looks_like_secret_path(path: Path) -> bool:
+    parts = {part.casefold() for part in path.parts}
+    name = path.name.casefold()
+    if name in {"secrets.yaml", "secrets.yml", "keys.json"} and (
+        ".aero" in parts or ".aerolytica" in parts or "aero" in parts
+    ):
+        return True
+    return False
 
 
 @register_tool(

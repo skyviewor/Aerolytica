@@ -85,6 +85,26 @@ def test_parse_vision_model_setup_does_not_route_to_main_llm():
     assert clear is None
 
 
+def test_parse_merra2_credentials_does_not_route_to_main_llm():
+    config = AeroConfig.create_default()
+
+    setup = _parse_llm_setup_from_text("怎么配置 MERRA-2 凭证", config)
+    clear = _parse_llm_clear_from_text("清除 MERRA-2 Earthdata token")
+
+    assert setup is None
+    assert clear is None
+
+
+def test_parse_cams_ads_credentials_does_not_route_to_main_llm():
+    config = AeroConfig.create_default()
+
+    setup = _parse_llm_setup_from_text("帮我配置 CAMS ADS API key", config)
+    clear = _parse_llm_clear_from_text("清除 CAMS ADS key")
+
+    assert setup is None
+    assert clear is None
+
+
 def test_parse_full_reset_llm_intent():
     clear = _parse_llm_clear_from_text("完整重置模型 API key 和服务商")
 

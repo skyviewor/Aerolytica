@@ -124,9 +124,29 @@ async def describe_dataset(dataset_id: str) -> dict:
     },
 )
 async def search_dataset_variables(dataset_id: str, query: str = "") -> dict:
+    from aero.data.cams_variables import DATASETS as CAMS_DATASETS
+    from aero.data.cams_variables import get_cams_variables, search_cams_variables
     from aero.datasets import get_dataset_catalog
 
     try:
+        if dataset_id in CAMS_DATASETS:
+            variables = search_cams_variables(
+                await get_cams_variables(dataset_id),
+                query=query,
+            )
+            return {
+                "status": "success",
+                "dataset_id": dataset_id,
+                "query": query,
+                "count": len(variables),
+                "variables": [
+                    (
+                        f"{item['name']}: {item['label']} "
+                        f"({item['level_type']} level)"
+                    )
+                    for item in variables
+                ],
+            }
         variables = await get_dataset_catalog().search_variables(dataset_id, query)
     except (ValueError, OSError, RuntimeError, httpx.HTTPError) as exc:
         return {"status": "error", "message": f"数据集变量查询失败：{exc}"}

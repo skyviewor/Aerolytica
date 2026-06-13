@@ -9,7 +9,7 @@ if conda info --envs 2>/dev/null | grep -q aero-agent; then
     conda install -n aero-agent -c conda-forge nco -y
 else
     echo "Creating aero-agent and installing NCO..."
-    conda create -n aero-agent -c conda-forge nco -y
+    conda create -n aero-agent -c conda-forge python=3.12 nco -y
 fi
 
 echo ""

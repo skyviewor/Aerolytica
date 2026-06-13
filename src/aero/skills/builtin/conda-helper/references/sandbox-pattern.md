@@ -19,7 +19,7 @@ conda info --envs | grep aero-agent
 
 **First time (env does not exist):**
 ```bash
-conda create -n aero-agent -c conda-forge <package> -y
+conda create -n aero-agent -c conda-forge python=3.12 -y
 ```
 
 **Append (env already exists):**
@@ -31,6 +31,19 @@ conda install -n aero-agent -c conda-forge <package> -y
 ```bash
 conda install -n aero-agent -c conda-forge nco cdo eccodes -y
 ```
+
+**pip-only Python packages:**
+```bash
+~/miniconda3/envs/aero-agent/bin/python -m pip install -U <package>
+```
+
+`cnmaps` must always be installed with pip:
+```bash
+~/miniconda3/envs/aero-agent/bin/python -m pip install -U cnmaps
+```
+
+Do not install `cnmaps` with `conda`, `mamba`, or include it in conda/mamba
+batch install commands.
 
 ### 3. Symlink to PATH
 

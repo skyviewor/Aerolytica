@@ -24,10 +24,16 @@ from aero.toolbox.tools.datasets import (
     search_datasets,
 )
 from aero.toolbox.tools.configuration import (
+    check_ads_config,
     check_cds_config,
+    check_earthdata_config,
+    clear_ads_config,
     clear_cds_config,
+    clear_earthdata_config,
     clear_llm_config,
+    configure_ads_key,
     configure_cds_key,
+    configure_earthdata_token,
     configure_llm_provider,
     list_llm_providers,
 )
@@ -92,6 +98,7 @@ from aero.toolbox.tools.era5 import (
     check_era5_availability,
     download_era5,
 )
+from aero.toolbox.tools.cams import download_cams, search_cams_variables
 from aero.toolbox.tools.gfs import (
     check_gfs_availability,
     download_gfs,
@@ -135,9 +142,13 @@ from aero.toolbox.tools.tool_rounds import get_max_tool_rounds, set_max_tool_rou
 
 __all__ = [
     "cancel_sub_agent",
+    "check_ads_config",
     "check_cds_config",
+    "check_earthdata_config",
     "clear_instructions",
+    "clear_ads_config",
     "clear_cds_config",
+    "clear_earthdata_config",
     "clear_llm_config",
     "cleanup_downloads",
     "check_email_config",
@@ -145,13 +156,16 @@ __all__ = [
     "check_gefs_availability",
     "check_gfs_availability",
     "check_ifs_availability",
+    "configure_ads_key",
     "configure_email_config",
     "configure_cds_key",
+    "configure_earthdata_token",
     "configure_llm_provider",
     "configure_vision_model",
     "describe_dataset",
     "describe_cds_dataset",
     "download_era5",
+    "download_cams",
     "download_gefs",
     "download_gfs",
     "download_ifs",
@@ -188,6 +202,7 @@ __all__ = [
     "record_instruction",
     "save_literature",
     "search_cds_variables",
+    "search_cams_variables",
     "search_datasets",
     "search_gefs_variables",
     "search_gfs_variables",

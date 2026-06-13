@@ -144,15 +144,10 @@ async def _check_cds(
     try:
         from aero.core.config import AeroConfig
 
-        config_path: Path | None = None
         cwd = Path.cwd()
-        for parent in [cwd, *cwd.parents]:
-            candidate = parent / "aero.yaml"
-            if candidate.exists():
-                config_path = candidate
-                break
+        config_path = cwd / "aero.yaml"
 
-        if config_path is None:
+        if not config_path.exists():
             return ERA5SourceStatus(
                 source="cds",
                 available=False,

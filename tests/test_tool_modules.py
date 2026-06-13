@@ -63,3 +63,13 @@ def test_migrated_tools_are_registered():
     registry = get_registry()
     for name in MIGRATED_TOOLS:
         assert registry.get(name) is not None
+
+
+def test_preview_image_tool_description_requires_inline_image_too():
+    tool = get_registry().get("preview_image")
+
+    assert tool is not None
+    assert "明确说打开图片" in tool.description
+    assert "Markdown 图片语法" in tool.description
+    assert "嵌入对话框" in tool.description
+    assert "不能替代对话内预览" in tool.description

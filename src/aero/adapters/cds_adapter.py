@@ -36,6 +36,7 @@ class CDSAdapter:
         area: list[float] | None = None,
         data_format: str = "netcdf",
         request_overrides: dict | None = None,
+        dest_path: Path | None = None,
         *,
         on_submitted: Callable[[str, str, Path], None] | None = None,
         on_request_id: Callable[[str, Path], None] | None = None,
@@ -50,8 +51,15 @@ class CDSAdapter:
         if data_format not in ("netcdf", "grib"):
             raise ValueError(f"不支持的格式: {data_format}，仅支持 netcdf 和 grib")
 
-        dest_path = self._build_dest_path(dataset_id, variables, year, month, day,
-                                           pressure_level, data_format)
+        dest_path = dest_path or self._build_dest_path(
+            dataset_id,
+            variables,
+            year,
+            month,
+            day,
+            pressure_level,
+            data_format,
+        )
         request = self._build_request(dataset_id, variables, year, month, day,
                                       pressure_level, area, data_format, request_overrides)
         if cancel_requested():
@@ -198,7 +206,7 @@ class CDSAdapter:
             request_overrides=request_overrides,
         )
 
-        file_size = await self.fetch(
+        await self.fetch(
             download_url=meta["download_url"],
             dest_path=meta["dest_path"],
             on_progress=on_progress,
@@ -256,12 +264,15 @@ class CDSAdapter:
                 request["day"] = days
                 request["time"] = [f"{h:02d}:00" for h in range(0, 24)]
 
-        request["variable"] = variables
-        request["year"] = [str(year)]
-        request["month"] = [f"{month:02d}"]
-        if pressure_level:
+        if "variable" not in request:
+            request["variable"] = variables
+        if "year" not in request and "date" not in request:
+            request["year"] = [str(year)]
+        if "month" not in request and "date" not in request:
+            request["month"] = [f"{month:02d}"]
+        if pressure_level and "pressure_level" not in request:
             request["pressure_level"] = [str(pressure_level)]
-        if area:
+        if area and "area" not in request:
             request["area"] = area
         return request
 
@@ -376,14 +387,9 @@ class CDSAdapter:
 def config_output_dir() -> Path:
     from pathlib import Path as _Path
     cwd = _Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        config_path = parent / "aero.yaml"
-        if config_path.exists():
-            from aero.core.config import AeroConfig
-            cfg = AeroConfig.load(config_path)
-            return parent / cfg.output.data_dir
     from aero.core.config import AeroConfig
-    cfg = AeroConfig.create_default()
+    config_path = cwd / "aero.yaml"
+    cfg = AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
     return cwd / cfg.output.data_dir
 
 
@@ -500,8 +506,9 @@ def _normalize_downloaded_file(dest_path: Path) -> None:
         shutil.rmtree(extract_dir)
         return
 
-    if any(_is_grib(f) for f in data_files):
-        shutil.move(str(data_files[0]), dest_path)
+    grib_files = [path for path in data_files if _is_grib(path)]
+    if grib_files:
+        shutil.move(str(grib_files[0]), dest_path)
         shutil.rmtree(extract_dir)
         return
 

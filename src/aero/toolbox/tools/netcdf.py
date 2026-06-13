@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from aero.toolbox.paths import short_path
+from aero.toolbox.paths import resolve_project_path, short_path
 from aero.toolbox.registry import register_tool
 
 
@@ -27,9 +27,9 @@ async def inspect_nc(file_path: str) -> dict:
     """Inspect a local NetCDF file and return its metadata."""
     import xarray as xr
 
-    path = Path(file_path)
+    path = resolve_project_path(file_path)
     if not path.exists():
-        return {"status": "error", "message": f"文件不存在: {short_path(file_path)}"}
+        return {"status": "error", "message": f"文件不存在: {short_path(path)}"}
 
     try:
         ds = xr.open_dataset(path)
@@ -134,8 +134,8 @@ async def subset_netcdf(
     """Subset a local NetCDF file by time, area, and variables."""
     try:
         result = _subset_netcdf_file(
-            input_path=Path(input_path),
-            output_path=Path(output_path) if output_path else None,
+            input_path=resolve_project_path(input_path),
+            output_path=resolve_project_path(output_path) if output_path else None,
             start_time=start_time,
             end_time=end_time,
             area=area,
@@ -162,12 +162,12 @@ def _subset_netcdf_file(
 ) -> dict:
     import xarray as xr
 
-    input_path = Path(input_path)
+    input_path = resolve_project_path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"文件不存在: {short_path(input_path)}")
     if output_path is None:
         output_path = input_path.with_name(f"{input_path.stem}_subset{input_path.suffix}")
-    output_path = Path(output_path)
+    output_path = resolve_project_path(output_path)
     if output_path.resolve() == input_path.resolve():
         raise ValueError("输出文件不能覆盖输入文件，请指定新的 output_path")
     if output_path.exists() and not overwrite:

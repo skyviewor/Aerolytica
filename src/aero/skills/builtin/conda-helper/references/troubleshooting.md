@@ -9,7 +9,7 @@
 **Fix**: Do NOT repair base. Use an isolated environment instead:
 
 ```bash
-conda create -n aero-agent -c conda-forge <package> -y
+conda create -n aero-agent -c conda-forge python=3.12 -y
 ```
 
 Isolated environments are immune to base environment issues.
@@ -40,7 +40,7 @@ export DYLD_LIBRARY_PATH=~/miniconda3/envs/aero-agent/lib:$DYLD_LIBRARY_PATH
 **Fix**: Use mamba instead (much faster dependency resolution):
 
 ```bash
-conda create -n aero-agent -c conda-forge python -y
+conda create -n aero-agent -c conda-forge python=3.12 -y
 conda install -n aero-agent -c conda-forge mamba -y
 ~/miniconda3/envs/aero-agent/bin/mamba install -p ~/miniconda3/envs/aero-agent -c conda-forge <package> -y
 ```
@@ -50,8 +50,10 @@ conda install -n aero-agent -c conda-forge mamba -y
 Some tools are only available via pip. They can also be installed into the aero-agent sandbox:
 
 ```bash
-conda run -n aero-agent pip install <package>
+~/miniconda3/envs/aero-agent/bin/python -m pip install -U <package>
 ```
+
+`cnmaps` must be installed this way. Do not use conda or mamba for `cnmaps`.
 
 Then symlink the binary:
 ```bash
@@ -62,5 +64,5 @@ ln -sf ~/miniconda3/envs/aero-agent/bin/<tool> ~/miniconda3/bin/<tool>
 
 Try `conda-forge` first. If not available, try:
 - `defaults` channel: `conda install -n aero-agent <package> -y`
-- `pip`: `conda run -n aero-agent pip install <package>`
+- `pip`: `~/miniconda3/envs/aero-agent/bin/python -m pip install -U <package>`
 - System package manager: `brew install <package>` (macOS) or `apt-get install -y <package>` (Linux)

@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aero.toolbox.download_progress import format_size
-from aero.toolbox.paths import find_project_dir, short_path
+from aero.toolbox.paths import find_project_dir, resolve_project_path, short_path
 from aero.toolbox.registry import register_tool
 
 
@@ -28,11 +28,11 @@ from aero.toolbox.registry import register_tool
 )
 async def list_files(directory: str, pattern: str = "") -> dict:
     """List files in a directory, optionally filtered by extension."""
-    p = Path(directory)
+    p = resolve_project_path(directory)
     if not p.exists():
-        return {"status": "error", "message": f"目录不存在: {directory}"}
+        return {"status": "error", "message": f"目录不存在: {short_path(p)}"}
     if not p.is_dir():
-        return {"status": "error", "message": f"不是目录: {directory}"}
+        return {"status": "error", "message": f"不是目录: {short_path(p)}"}
 
     files = []
     try:

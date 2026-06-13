@@ -4066,20 +4066,14 @@ class AeroApp(App):
 
 def _load_config() -> AeroConfig:
     cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        config_path = parent / "aero.yaml"
-        if config_path.exists():
-            return AeroConfig.load(config_path)
+    config_path = cwd / "aero.yaml"
+    if config_path.exists():
+        return AeroConfig.load(config_path)
     return AeroConfig.create_default()
 
 
 def _save_config(config: AeroConfig) -> None:
     cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        config_path = parent / "aero.yaml"
-        if config_path.exists():
-            config.save(config_path)
-            return
     config.save(cwd / "aero.yaml")
 
 
@@ -4185,11 +4179,36 @@ def _mentions_email(text: str) -> bool:
     )
 
 
+def _mentions_data_credentials(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "merra",
+            "merra-2",
+            "earthdata",
+            "earth data",
+            "ges disc",
+            "gesdisc",
+            "nasa",
+            "cams",
+            "ads",
+            "atmosphere data store",
+            "cds",
+            "era5",
+            "数据源",
+            "数据集",
+        )
+    )
+
+
 def _looks_like_llm_setup_intent(text: str) -> bool:
     lowered = text.lower()
     if _mentions_vision_model(text):
         return False
     if _mentions_email(text):
+        return False
+    if _mentions_data_credentials(text):
         return False
     markers = [
         "api key",
@@ -4218,6 +4237,8 @@ def _parse_llm_clear_from_text(text: str) -> dict | None:
     if _mentions_vision_model(text):
         return None
     if _mentions_email(text):
+        return None
+    if _mentions_data_credentials(text):
         return None
     llm_markers = (
         "api key",
@@ -4915,10 +4936,6 @@ def _status_progress_slot(text: str) -> str | None:
         return text.split(" ", 1)[0]
     if text.startswith("下载进度 "):
         return "下载进度"
-    if text.startswith("stdout: "):
-        return "stdout"
-    if text.startswith("stderr: "):
-        return "stderr"
     if text.startswith("GCS ARCO ") and "，已等待 " in text:
         return text.split("，已等待 ", 1)[0]
     return None
@@ -4927,7 +4944,40 @@ def _status_progress_slot(text: str) -> str | None:
 def _display_status_line(text: str) -> str:
     if text.startswith("下载进度#") and " " in text:
         return "下载进度 " + text.split(" ", 1)[1]
+    if text.startswith("stdout: "):
+        return "命令输出：" + text.removeprefix("stdout: ")
+    if text.startswith("stderr: "):
+        content = text.removeprefix("stderr: ")
+        prefix = "错误输出：" if _stderr_line_looks_like_error(content) else "命令日志："
+        return prefix + content
     return text
+
+
+def _stderr_line_looks_like_error(text: str) -> bool:
+    line = text.strip()
+    if not line:
+        return False
+    lowered = line.lower()
+    if "download completed" in lowered:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2} .*?\b(info|debug)\b", line, flags=re.IGNORECASE):
+        return False
+    if re.search(r"\b(info|debug)\b", line, flags=re.IGNORECASE):
+        return False
+    error_markers = (
+        "traceback",
+        "exception",
+        "error",
+        "failed",
+        "failure",
+        "no such file or directory",
+        "permission denied",
+        "invalid request",
+        "bad request",
+        "command not found",
+        "not found",
+    )
+    return any(marker in lowered for marker in error_markers)
 
 
 def _normalize_confirm_choice(choice: str) -> str:

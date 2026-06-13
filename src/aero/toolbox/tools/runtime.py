@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from aero.agent.runtime import _conda_roots
 from aero.toolbox.paths import find_project_dir
@@ -91,7 +92,7 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
             "-c",
             "conda-forge",
             "--override-channels",
-            "python",
+            "python=3.12",
             "-y",
         ]
         env_create_command = " ".join(env_create_cmd)
@@ -273,15 +274,17 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
         "通常不需要手动 conda activate。"
         "凡是通过 run_shell 执行 python/python3/pip/pip3/python -m pip，都必须解析到 aero-agent；"
         "不要用 base、系统 Python 或绝对路径绕过该环境。"
-        "远程数据下载应优先用内置下载工具，内置工具覆盖不了时使用 curl、wget、aria2c "
-        "或数据源官方 CLI，不要跳过下载工具和 CLI 直接写 Python HTTP/Range/下载脚本。"
+        "远程数据下载应优先用内置下载工具；CAMS/ADS、CDS/ERA5、GFS/NOMADS/AWS 等"
+        "已有专用工具覆盖的数据源，不要用 curl/wget/head/grep 抓网页或 API 查参数。"
+        "只有内置工具完全覆盖不了的数据源，才使用 curl、wget、aria2c 或数据源官方 CLI，"
+        "不要跳过下载工具和 CLI 直接写 Python HTTP/Range/下载脚本。"
         "GRIB/GRIB2/NetCDF 的合并、转换、拼接、裁剪、平均、元数据编辑应优先使用"
         " CDO、NCO、eccodes、netcdf-c 等命令行工具；只有用户明确要求脚本、CLI 不适合，"
         "或已经尝试安装/执行 CLI 但失败时，才用 Python/cfgrib/xarray 脚本兜底。\n\n"
         "常用命令：\n"
-        "  curl -L -C - -o file.grib2 URL              断点续传下载远程文件\n"
-        "  wget -c -O file.grib2 URL                  断点续传下载远程文件\n"
-        "  aria2c -c -x 8 -s 8 -o file.grib2 URL      多连接断点续传下载\n"
+        "  curl -L -C - -o file.grib2 URL              下载未被内置工具覆盖的远程文件\n"
+        "  wget -c -O file.grib2 URL                  下载未被内置工具覆盖的远程文件\n"
+        "  aria2c -c -x 8 -s 8 -o file.grib2 URL      多连接下载未覆盖的远程文件\n"
         "  cdo -f nc copy input.grib2 output.nc        GRIB 转 NetCDF\n"
         "  cdo mergetime input*.nc output.nc           按时间合并 NetCDF\n"
         "  ncrcat input*.nc output.nc                  拼接 NetCDF 记录维\n"
@@ -330,6 +333,15 @@ async def run_shell(
     manager = get_runtime_tool_manager()
     command, workdir, context_correction = _normalize_shell_context(command, workdir)
     env = runtime._build_exec_env()
+    secrets_error = _secrets_shell_error(command)
+    if secrets_error:
+        return secrets_error
+    covered_download_code_error = _covered_download_code_shell_error(command)
+    if covered_download_code_error:
+        return covered_download_code_error
+    covered_data_error = _covered_data_shell_error(command)
+    if covered_data_error:
+        return covered_data_error
     python_error = _python_runtime_error(command, env)
     if python_error:
         return python_error
@@ -395,6 +407,150 @@ async def run_shell(
         or result.stderr_bytes > len(stderr.encode(errors="replace")),
         "duration_ms": result.duration_ms,
     }
+
+
+def _covered_download_code_shell_error(command: str) -> dict | None:
+    lowered = command.lower()
+    if "cdsapi" in lowered or "ecmwf.datastores" in lowered:
+        return {
+            "status": "error",
+            "covered_download_code_blocked": True,
+            "message": (
+                "不要用 run_shell 编写 cdsapi/ecmwf-datastores 下载代码。"
+                "CAMS/ADS 与 CDS/ERA5 下载已有专用工具封装；"
+                "请使用 download_cams 或 ERA5 下载工具。"
+            ),
+            "suggested_tools": ["download_cams", "download_era5"],
+            "command": _redact_shell_command(command),
+        }
+    if any(marker in lowered for marker in ("urllib.request", "urlopen(", "requests.post", "requests.get")):
+        urls = _shell_urls(command)
+        if any(_is_covered_data_url(url) for url in urls):
+            return {
+                "status": "error",
+                "covered_download_code_blocked": True,
+                "message": (
+                    "不要用 run_shell 编写 Python HTTP/URL 下载代码访问已覆盖的数据源。"
+                    "请使用对应专用下载工具；CAMS/ADS 用 download_cams，"
+                    "CDS/ERA5 用 ERA5 下载工具。"
+                ),
+                "suggested_tools": ["download_cams", "download_era5"],
+                "command": _redact_shell_command(command),
+            }
+    return None
+
+
+def _secrets_shell_error(command: str) -> dict | None:
+    lowered = command.lower()
+    secret_markers = (
+        ".aero/secrets.yaml",
+        ".aero/secrets.yml",
+        ".aerolytica/secrets.yaml",
+        ".aerolytica/secrets.yml",
+        ".aerolytica/keys.json",
+        "aero_secrets_path",
+        "secrets.yaml",
+        "secrets.yml",
+        "keys.json",
+    )
+    if not any(marker in lowered for marker in secret_markers):
+        return None
+    return {
+        "status": "error",
+        "secret_access_blocked": True,
+        "message": (
+            "不要用 run_shell 查找或读取 Aero 密钥文件。凭证状态属于内部配置，"
+            "请使用对应配置检查工具：CAMS/ADS 用 check_ads_config，"
+            "ERA5/CDS 用 check_cds_config，MERRA-2/Earthdata 用 check_earthdata_config。"
+        ),
+        "suggested_tools": ["check_ads_config", "check_cds_config", "check_earthdata_config"],
+        "command": _redact_shell_command(command),
+    }
+
+
+def _covered_data_shell_error(command: str) -> dict | None:
+    urls = _shell_urls(command)
+    if not urls:
+        return None
+    for url in urls:
+        if _is_ads_cams_url(url):
+            return {
+                "status": "error",
+                "covered_data_source": True,
+                "message": (
+                    "CAMS/ADS 数据源已有专用工具覆盖。不要用 run_shell/curl/wget 抓 ADS 网页或 API；"
+                    "请先调用 search_cams_variables 或 search_dataset_variables 确认变量，"
+                    "再调用 download_cams 下载。"
+                ),
+                "suggested_tools": ["search_cams_variables", "download_cams"],
+                "command": _redact_shell_command(command),
+            }
+        if _is_cds_dataset_url(url):
+            return {
+                "status": "error",
+                "covered_data_source": True,
+                "message": (
+                    "CDS/ERA5 数据源已有专用工具覆盖。不要用 run_shell/curl/wget 抓 CDS 网页；"
+                    "请使用 search_cds_variables 或 ERA5 下载工具。"
+                ),
+                "suggested_tools": ["search_cds_variables", "download_era5"],
+                "command": _redact_shell_command(command),
+            }
+    return None
+
+
+def _is_covered_data_url(url: str) -> bool:
+    return _is_ads_cams_url(url) or _is_cds_dataset_url(url)
+
+
+def _is_ads_cams_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    return host == "ads.atmosphere.copernicus.eu" and (
+        "/datasets/cams-" in path or "/api/" in path
+    )
+
+
+def _is_cds_dataset_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    return host == "cds.climate.copernicus.eu" and "/datasets" in path
+
+
+def _shell_urls(command: str) -> list[str]:
+    urls: list[str] = []
+    for match in re.finditer(r"https?://[^\s'\"<>]+", command):
+        urls.append(match.group(0).rstrip(".,;)"))
+    for part in re.split(r"(?:&&|\|\||;|\|)", command):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            words = part.split()
+        for word in words:
+            if word.startswith(("http://", "https://")):
+                urls.append(word.rstrip(".,;"))
+    return list(dict.fromkeys(urls))
+
+
+def _redact_shell_command(command: str) -> str:
+    redacted = re.sub(
+        r"(?i)(\b(?:key|api_key|token|password)\s*=\s*)['\"][^'\"]+['\"]",
+        r"\1'***'",
+        command,
+    )
+    redacted = re.sub(
+        r"(?i)(\b(?:key|api_key|token|password)\s*[:=]\s*)[^\s,'\"}]+",
+        r"\1***",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)(authorization\s*:\s*(?:bearer|token)?\s*)[^\s'\";]+",
+        r"\1***",
+        redacted,
+    )
+    return redacted
 
 
 def _python_runtime_error(command: str, env: dict[str, str]) -> dict | None:

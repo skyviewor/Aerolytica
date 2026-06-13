@@ -35,6 +35,7 @@ def test_setup_runtime_uses_existing_conda_and_installs_common_packages(
 
     assert init_runtime.setup_runtime() is True
     assert calls[0][:4] == [str(conda), "create", "-n", "aero-agent"]
+    assert "python=3.12" in calls[0]
     assert calls[1][:4] == [str(conda), "install", "-n", "aero-agent"]
     assert Path(calls[2][0]).resolve() == (env_bin / "mamba").resolve()
     assert calls[2][1:3] == ["env", "update"]
@@ -97,6 +98,17 @@ def test_common_package_files_separate_conda_and_pip_packages():
     assert "mplfonts" not in conda_packages
     assert "cnmaps" not in conda_packages
     assert pip_packages == ("mplfonts", "cnmaps")
+
+
+def test_conda_helper_documents_python_312_and_pip_only_cnmaps():
+    skill_text = (
+        Path("src/aero/skills/builtin/conda-helper/SKILL.md").read_text()
+    )
+
+    assert "python=3.12" in skill_text
+    assert "`cnmaps` is pip-only" in skill_text
+    assert "Never install `cnmaps` with conda or mamba" in skill_text
+    assert "python -m pip install -U cnmaps" in skill_text
 
 
 def test_setup_runtime_can_skip_miniconda_install(monkeypatch):

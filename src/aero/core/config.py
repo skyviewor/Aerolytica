@@ -13,8 +13,19 @@ class CDSCredentials(BaseModel):
     key: str = ""
 
 
+class ADSCredentials(BaseModel):
+    url: str = "https://ads.atmosphere.copernicus.eu/api"
+    key: str = ""
+
+
+class EarthdataCredentials(BaseModel):
+    token: str = ""
+
+
 class Credentials(BaseModel):
     cds: CDSCredentials = CDSCredentials()
+    ads: ADSCredentials = ADSCredentials()
+    earthdata: EarthdataCredentials = EarthdataCredentials()
 
 
 class LLMConfig(BaseModel):
@@ -215,6 +226,15 @@ def apply_user_secrets(config: AeroConfig) -> AeroConfig:
                 config.credentials.cds.url = str(cds["url"])
             if cds.get("key"):
                 config.credentials.cds.key = str(cds["key"])
+        ads = credentials.get("ads")
+        if isinstance(ads, dict):
+            if ads.get("url"):
+                config.credentials.ads.url = str(ads["url"])
+            if ads.get("key"):
+                config.credentials.ads.key = str(ads["key"])
+        earthdata = credentials.get("earthdata")
+        if isinstance(earthdata, dict) and earthdata.get("token"):
+            config.credentials.earthdata.token = str(earthdata["token"])
 
     vision = secrets.get("vision")
     if isinstance(vision, dict):
@@ -270,6 +290,31 @@ def clear_cds_credentials() -> None:
     save_user_secrets(secrets)
 
 
+def save_ads_credentials(url: str, key: str) -> None:
+    secrets = load_user_secrets()
+    credentials = secrets.setdefault("credentials", {})
+    credentials["ads"] = {"url": url, "key": key}
+    save_user_secrets(secrets)
+
+
+def clear_ads_credentials() -> None:
+    secrets = load_user_secrets()
+    credentials = secrets.setdefault("credentials", {})
+    credentials["ads"] = {"url": "", "key": ""}
+    save_user_secrets(secrets)
+
+
+def save_earthdata_token(token: str) -> None:
+    secrets = load_user_secrets()
+    credentials = secrets.setdefault("credentials", {})
+    credentials["earthdata"] = {"token": token}
+    save_user_secrets(secrets)
+
+
+def clear_earthdata_token() -> None:
+    save_earthdata_token("")
+
+
 def save_vision_api_key(api_key: str, base_url: str = "") -> None:
     secrets = load_user_secrets()
     vision = secrets.setdefault("vision", {})
@@ -296,6 +341,12 @@ def _remove_secrets_from_config_data(data: dict) -> None:
         cds = credentials.get("cds")
         if isinstance(cds, dict):
             cds["key"] = ""
+        ads = credentials.get("ads")
+        if isinstance(ads, dict):
+            ads["key"] = ""
+        earthdata = credentials.get("earthdata")
+        if isinstance(earthdata, dict):
+            earthdata["token"] = ""
 
     llm = data.get("llm")
     if isinstance(llm, dict):

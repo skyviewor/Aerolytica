@@ -121,7 +121,8 @@ def test_build_system_prompt():
     assert "不要依赖系统提示中的静态名单" in prompt
     assert "NCEP Reanalysis 变量优先通过统一数据集变量查询能力确认" in prompt
     assert "允许用 run_shell、源站元数据或自定义分析兜底" in prompt
-    assert "不要为 GFS/NOMADS/AWS/CDS 下载编写 Python HTTP/Range/下载脚本" in prompt
+    assert "不要为 GFS/NOMADS/AWS/CDS/CAMS/ADS 下载编写 Python HTTP/Range/下载脚本" in prompt
+    assert "不要用 `cdsapi.Client`、`urllib`、`requests`、`curl`" in prompt
     assert "curl、wget、aria2c" in prompt
     assert "必须调用 inspect_gfs_inventory" in prompt
     assert "不要用 run_shell 执行 curl/grep/head 去查看 NOMADS 或 AWS 的 `.idx` 文件" in prompt
@@ -138,6 +139,7 @@ def test_build_system_prompt():
     assert "source_url" in prompt
     assert "引用参考文献" in prompt
     assert "原样粘贴页面上的两行官方配置" in prompt
+    assert "禁止猜测、查找、cat、read_file 或用 Python 读取 Aero 密钥文件" in prompt
     assert "SST 自动换成 TMP:surface" in prompt
     assert "analyze_image" in prompt
     assert "list_figures" in prompt
@@ -146,6 +148,11 @@ def test_build_system_prompt():
     assert "当前轮没有成功调用" in prompt
     assert "禁止写任何图片/图表的视觉解读" in prompt
     assert "降水/云/要素集中在哪里" in prompt
+    assert "生成图或改图后必须把图片嵌入对话框" in prompt
+    assert "只要用户明确说“打开图片 / 打开这张图 / 帮我打开图”等自然表达" in prompt
+    assert "但即使调用了 `preview_image`" in prompt
+    assert "不要用 run_shell/curl/head/grep 查看 ADS 网页" in prompt
+    assert "不要自己写 cdsapi/urllib/requests 下载脚本" in prompt
     assert "figures/precip_2023.png" in prompt
     assert "data/precip_2023.png" not in prompt
     assert "只有一个数据源——CDS" in prompt
@@ -167,6 +174,7 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "use the unified dataset-variable query first" in prompt
     assert "using run_shell, source metadata, or custom analysis as a fallback is allowed" in prompt
     assert "Do NOT write Python HTTP/Range/download scripts" in prompt
+    assert "Do NOT use `cdsapi.Client`, `urllib`, `requests`, `curl`" in prompt
     assert "`curl`, `wget`, `aria2c`" in prompt
     assert "call inspect_gfs_inventory" in prompt
     assert "Do NOT use run_shell with" in prompt
@@ -183,6 +191,7 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "source_url" in prompt
     assert "Citing references" in prompt
     assert "official two-line configuration" in prompt
+    assert "Never inspect, guess, find, cat, read_file, or run Python against Aero secret files" in prompt
     assert "surface temperature for SST" in prompt
     assert "analyze_image" in prompt
     assert "list_figures" in prompt
@@ -191,6 +200,11 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "Without a successful `analyze_image` call in the current turn" in prompt
     assert "do not write any visual interpretation" in prompt
     assert "where precipitation/clouds/features are concentrated" in prompt
+    assert "generated or revised figures must appear inline in the chat via Markdown image syntax" in prompt
+    assert "Never omit the inline image" in prompt
+    assert "Call `preview_image` when the user explicitly asks to open the image" in prompt
+    assert "do not inspect ADS\n    pages with run_shell/curl/head/grep" in prompt
+    assert "do not write your own cdsapi/urllib/requests\n    downloader" in prompt
     assert "figures/precip_2023.png" in prompt
     assert "data/precip_2023.png" not in prompt
     assert "only ONE data source" in prompt
@@ -231,6 +245,54 @@ def test_user_facing_text_hides_internal_tool_names():
     assert "下载数据" in sanitized
 
 
+def test_user_facing_text_hides_cams_tool_and_parameter_names():
+    from aero.agent.loop import _sanitize_user_facing_text
+
+    text = (
+        "下载时通过 `download_cams` 工具，指定 `dataset_id` 为 "
+        "`cams-global-reanalysis-eac4`，选择对应变量即可。"
+    )
+
+    sanitized = _sanitize_user_facing_text(text)
+
+    assert sanitized == "下载时选择 CAMS EAC4 再分析数据集，选择对应变量即可。"
+    assert "download_cams" not in sanitized
+    assert "dataset_id" not in sanitized
+    assert "cams-global-reanalysis-eac4" not in sanitized
+
+
+def test_user_facing_text_hides_cams_tool_download_phrase():
+    from aero.agent.loop import _sanitize_user_facing_text
+
+    text = "CAMS 全球大气成分预报数据我是支持的，通过 `download_cams` 工具就能下载。"
+
+    sanitized = _sanitize_user_facing_text(text)
+
+    assert sanitized == "CAMS 全球大气成分预报数据我是支持的，我可以直接帮你下载。"
+    assert "download_cams" not in sanitized
+    assert "工具" not in sanitized
+
+
+def test_user_facing_text_does_not_corrupt_paths_or_request_keys():
+    from aero.agent.loop import _sanitize_user_facing_text
+
+    text = (
+        "正在下载 CAMS 文件："
+        "data/cams_cams-global-atmospheric-composition-forecasts_"
+        "particulate_matter_2.5um_20260612.nc\n"
+        "{'data_format': ['netcdf_zip'], "
+        "'dataset_id': 'cams-global-atmospheric-composition-forecasts'}"
+    )
+
+    sanitized = _sanitize_user_facing_text(text)
+
+    assert "data/cams_cams-global-atmospheric-composition-forecasts_" in sanitized
+    assert "data_format" in sanitized
+    assert "dataset_id" in sanitized
+    assert "CAMS 全球大气成分预报数据集_particulate" not in sanitized
+    assert "数据格式" not in sanitized
+
+
 def test_streaming_text_sanitizer_hides_split_tool_names():
     from aero.agent.loop import _StreamingTextSanitizer
 
@@ -246,6 +308,24 @@ def test_streaming_text_sanitizer_hides_split_tool_names():
 
     assert "list_literature" not in streamed
     assert "你可以让我查看所有已保存的论文" in streamed
+
+
+def test_streaming_text_sanitizer_hides_split_cams_tool_phrase():
+    from aero.agent.loop import _StreamingTextSanitizer
+
+    sanitizer = _StreamingTextSanitizer()
+    chunks = [
+        "CAMS 全球大气成分预报数据我是支持的，通过 `down",
+        "load_",
+        "cams` 工具就能下载。",
+    ]
+
+    streamed = "".join(sanitizer.push(chunk) for chunk in chunks)
+    streamed += sanitizer.flush()
+
+    assert "download_cams" not in streamed
+    assert "工具就能下载" not in streamed
+    assert "我可以直接帮你下载" in streamed
 
 
 def test_progress_text_hides_internal_tool_names():
@@ -349,6 +429,25 @@ def test_run_shell_progress_hides_missing_guessed_cd():
     )
 
     assert message == "正在执行命令：python scripts/tmp/plot.py"
+
+
+def test_run_shell_progress_redacts_inline_secrets():
+    from aero.agent.loop import _tool_progress_message
+
+    message = _tool_progress_message(
+        "run_shell",
+        "start",
+        {
+            "command": (
+                "python3 -c \"import cdsapi; cdsapi.Client("
+                "url='https://ads.atmosphere.copernicus.eu/api', "
+                "key='ee3a913f-03e7-4c83-a3b9-ed422aa0e091')\""
+            )
+        },
+    )
+
+    assert "ee3a913f" not in message
+    assert "key='***'" in message
 
 
 def test_read_only_python_comparison_does_not_need_confirmation():
@@ -471,16 +570,136 @@ def test_existing_mkdir_with_another_write_still_needs_confirmation(tmp_path):
 
 
 def test_streamed_shell_output_reuses_status_lines():
-    from aero.cli.main import _is_same_status_slot, _status_progress_slot
+    from aero.cli.main import _display_status_line, _is_same_status_slot, _status_progress_slot
 
-    assert _status_progress_slot("stdout: collecting cartopy") == "stdout"
-    assert _status_progress_slot("stderr: warning from pip") == "stderr"
-    assert _is_same_status_slot("stdout: one", "stdout: two") is True
-    assert _is_same_status_slot("stderr: one", "stderr: two") is True
+    assert _status_progress_slot("stdout: collecting cartopy") is None
+    assert _status_progress_slot("stderr: warning from pip") is None
+    assert _display_status_line("stdout: collecting cartopy") == "命令输出：collecting cartopy"
+    assert _display_status_line("stderr: warning from pip") == "命令日志：warning from pip"
+    assert _is_same_status_slot("stdout: one", "stdout: two") is False
+    assert _is_same_status_slot("stderr: one", "stderr: two") is False
     assert _is_same_status_slot("stdout: one", "stderr: two") is False
 
 
-def test_live_status_lines_stay_below_regular_progress_messages():
+def test_stderr_display_distinguishes_logs_from_errors():
+    from aero.cli.main import _display_status_line
+
+    assert _display_status_line("stderr: 2026-06-12 23:39:07,972 INFO Request ID is abc") == (
+        "命令日志：2026-06-12 23:39:07,972 INFO Request ID is abc"
+    )
+    assert _display_status_line("stderr: 2026-06-12 23:39:30,326 INFO status has been updated to running") == (
+        "命令日志：2026-06-12 23:39:30,326 INFO status has been updated to running"
+    )
+    assert _display_status_line("stderr: Download completed!") == "命令日志：Download completed!"
+    assert _display_status_line("stderr: Traceback (most recent call last):").startswith("错误输出：")
+    assert _display_status_line("stderr: /bin/bash: mamba: No such file or directory").startswith(
+        "错误输出："
+    )
+
+
+def test_reference_injection_uses_markdown_text_links():
+    from aero.agent.loop import _inject_refs_if_missing
+
+    text = _inject_refs_if_missing(
+        "下载前提\n\n需要先配置 ADS 凭证。",
+        [
+            "https://ads.atmosphere.copernicus.eu/",
+            "https://ads.atmosphere.copernicus.eu/datasets/cams-global-reanalysis-eac4?tab=download",
+        ],
+    )
+
+    assert "参考资料" in text
+    assert (
+        "1. [CAMS EAC4 数据集下载页]"
+        "(https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-reanalysis-eac4?tab=download)"
+    ) in text
+    assert "Copernicus ADS" not in text
+    assert "ads.atmosphere.copernicus.eu：" not in text
+    assert "\n   <https://" not in text
+
+
+def test_existing_markdown_reference_links_are_normalized():
+    from aero.agent.loop import _inject_refs_if_missing
+
+    text = _inject_refs_if_missing(
+        "参考资料\n"
+        "- [ECMWF Parameter Database](https://codes.ecmwf.int/grib/param-db/?filter=pm)\n"
+        "- [ECMWF Parameter Database #2](https://codes.ecmwf.int/grib/param-db/?filter=o3)",
+        [],
+    )
+
+    assert text == (
+        "参考资料\n"
+        "1. [ECMWF Parameter Database](https://codes.ecmwf.int/grib/param-db/?filter=pm)\n"
+        "2. [ECMWF Parameter Database](https://codes.ecmwf.int/grib/param-db/?filter=o3)"
+    )
+
+
+def test_reference_links_encode_spaces_in_urls():
+    from aero.agent.loop import _inject_refs_if_missing
+
+    text = _inject_refs_if_missing(
+        "参考资料\n"
+        "- [ECMWF Parameter Database]"
+        "(https://codes.ecmwf.int/grib/param-db/?filter=total column ozone)",
+        [],
+    )
+
+    assert text == (
+        "参考资料\n"
+        "1. [ECMWF Parameter Database]"
+        "(https://codes.ecmwf.int/grib/param-db/?filter=total%20column%20ozone)"
+    )
+
+    injected = _inject_refs_if_missing(
+        "请看这个变量说明。",
+        ["https://codes.ecmwf.int/grib/param-db/?filter=total%20column%20ozone"],
+    )
+
+    assert "total%20column%20ozone" in injected
+    assert "total%2520column%2520ozone" not in injected
+
+
+def test_reference_links_normalize_cams_dataset_title_urls():
+    from aero.agent.loop import _inject_refs_if_missing
+
+    text = _inject_refs_if_missing(
+        "参考资料\n"
+        "1. [CAMS 全球大气成分预报数据集]"
+        "(https://ads.atmosphere.copernicus.eu/datasets/CAMS 全球大气成分预报数据集?tab=download)",
+        [],
+    )
+
+    assert text == (
+        "参考资料\n"
+        "1. [CAMS 全球大气成分预报数据集]"
+        "(https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-atmospheric-composition-forecasts?tab=download)"
+    )
+    assert " " not in text.split("](", 1)[1].split(")", 1)[0]
+    assert "全球大气成分预报" not in text.split("](", 1)[1].split(")", 1)[0]
+
+
+def test_existing_plain_reference_urls_are_converted_to_markdown_links():
+    from aero.agent.loop import _inject_refs_if_missing
+
+    text = _inject_refs_if_missing(
+        "参考资料\n"
+        "1. CAMS 全球再分析 EAC4 数据页 https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-reanalysis-eac4?tab=download",
+        [],
+    )
+
+    assert text == (
+        "参考资料\n"
+        "1. [CAMS 全球再分析 EAC4 数据页]"
+        "(https://ads.atmosphere.copernicus.eu/datasets/"
+        "cams-global-reanalysis-eac4?tab=download)"
+    )
+
+
+def test_live_download_progress_lines_stay_below_regular_progress_messages():
     from types import SimpleNamespace
 
     from aero.cli.main import AeroApp
@@ -506,6 +725,27 @@ def test_live_status_lines_stay_below_regular_progress_messages():
 
     assert panel.lines[-1] == "下载进度#1 [██░░] 40%"
     assert len(panel.lines) == 4
+
+
+def test_shell_output_status_lines_keep_chronological_position():
+    from types import SimpleNamespace
+
+    from aero.cli.main import AeroApp
+
+    panel = SimpleNamespace(lines=[])
+
+    def upsert(text: str) -> bool:
+        return AeroApp._upsert_status_line(None, panel, text)
+
+    upsert("正在执行命令：mamba install cartopy")
+    upsert("stdout: /bin/bash: mamba: No such file or directory")
+    upsert("正在执行命令：pip install cartopy")
+
+    assert panel.lines == [
+        "正在执行命令：mamba install cartopy",
+        "stdout: /bin/bash: mamba: No such file or directory",
+        "正在执行命令：pip install cartopy",
+    ]
 
 
 def test_completed_download_progress_disappears_from_status_panel():
@@ -778,6 +1018,23 @@ async def test_delete_file_success(tmp_path):
     result = await delete_file(str(test_file))
     assert result["status"] == "success"
     assert not test_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_read_file_blocks_aero_secret_files(tmp_path, monkeypatch):
+    from aero.toolbox.builtin_tools import read_file
+
+    secrets_dir = tmp_path / ".aero"
+    secrets_dir.mkdir()
+    secrets_path = secrets_dir / "secrets.yaml"
+    secrets_path.write_text("credentials:\n  ads:\n    key: secret\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = await read_file(str(secrets_path))
+
+    assert result["status"] == "error"
+    assert result["secret_access_blocked"] is True
+    assert "check_ads_config" in result["suggested_tools"]
 
 
 @pytest.mark.asyncio

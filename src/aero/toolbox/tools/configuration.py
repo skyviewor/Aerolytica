@@ -1,13 +1,17 @@
 """CDS and language-model configuration tools."""
 
 import re
-from pathlib import Path
 
 from aero.core.config import (
+    ADSCredentials,
     AeroConfig,
+    clear_ads_credentials,
     clear_cds_credentials,
+    clear_earthdata_token,
     clear_llm_api_key,
+    save_ads_credentials,
     save_cds_credentials,
+    save_earthdata_token,
     save_llm_profile,
     user_secrets_path,
 )
@@ -126,23 +130,228 @@ def configure_cds_key(credential_string: str) -> dict:
     config.credentials.cds.key = cds_key
     save_cds_credentials(cds_url, cds_key)
 
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        config_path = parent / "aero.yaml"
-        if config_path.exists():
-            config.save(config_path)
-            return {
-                "status": "success",
-                "message": (f"CDS API key 已保存到 {user_secrets_path()}，现在可以开始下载数据。"),
-                "secrets_path": str(user_secrets_path()),
-            }
-
-    config.save(cwd / "aero.yaml")
+    config.save(find_config_path())
     return {
         "status": "success",
         "message": "CDS API key 已保存到用户级密钥文件，现在可以开始下载数据。",
         "secrets_path": str(user_secrets_path()),
     }
+
+
+@register_tool(
+    name="check_ads_config",
+    description=(
+        "检查 Copernicus Atmosphere Data Store (ADS) API 凭证是否已配置。"
+        "CAMS Reanalysis/Forecast 下载返回 ADS key 未配置，或用户问 CAMS/ADS 凭证时调用。"
+    ),
+    parameters={"type": "object", "properties": {}},
+)
+def check_ads_config() -> dict:
+    """Check whether ADS API credentials are configured."""
+    config = find_config()
+    ads_cfg = config.credentials.ads
+    if ads_cfg.key:
+        return {
+            "status": "ready",
+            "message": "ADS API 已配置，可以下载 CAMS 数据。",
+            "url": ads_cfg.url,
+        }
+    return {
+        "status": "not_configured",
+        "message": (
+            "CAMS 数据来自 Copernicus Atmosphere Data Store (ADS)，需要单独配置 ADS "
+            "Personal Access Token，和 ERA5/CDS key 分开。\n"
+            "1. 访问 https://ads.atmosphere.copernicus.eu/ 并登录 Copernicus 账户\n"
+            "2. 进入账户页面的 API token / Personal Access Token 区域\n"
+            "3. 复制 ADS API 页面显示的 url/key 配置，或把 token 直接粘贴给我\n"
+            "4. 首次下载 CAMS 数据集前，需要先打开对应数据集下载页接受 Terms of Use：\n"
+            "   - CAMS EAC4 再分析：https://ads.atmosphere.copernicus.eu/datasets/"
+            "cams-global-reanalysis-eac4?tab=download\n"
+            "   - CAMS 全球大气成分预报：https://ads.atmosphere.copernicus.eu/datasets/"
+            "cams-global-atmospheric-composition-forecasts?tab=download"
+        ),
+    }
+
+
+@register_tool(
+    name="configure_ads_key",
+    description=(
+        "保存 Copernicus ADS API URL 和 key/token 到用户级密钥文件。"
+        "当用户粘贴 ADS 官方 url/key、Personal Access Token，或明确配置 CAMS/ADS 凭证时调用。"
+        "不要用于 ERA5/CDS、NASA Earthdata 或 LLM API key。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "credential_string": {
+                "type": "string",
+                "description": (
+                    "用户粘贴的 ADS 凭证；可为官方两行 url/key，也可为单独 token。"
+                ),
+            },
+        },
+        "required": ["credential_string"],
+    },
+)
+def configure_ads_key(credential_string: str) -> dict:
+    """Parse and save ADS API credentials."""
+    ads_url, ads_key = _parse_ads_credentials(credential_string)
+    if not ads_key:
+        return {
+            "status": "error",
+            "message": "未找到 ADS key/token，请粘贴官方 url/key 配置或 Personal Access Token。",
+        }
+
+    config = find_config()
+    config.credentials.ads.url = ads_url
+    config.credentials.ads.key = ads_key
+    save_ads_credentials(ads_url, ads_key)
+
+    config_path = find_config_path()
+    if config_path:
+        config.save(config_path)
+
+    return {
+        "status": "success",
+        "message": (
+            f"ADS API key 已保存到 {user_secrets_path()}，现在可以下载 CAMS 数据。"
+            "如果某个数据集首次下载失败，请打开对应数据集下载页接受 Terms of Use："
+            "EAC4 再分析 https://ads.atmosphere.copernicus.eu/datasets/"
+            "cams-global-reanalysis-eac4?tab=download；"
+            "全球大气成分预报 https://ads.atmosphere.copernicus.eu/datasets/"
+            "cams-global-atmospheric-composition-forecasts?tab=download。"
+        ),
+        "url": ads_url,
+        "api_key_masked": mask_secret(ads_key),
+        "secrets_path": str(user_secrets_path()),
+    }
+
+
+def _parse_ads_credentials(credential_string: str) -> tuple[str, str]:
+    text = credential_string.strip()
+    default_url = "https://ads.atmosphere.copernicus.eu/api"
+    if not text:
+        return default_url, ""
+    url = default_url
+    key = ""
+    if "\n" in text:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            name, value = line.split(":", 1)
+            name = name.strip().lower()
+            value = value.strip()
+            if name == "url" and value:
+                url = value
+            elif name in {"key", "token", "api_key", "personal_access_token"}:
+                key = value
+        return url, key
+    match = re.match(r"^(https?://[^:]+)(?::(.+))?$", text)
+    if match and "atmosphere.copernicus.eu" in match.group(1):
+        return match.group(1), (match.group(2) or "").strip()
+    if text.lower().startswith("bearer "):
+        text = text.split(None, 1)[1].strip()
+    return url, text
+
+
+@register_tool(
+    name="check_earthdata_config",
+    description=(
+        "检查 NASA Earthdata/GES DISC 凭证是否已配置就绪。"
+        "当用户询问如何配置 MERRA-2、GES DISC、NASA Earthdata 凭证，"
+        "或 MERRA-2 下载返回授权错误时调用。不要把 Earthdata 凭证当作 LLM API key。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
+def check_earthdata_config() -> dict:
+    """Check whether NASA Earthdata credentials are configured."""
+    config = find_config()
+    token = config.credentials.earthdata.token
+    if token:
+        return {
+            "status": "ready",
+            "message": "NASA Earthdata token 已配置，可以用于 MERRA-2/GES DISC 下载。",
+            "token_masked": mask_secret(token),
+        }
+
+    return {
+        "status": "not_configured",
+        "message": (
+            "MERRA-2 需要 NASA Earthdata Login/GES DISC 授权。请按以下步骤配置：\n"
+            "1. 访问 https://urs.earthdata.nasa.gov/ 注册或登录 Earthdata 账户\n"
+            "2. 登录后点击页面右上角 My Profile\n"
+            "3. 在 My Profile 页面找到 Access Token 区域\n"
+            "4. 点击 Generate Token 生成 token；如果已经有 token，可以直接复制现有 token\n"
+            "5. 将 token 字符串直接粘贴给我，我会保存到本地用户级密钥文件\n\n"
+            "也可以自行设置环境变量 EARTHDATA_TOKEN。"
+        ),
+    }
+
+
+@register_tool(
+    name="configure_earthdata_token",
+    description=(
+        "保存 NASA Earthdata token 到用户级密钥文件，用于 MERRA-2/GES DISC 下载。"
+        "当用户粘贴 Earthdata token，或明确要求配置 MERRA-2/Earthdata 凭证时调用。"
+        "不要用于 LLM、DeepSeek、Kimi、OpenAI、百炼或 CDS 凭证。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "token": {
+                "type": "string",
+                "description": "用户粘贴的 NASA Earthdata token。",
+            },
+        },
+        "required": ["token"],
+    },
+)
+def configure_earthdata_token(token: str) -> dict:
+    """Save a NASA Earthdata token in the user secrets file."""
+    value = _normalize_secret_token(token)
+    if not value:
+        return {"status": "error", "message": "Earthdata token 不能为空。"}
+
+    config = find_config()
+    config.credentials.earthdata.token = value
+    save_earthdata_token(value)
+
+    config_path = find_config_path()
+    if config_path:
+        config.save(config_path)
+
+    return {
+        "status": "success",
+        "message": (
+            f"NASA Earthdata token 已保存到 {user_secrets_path()}，"
+            "现在可以下载 MERRA-2/GES DISC 数据。"
+        ),
+        "token_masked": mask_secret(value),
+        "secrets_path": str(user_secrets_path()),
+    }
+
+
+def _normalize_secret_token(text: str) -> str:
+    value = text.strip()
+    if "\n" in value:
+        for line in value.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if ":" in line and line.split(":", 1)[0].strip().lower() in {
+                "token",
+                "earthdata_token",
+                "bearer",
+            }:
+                return line.split(":", 1)[1].strip()
+        return ""
+    if value.lower().startswith("bearer "):
+        value = value.split(None, 1)[1].strip()
+    return value
 
 
 @register_tool(
@@ -335,6 +544,7 @@ def clear_llm_config(reset_provider: bool = False) -> dict:
         provider_config.base_url = config.llm.base_url
         provider_config.api_key = ""
         clear_llm_api_key("deepseek")
+        save_llm_profile("deepseek", "", config.llm.model, config.llm.base_url)
 
     config.save(config_path)
     return {
@@ -367,20 +577,12 @@ def clear_cds_config() -> dict:
     """Clear CDS API credentials from the user secrets file."""
     from aero.core.config import CDSCredentials
 
-    config_path = None
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        p = parent / "aero.yaml"
-        if p.exists():
-            config_path = p
-            break
-
-    config = find_config() if config_path is not None else AeroConfig.create_default()
+    config_path = find_config_path()
+    config = find_config()
     was_configured = bool(config.credentials.cds.key)
     config.credentials.cds = CDSCredentials()
     clear_cds_credentials()
-    if config_path is not None:
-        config.save(config_path)
+    config.save(config_path)
 
     if was_configured:
         return {
@@ -394,5 +596,66 @@ def clear_cds_config() -> dict:
     return {
         "status": "success",
         "message": "用户级密钥文件中未配置 CDS 凭证，无需操作。",
+        "secrets_path": str(user_secrets_path()),
+    }
+
+
+@register_tool(
+    name="clear_ads_config",
+    description=(
+        "清除用户级密钥文件中已保存的 ADS API 凭证。"
+        "用户要求清除/删除 CAMS 或 ADS 凭证时调用。"
+    ),
+    parameters={"type": "object", "properties": {}},
+)
+def clear_ads_config() -> dict:
+    """Clear ADS API credentials from the user secrets file."""
+    config_path = find_config_path()
+    config = find_config()
+    was_configured = bool(config.credentials.ads.key)
+    config.credentials.ads = ADSCredentials()
+    clear_ads_credentials()
+    if config_path is not None:
+        config.save(config_path)
+    return {
+        "status": "success",
+        "message": (
+            f"ADS API 凭证已从 {user_secrets_path()} 中清除。"
+            if was_configured
+            else "用户级密钥文件中未配置 ADS 凭证，无需操作。"
+        ),
+        "secrets_path": str(user_secrets_path()),
+    }
+
+
+@register_tool(
+    name="clear_earthdata_config",
+    description=(
+        "清除用户级密钥文件中已保存的 NASA Earthdata token。"
+        "用户要求清除/删除 MERRA-2、GES DISC 或 Earthdata 凭证时调用。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
+def clear_earthdata_config() -> dict:
+    """Clear NASA Earthdata token from the user secrets file."""
+    config_path = find_config_path()
+    config = find_config()
+    was_configured = bool(config.credentials.earthdata.token)
+    config.credentials.earthdata.token = ""
+    clear_earthdata_token()
+    if config_path is not None:
+        config.save(config_path)
+
+    return {
+        "status": "success",
+        "message": (
+            f"NASA Earthdata token 已从 {user_secrets_path()} 中清除。"
+            if was_configured
+            else "用户级密钥文件中未配置 NASA Earthdata token，无需操作。"
+        ),
+        "token_cleared": was_configured,
         "secrets_path": str(user_secrets_path()),
     }

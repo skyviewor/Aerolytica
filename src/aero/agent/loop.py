@@ -9,7 +9,7 @@ import re
 import shlex
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import structlog
 
@@ -65,6 +65,7 @@ _MUTATING_PYTHON_RE = re.compile(
 
 _BUILD_TOOLS: set[str] = {
     "download_era5",
+    "download_cams",
     "subset_netcdf",
     "download_gfs",
     "download_ifs",
@@ -234,10 +235,12 @@ _TOOL_NAME_REPLACEMENTS = {
     "parse_isd_csv": "解析地面观测数据",
     "inspect_csv_table": "查看表格数据概况",
     "check_era5_availability": "检查 ERA5 数据源可用性",
+    "download_cams": "下载 CAMS 数据",
     "subset_netcdf": "裁剪 NetCDF 文件",
     "inspect_nc": "查看文件详情",
     "inspect_grib2": "查看 GRIB2 文件详情",
     "search_cds_variables": "查询可用变量",
+    "search_cams_variables": "查询 CAMS 变量",
     "download_gfs": "下载 GFS 预报数据",
     "get_gfs_forecast_schedule": "解析 GFS 预报时效",
     "check_gfs_availability": "检查 GFS 可用时次",
@@ -254,7 +257,10 @@ _TOOL_NAME_REPLACEMENTS = {
     "get_ifs_forecast_schedule": "解析 IFS 预报时效",
     "check_ifs_availability": "检查 IFS 可用时次",
     "search_ifs_variables": "查询 IFS 可用要素",
+    "check_ads_config": "检查 ADS 配置",
+    "configure_ads_key": "保存 ADS 凭证",
     "configure_cds_key": "保存 CDS 凭证",
+    "configure_earthdata_token": "保存 Earthdata 凭证",
     "configure_email_config": "配置邮箱",
     "check_email_config": "检查邮箱配置",
     "send_email": "发送邮件",
@@ -310,6 +316,11 @@ _TOOL_PROGRESS_MESSAGES = {
         "查看 GRIB2 文件内容失败",
     ),
     "search_cds_variables": ("正在查询可用变量", "可用变量查询完成", "查询可用变量失败"),
+    "search_cams_variables": (
+        "正在查询 CAMS 可用变量",
+        "CAMS 可用变量查询完成",
+        "查询 CAMS 可用变量失败",
+    ),
     "download_gfs": (
         "准备下载 GFS 预报数据",
         "GFS 预报数据下载完成",
@@ -375,6 +386,7 @@ _TOOL_PROGRESS_MESSAGES = {
         "IFS 预报数据下载完成",
         "IFS 预报数据下载失败",
     ),
+    "download_cams": ("准备下载 CAMS 数据", "CAMS 数据下载完成", "CAMS 数据下载失败"),
     "get_ifs_forecast_schedule": (
         "正在解析 IFS 预报时效",
         "IFS 预报时效解析完成",
@@ -390,6 +402,8 @@ _TOOL_PROGRESS_MESSAGES = {
         "IFS 可用要素查询完成",
         "查询 IFS 可用要素失败",
     ),
+    "check_ads_config": ("正在检查 ADS 配置", "ADS 配置检查完成", "检查 ADS 配置失败"),
+    "configure_ads_key": ("正在保存 ADS 凭证", "ADS 凭证已保存", "保存 ADS 凭证失败"),
     "configure_cds_key": ("正在保存 CDS 凭证", "CDS 凭证已保存", "保存 CDS 凭证失败"),
     "configure_email_config": ("正在保存邮箱配置", "邮箱配置已保存", "保存邮箱配置失败"),
     "check_email_config": ("正在检查邮箱配置", "邮箱配置检查完成", "检查邮箱配置失败"),
@@ -413,6 +427,16 @@ _TOOL_PROGRESS_MESSAGES = {
     "list_files": ("正在查看文件列表", "文件列表查看完成", "查看文件列表失败"),
     "list_figures": ("正在查看图片列表", "图片列表查看完成", "查看图片列表失败"),
     "check_cds_config": ("正在检查 CDS 配置", "CDS 配置检查完成", "检查 CDS 配置失败"),
+    "check_earthdata_config": (
+        "正在检查 Earthdata 配置",
+        "Earthdata 配置检查完成",
+        "检查 Earthdata 配置失败",
+    ),
+    "configure_earthdata_token": (
+        "正在保存 Earthdata 凭证",
+        "Earthdata 凭证已保存",
+        "保存 Earthdata 凭证失败",
+    ),
     "describe_cds_dataset": ("正在查看数据集信息", "数据集信息查看完成", "查看数据集信息失败"),
     "query_download": ("正在查询下载状态", "下载状态查询完成", "查询下载状态失败"),
     "check_vision_model_config": (
@@ -466,12 +490,13 @@ def _tool_progress_message(tool_name: str, stage: str, args: dict | None = None)
     if tool_name == "run_shell" and args is not None:
         raw_command = str(args.get("command") or "")
         try:
-            from aero.toolbox.tools.runtime import _normalize_shell_context
+            from aero.toolbox.tools.runtime import _normalize_shell_context, _redact_shell_command
 
             raw_command, _workdir, _correction = _normalize_shell_context(
                 raw_command,
                 str(args.get("workdir") or "."),
             )
+            raw_command = _redact_shell_command(raw_command)
         except Exception:
             pass
         command = _short_shell_command(raw_command)
@@ -553,6 +578,27 @@ def _sanitize_user_facing_text(text: str) -> str:
         )
         text = text.replace(f"`{tool_name}`", replacement)
         text = text.replace(tool_name, replacement)
+    text = re.sub(
+        r"下载时通过\s+下载 CAMS 数据\s*(?:工具|函数)?，\s*"
+        r"指定\s+`?dataset_id`?\s+为\s+`?cams-global-reanalysis-eac4`?\s*，",
+        "下载时选择 CAMS EAC4 再分析数据集，",
+        text,
+    )
+    text = re.sub(
+        r"下载时通过\s+下载 CAMS 数据\s*(?:工具|函数)?，\s*"
+        r"指定\s+`?dataset_id`?\s+为\s+"
+        r"`?cams-global-atmospheric-composition-forecasts`?\s*，",
+        "下载时选择 CAMS 全球大气成分预报数据集，",
+        text,
+    )
+    text = re.sub(r"通过\s+下载 CAMS 数据\s*(?:工具|函数)?", "选择 CAMS 数据下载", text)
+    text = re.sub(r"通过\s+下载数据\s*(?:工具|函数)?", "选择数据下载", text)
+    text = re.sub(r"选择 CAMS 数据下载\s*就能下载", "我可以直接帮你下载", text)
+    text = re.sub(r"选择数据下载\s*就能下载", "我可以直接帮你下载", text)
+    text = re.sub(r"指定\s+`?dataset_id`?\s+为", "选择数据集", text)
+    text = re.sub(r"选择数据集\s+([A-Za-z0-9_.-]+)", r"选择数据集 \1", text)
+    text = text.replace("下载时选择 CAMS 数据下载，选择数据集", "下载时选择")
+    text = text.replace("下载时选择数据下载，选择数据集", "下载时选择")
     return text
 
 
@@ -629,10 +675,11 @@ def _collect_ref_urls(result: object) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
     for u in urls:
-        if u not in seen:
-            seen.add(u)
-            deduped.append(u)
-    return deduped
+        url = _encode_reference_url(u)
+        if url not in seen:
+            seen.add(url)
+            deduped.append(url)
+    return _prune_generic_reference_urls(deduped)
 
 
 def _is_url(s: str) -> bool:
@@ -640,18 +687,117 @@ def _is_url(s: str) -> bool:
 
 
 def _inject_refs_if_missing(text: str, ref_urls: list[str]) -> str:
+    ref_urls = _prune_generic_reference_urls([_encode_reference_url(url) for url in ref_urls])
     if not ref_urls:
-        return text
+        return _format_reference_links(text)
     if "参考资料" in text or "References" in text.lower():
-        return text
+        return _format_reference_links(text)
     lines = ["\n\n参考资料"]
-    label_counts: dict[str, int] = {}
-    for url in ref_urls:
+    for index, url in enumerate(ref_urls, start=1):
         label = _reference_label(url)
-        label_counts[label] = label_counts.get(label, 0) + 1
-        display_label = label if label_counts[label] == 1 else f"{label} #{label_counts[label]}"
-        lines.append(f"- [{display_label}]({url})")
-    return text + "\n".join(lines)
+        lines.append(f"{index}. [{label}]({url})")
+    return _format_reference_links(text + "\n".join(lines))
+
+
+def _format_reference_links(text: str) -> str:
+    """Render reference links as clickable Markdown text links."""
+    lines = text.splitlines()
+    in_refs = False
+    formatted: list[str] = []
+    link_re = re.compile(
+        r"^(?P<prefix>\s*(?:(?P<num>\d+)\.\s*|[-*]\s*)?)"
+        r"\[(?P<label>[^\]]+)\]\((?P<url>https?://[^)]+)\)\s*$"
+    )
+    plain_re = re.compile(
+        r"^(?P<prefix>\s*(?:(?P<num>\d+)\.\s*|[-*]\s*)?)"
+        r"(?P<label>.*?\S)\s+(?P<url>https?://\S+)\s*$"
+    )
+    index = 1
+    for line in lines:
+        stripped = line.strip()
+        if stripped in {"参考资料", "References"}:
+            in_refs = True
+            formatted.append(line)
+            continue
+        if in_refs and stripped.startswith("#") and stripped not in {"参考资料", "References"}:
+            in_refs = False
+        if in_refs:
+            match = link_re.match(line)
+            if match:
+                label = re.sub(r"\s+#\d+$", "", match.group("label").strip())
+                url = _encode_reference_url(match.group("url"))
+                number = match.group("num") or str(index)
+                formatted.append(f"{number}. [{label}]({url})")
+                index = int(number) + 1 if number.isdigit() else index + 1
+                continue
+            match = plain_re.match(line)
+            if match:
+                label = match.group("label").strip().rstrip("：:")
+                url = _encode_reference_url(match.group("url"))
+                number = match.group("num") or str(index)
+                formatted.append(f"{number}. [{label}]({url})")
+                index = int(number) + 1 if number.isdigit() else index + 1
+                continue
+        formatted.append(line)
+    return "\n".join(formatted)
+
+
+def _encode_reference_url(url: str) -> str:
+    url = url.strip()
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    path = _normalize_reference_path(parsed.netloc, unquote(parsed.path))
+    path = quote(path, safe="/%")
+    query = quote(unquote(parsed.query), safe="=&?/:;+,%")
+    fragment = quote(unquote(parsed.fragment), safe="=&?/:;+,%")
+    return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, query, fragment))
+
+
+def _normalize_reference_path(host: str, path: str) -> str:
+    if "ads.atmosphere.copernicus.eu" not in host.lower():
+        return path
+    if not path.lower().startswith("/datasets/"):
+        return path
+    dataset_text = path.split("/datasets/", 1)[1].strip("/")
+    dataset_key = dataset_text.casefold().replace("_", "-").replace("%20", " ")
+    if (
+        "atmospheric-composition-forecasts" in dataset_key
+        or "global-atmospheric-composition-forecasts" in dataset_key
+        or "全球大气成分预报" in dataset_key
+        or "预报数据集" in dataset_key
+    ):
+        return "/datasets/cams-global-atmospheric-composition-forecasts"
+    if (
+        "global-reanalysis-eac4" in dataset_key
+        or "reanalysis-eac4" in dataset_key
+        or "eac4" in dataset_key
+        or "全球再分析" in dataset_key
+        or "再分析" in dataset_key
+    ):
+        return "/datasets/cams-global-reanalysis-eac4"
+    return path
+
+
+def _prune_generic_reference_urls(urls: list[str]) -> list[str]:
+    """Drop generic landing pages when a specific page from the same source exists."""
+    parsed_urls = [(url, urlparse(url)) for url in urls]
+    specific_hosts = {
+        parsed.netloc.lower()
+        for _url, parsed in parsed_urls
+        if parsed.path and parsed.path not in {"", "/"}
+    }
+    pruned: list[str] = []
+    seen: set[str] = set()
+    for url, parsed in parsed_urls:
+        host = parsed.netloc.lower()
+        is_generic = parsed.path in {"", "/"}
+        if is_generic and host in specific_hosts:
+            continue
+        if url not in seen:
+            seen.add(url)
+            pruned.append(url)
+    return pruned
 
 
 def _direct_tool_response(tool_name: str, result: object) -> str | None:
@@ -677,6 +823,17 @@ def _reference_label(url: str) -> str:
         return "CDS Datasets"
     if "cds.climate.copernicus.eu" in host:
         return "Copernicus CDS"
+    if "ads.atmosphere.copernicus.eu" in host and "/datasets/cams-global-reanalysis-eac4" in path:
+        return "CAMS EAC4 数据集下载页"
+    if (
+        "ads.atmosphere.copernicus.eu" in host
+        and "/datasets/cams-global-atmospheric-composition-forecasts" in path
+    ):
+        return "CAMS 全球大气成分预报下载页"
+    if "ads.atmosphere.copernicus.eu" in host and "/datasets" in path:
+        return "CAMS/ADS 数据集下载页"
+    if "ads.atmosphere.copernicus.eu" in host:
+        return "Copernicus ADS"
     if "registry.opendata.aws" in host:
         return "AWS Open Data Registry"
     if host:
@@ -1398,6 +1555,7 @@ def _sanitize_tool_message_sequence(messages: list[Message]) -> list[Message]:
 def _tool_start_message(tool_name: str) -> str:
     messages = {
         "search_cds_variables": "正在查询数据变量信息...",
+        "search_cams_variables": "正在查询 CAMS 可用变量...",
         "search_gfs_variables": "正在查询 GFS 可用要素...",
         "lookup_gfs_parameter": "正在查阅 GFS 要素定义...",
         "check_gfs_availability": "正在检查 GFS 可用时次...",
@@ -1405,6 +1563,7 @@ def _tool_start_message(tool_name: str) -> str:
         "lookup_ecmwf_parameter": "正在查阅 ECMWF 参数定义...",
         "describe_cds_dataset": "正在读取数据集说明...",
         "download_era5": "正在准备并提交数据下载任务...",
+        "download_cams": "正在准备并提交 CAMS 数据请求...",
         "subset_netcdf": "正在裁剪 NetCDF 文件...",
         "download_gfs": "正在准备 GFS 预报数据下载...",
         "list_downloads": "正在查看下载任务记录...",
@@ -1413,6 +1572,10 @@ def _tool_start_message(tool_name: str) -> str:
         "cleanup_downloads": "正在清理下载记录...",
         "check_cds_config": "正在检查 CDS 配置...",
         "configure_cds_key": "正在保存 CDS 配置...",
+        "check_ads_config": "正在检查 ADS 配置...",
+        "configure_ads_key": "正在保存 ADS 配置...",
+        "check_earthdata_config": "正在检查 Earthdata 配置...",
+        "configure_earthdata_token": "正在保存 Earthdata 配置...",
         "configure_email_config": "正在保存邮箱配置...",
         "check_email_config": "正在检查邮箱配置...",
         "send_email": "正在发送邮件...",
@@ -1439,6 +1602,7 @@ def _tool_start_message(tool_name: str) -> str:
 def _tool_done_message(tool_name: str) -> str:
     messages = {
         "search_cds_variables": "数据变量信息查询完成",
+        "search_cams_variables": "CAMS 可用变量查询完成",
         "search_gfs_variables": "GFS 可用要素查询完成",
         "lookup_gfs_parameter": "GFS 要素定义查询完成",
         "check_gfs_availability": "GFS 可用时次检查完成",
@@ -1446,6 +1610,7 @@ def _tool_done_message(tool_name: str) -> str:
         "lookup_ecmwf_parameter": "ECMWF 参数定义查询完成",
         "describe_cds_dataset": "数据集说明读取完成",
         "download_era5": "数据下载处理完成",
+        "download_cams": "CAMS 数据下载完成",
         "subset_netcdf": "NetCDF 文件裁剪完成",
         "download_gfs": "GFS 预报数据下载完成",
         "list_downloads": "下载任务记录已读取",
@@ -1454,6 +1619,10 @@ def _tool_done_message(tool_name: str) -> str:
         "cleanup_downloads": "下载记录清理完成",
         "check_cds_config": "CDS 配置检查完成",
         "configure_cds_key": "CDS 配置已保存",
+        "check_ads_config": "ADS 配置检查完成",
+        "configure_ads_key": "ADS 配置已保存",
+        "check_earthdata_config": "Earthdata 配置检查完成",
+        "configure_earthdata_token": "Earthdata 配置已保存",
         "configure_email_config": "邮箱配置已保存",
         "check_email_config": "邮箱配置检查完成",
         "send_email": "邮件已发送",
@@ -1480,10 +1649,12 @@ def _tool_done_message(tool_name: str) -> str:
 def _tool_error_prefix(tool_name: str) -> str:
     messages = {
         "download_era5": "数据下载处理失败",
+        "download_cams": "CAMS 数据下载失败",
         "subset_netcdf": "NetCDF 文件裁剪失败",
         "download_gfs": "GFS 预报数据下载失败",
         "retry_download": "下载任务重试失败",
         "search_cds_variables": "数据变量信息查询失败",
+        "search_cams_variables": "CAMS 可用变量查询失败",
         "search_gfs_variables": "GFS 可用要素查询失败",
         "lookup_gfs_parameter": "GFS 要素定义查询失败",
         "check_gfs_availability": "GFS 可用时次检查失败",
@@ -1495,6 +1666,10 @@ def _tool_error_prefix(tool_name: str) -> str:
         "cleanup_downloads": "下载记录清理失败",
         "check_cds_config": "CDS 配置检查失败",
         "configure_cds_key": "CDS 配置保存失败",
+        "check_ads_config": "ADS 配置检查失败",
+        "configure_ads_key": "ADS 配置保存失败",
+        "check_earthdata_config": "Earthdata 配置检查失败",
+        "configure_earthdata_token": "Earthdata 配置保存失败",
         "configure_email_config": "邮箱配置保存失败",
         "check_email_config": "邮箱配置检查失败",
         "send_email": "邮件发送失败",

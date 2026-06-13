@@ -45,6 +45,8 @@ def test_default_catalogue_lists_all_supported_datasets_and_download_routes():
     assert routes["gefs-global-ensemble-forecast"] == "download_gefs"
     assert routes["ifs-open-data-forecast"] == "download_ifs"
     assert routes["aifs-open-data-forecast"] == "download_ifs"
+    assert routes["cams-global-reanalysis-eac4"] == "download_cams"
+    assert routes["cams-global-atmospheric-composition-forecasts"] == "download_cams"
     assert routes["ncep-reanalysis-1-6-hourly"] == "download_dataset"
     assert routes["ncep-reanalysis-1-monthly"] == "download_dataset"
     assert routes["ncep-reanalysis-2-6-hourly"] == "download_dataset"
@@ -60,6 +62,10 @@ def test_default_catalogue_lists_all_supported_datasets_and_download_routes():
     assert routes["jra3q-surface-6-hourly-125"] == "download_dataset"
     assert routes["jra55-pressure-6-hourly-125"] == "download_dataset"
     assert routes["jra55-surface-6-hourly-125"] == "download_dataset"
+    assert routes["merra2-single-level-hourly"] == "download_dataset"
+    assert routes["merra2-pressure-3hourly"] == "download_dataset"
+    assert routes["merra2-single-level-monthly"] == "download_dataset"
+    assert routes["merra2-pressure-monthly"] == "download_dataset"
     assert routes["noaa-mrms"] == "download_dataset"
 
 

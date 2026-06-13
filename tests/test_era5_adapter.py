@@ -95,6 +95,25 @@ async def test_download_unpacks_netcdf_zip(tmp_path, monkeypatch):
     assert result.params["actual_file_format"] == "netcdf3"
 
 
+def test_normalize_downloaded_zip_prefers_actual_grib_file(tmp_path):
+    from aero.adapters.cds_adapter import _normalize_downloaded_file
+
+    dest_path = tmp_path / "download.nc"
+    bogus_netcdf = tmp_path / "a.nc"
+    grib = tmp_path / "b.grib"
+    bogus_netcdf.write_bytes(b"not a netcdf")
+    grib.write_bytes(b"GRIB" + b"\0" * 2048)
+
+    with zipfile.ZipFile(dest_path, "w") as archive:
+        archive.write(bogus_netcdf, arcname="a.nc")
+        archive.write(grib, arcname="b.grib")
+
+    _normalize_downloaded_file(dest_path)
+
+    assert dest_path.read_bytes().startswith(b"GRIB")
+    assert _detect_file_format(dest_path) == "grib"
+
+
 @pytest.mark.asyncio
 async def test_fetch_reuses_complete_existing_file(tmp_path, monkeypatch):
     dest = tmp_path / "complete.nc"

@@ -6,17 +6,12 @@ from aero.core.config import AeroConfig
 
 
 def find_config_path() -> Path:
-    """Find the nearest project config path, or default to cwd."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        config_path = parent / "aero.yaml"
-        if config_path.exists():
-            return config_path
-    return cwd / "aero.yaml"
+    """Return the config path for the current Aero workspace."""
+    return Path.cwd() / "aero.yaml"
 
 
 def find_config() -> AeroConfig:
-    """Load the nearest project config, or create an in-memory default."""
+    """Load the current workspace config, or create an in-memory default."""
     config_path = find_config_path()
     if config_path.exists():
         return AeroConfig.load(config_path)
