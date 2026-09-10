@@ -109,6 +109,9 @@ class WebRuntime:
         self.sessions = SessionManager()
         self.artifacts = ArtifactService(self.project_dir)
         self.active_sessions: dict[str, LocalSession] = {}
+        from aero.server.cloud import CloudServices
+
+        self.cloud = CloudServices(self)
 
     def _load_config(self) -> AeroConfig:
         path = self.project_dir / "aero.yaml"
@@ -173,7 +176,9 @@ class WebRuntime:
             "language": cfg.language,
             "mode": cfg.mode,
             "max_tool_rounds": cfg.max_tool_rounds,
-            "llm_configured": bool(cfg.llm.active_api_key()),
+            "llm_configured": bool(cfg.llm.active_api_key()) or (
+                cfg.llm.provider == "official" and self.cloud.account.data.is_logged_in
+            ),
             "vision": {
                 "mode": cfg.vision.mode,
                 "provider": cfg.vision.provider,
@@ -209,6 +214,7 @@ class WebRuntime:
             session.update_config(self.config)
 
     async def close(self) -> None:
+        await self.cloud.close()
         await asyncio.gather(
             *(session.close() for session in self.active_sessions.values()), return_exceptions=True
         )
@@ -235,6 +241,10 @@ def create_app(
         if session is None:
             raise HTTPException(status_code=404, detail="会话不存在")
         return session
+
+    from aero.server.cloud import cloud_router
+
+    app.include_router(cloud_router(require_auth))
 
     @app.get("/")
     async def index(request: Request):

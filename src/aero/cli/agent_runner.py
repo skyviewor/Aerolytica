@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import signal
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from aero.agent.loop import AgentLoop
 from aero.agent.session import SessionManager, SessionMeta
+from aero.application.cloud_runtime import CloudAgentRuntime, RelayRuntimeTransport
+from aero.application.local_session import LocalSession
 from aero.core.config import AeroConfig
+from aero.core.official_account import OfficialAccountError
 from aero.core.remote_agent import (
     AgentProcessLock,
     RemoteAgentClient,
@@ -41,7 +47,7 @@ def run_agent_cli(args: list[str]) -> int:
             selector = _selector_arg(args[1:], "status")
             return asyncio.run(_show_status(selector))
         raise ValueError(f"未知 Agent 子命令：{action}")
-    except (RemoteAgentError, ValueError) as exc:
+    except (OfficialAccountError, RemoteAgentError, ValueError) as exc:
         print(f"错误：{exc}")
         return 1
 
@@ -72,7 +78,7 @@ def _selector_arg(args: list[str], command: str) -> str | None:
         return None
     if len(args) == 1 and args[0].strip():
         return args[0].strip()
-    raise ValueError(f"用法：aero agent {command} [Agent 名称或 Agent ID]")
+    raise ValueError(f"用法：aero agent {command} [智能体名称或智能体 ID]")
 
 
 def _run_args(args: list[str]) -> tuple[str | None, bool]:
@@ -85,12 +91,12 @@ def _run_args(args: list[str]) -> tuple[str | None, bool]:
             index += 1
         elif not args[index].startswith("-") and args[index].strip():
             if selector is not None:
-                raise ValueError("Agent 名称或 ID 只能指定一次")
+                raise ValueError("智能体名称或 ID 只能指定一次")
             selector = args[index].strip()
             index += 1
         else:
             raise ValueError(
-                "用法：aero agent run [Agent 名称或 Agent ID] [--cloud-memory]"
+                "用法：aero agent run [智能体名称或智能体 ID] [--cloud-memory]"
             )
     return selector, cloud_memory
 
@@ -99,10 +105,10 @@ async def _register(name: str, description: str) -> int:
     client = RemoteAgentClient(select_agent=False)
     try:
         result = await client.register(name, description=description)
-        print(f"Agent 已注册：{result.get('name') or name}")
+        print(f"智能体已注册：{result.get('name') or name}")
         if description:
             print(f"描述：{description}")
-        print(f"Agent ID：{result.get('agent_id') or ''}")
+        print(f"智能体 ID：{result.get('agent_id') or ''}")
         print("令牌已安全保存到 ~/.aero/secrets.yaml")
         print(f"运行 aero agent run {name} 开始待命。")
         return 0
@@ -115,7 +121,7 @@ async def _list_agents() -> int:
     try:
         agents = await client.list_registered_remote_agents()
         if not agents:
-            print("本地没有已注册的 Agent。")
+            print("本地没有已注册的智能体。")
             return 0
         for agent in agents:
             last_seen = f"，最后活动：{agent['last_seen_at']}" if agent.get("last_seen_at") else ""
@@ -132,7 +138,7 @@ async def _show_status(selector: str | None) -> int:
     client = RemoteAgentClient(agent_selector=selector)
     try:
         status = await client.status()
-        print(f"Agent：{status.get('name') or client.agent_name or client.agent_id}")
+        print(f"智能体：{status.get('name') or client.agent_name or client.agent_id}")
         print(f"状态：{status.get('status') or 'unknown'}")
         if status.get("last_seen_at"):
             print(f"最后活动：{status['last_seen_at']}")
@@ -142,6 +148,76 @@ async def _show_status(selector: str | None) -> int:
 
 
 async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> int:
+    """Run the fenced resident worker against the workspace's bound project."""
+    config = _load_config()
+    client = RemoteAgentClient(agent_selector=selector)
+    client._require_registration()
+    try:
+        await client.session.access_token()
+    except Exception:
+        await client.close()
+        raise
+    binding_path = Path.cwd().resolve() / ".aero" / "cloud-sync" / "state.json"
+    try:
+        state = json.loads(binding_path.read_text())
+    except (OSError, ValueError) as exc:
+        await client.close()
+        raise RemoteAgentError("请先将当前工作区绑定到云端项目，再启动常驻智能体。") from exc
+    binding = state.get("binding") if isinstance(state, dict) else None
+    project_id = binding.get("project_id") if isinstance(binding, dict) else None
+    if not project_id:
+        await client.close()
+        raise RemoteAgentError("请先将当前工作区绑定到云端项目，再启动常驻智能体。")
+
+    process_lock = AgentProcessLock(client.agent_id)
+    process_lock.acquire()
+    project_dir = Path.cwd().resolve()
+    session_id = _memory_session_id(client.agent_id, project_dir)
+    session = LocalSession(project_dir, config, session_id=session_id)
+    http = httpx.AsyncClient(
+        base_url=client.session.base_url,
+        timeout=httpx.Timeout(35.0, connect=10.0),
+    )
+    runtime = CloudAgentRuntime(
+        session,
+        RelayRuntimeTransport(http, client.agent_id, client.agent_token),
+        device_id=f"cli-{project_dir.name}",
+        project_id=str(project_id),
+        account_id=client.session.data.user_id,
+        account_identity=lambda: client.session.data.user_id,
+        state_dir=Path.home() / ".aero" / "agent-runtime",
+    )
+    memory_info = runtime.enable_memory() if cloud_memory else None
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def request_stop() -> None:
+        stop_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        with suppress(NotImplementedError):
+            loop.add_signal_handler(signum, request_stop)
+    await runtime.start()
+    print(f"远程智能体已启动：{client.agent_name or client.agent_id}")
+    print("已绑定云端项目：" + str(project_id))
+    if memory_info:
+        print("加密云记忆已开启；请立即保存恢复密钥：" + memory_info["recovery_key"])
+    print("正在等待云端指令，按 Ctrl+C 停止。")
+    try:
+        await stop_event.wait()
+        return 0
+    finally:
+        if memory_info:
+            with suppress(Exception):
+                await runtime.export_memory()
+        await runtime.stop()
+        await session.close()
+        await http.aclose()
+        await client.close()
+        process_lock.release()
+
+
+async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = False) -> int:
     config = _load_config()
     agent = AgentLoop(config)
     client = RemoteAgentClient(agent_selector=selector)

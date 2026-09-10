@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import "katex/dist/katex.min.css";
 import "./styles.css";
+import { CloudAccountIndicator, CloudPanel, useCloudAccount } from "./CloudPanel";
 
 type Session = {
   id: string;
@@ -158,7 +159,7 @@ function formatRunState(state: string) {
   return (
     {
       queued: "任务已排队",
-      running: "Agent 正在运行",
+      running: "智能体正在运行",
       waiting_confirmation: "等待确认",
       waiting_secret: "等待安全凭据",
       cancelling: "正在取消任务",
@@ -324,6 +325,9 @@ function upsertActivity(items: ActivityItem[], next: ActivityItem[]) {
 }
 
 function App() {
+  const [showCloud, setShowCloud] = useState(false);
+  const [cloudRefreshVersion, setCloudRefreshVersion] = useState(0);
+  const { account, accountError, refreshAccount } = useCloudAccount(cloudRefreshVersion);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -385,7 +389,7 @@ function App() {
         await loadTree(".");
       } catch (reason) {
         setError(
-          reason instanceof Error ? reason.message : "无法连接本地 Agent 服务",
+          reason instanceof Error ? reason.message : "无法连接本地智能体服务",
         );
       }
     })();
@@ -550,6 +554,7 @@ function App() {
     }
     if (payload.type === "session_title_failed") eventSource.current?.close();
     if (payload.type === "run_completed" || payload.type === "run_cancelled") {
+      setCloudRefreshVersion((version) => version + 1);
       void refreshTree();
       setRunning(false);
       setCancelling(false);
@@ -588,7 +593,7 @@ function App() {
     setRunning(true);
     setCancelling(false);
     setActivity([
-      { id: `${Date.now()}-start`, text: "正在启动 Agent", kind: "state" },
+      { id: `${Date.now()}-start`, text: "正在启动智能体", kind: "state" },
     ]);
     try {
       const status = await api<{ run_id: string }>(
@@ -823,6 +828,7 @@ function App() {
             />
           </div>
           <div className="sidebar-bottom">
+            <CloudAccountIndicator account={account} error={accountError} onClick={() => { setShowCloud(true); void refreshAccount(); }} />
             <button
               className="sidebar-link"
               onClick={() => setInspector("artifacts")}
@@ -888,7 +894,7 @@ function App() {
                   <span />
                   <span />
                 </div>
-                <span>Agent 正在检查任务…</span>
+                <span>智能体正在检查任务…</span>
                 <button
                   onClick={() => void cancelRun()}
                   className="cancel-inline"
@@ -970,7 +976,7 @@ function App() {
             </div>
             <div className="composer-footnote">
               <ShieldCheck size={12} />
-              本地项目安全边界已启用 · Agent 的文件操作会请求确认
+              本地项目安全边界已启用 · 智能体的文件操作会请求确认
             </div>
           </div>
         </main>
@@ -1048,6 +1054,9 @@ function App() {
           }}
         />
       )}
+      {showCloud && <CloudPanel account={account} accountError={accountError} refreshAccount={refreshAccount} sessionId={sessionId} onClose={() => setShowCloud(false)} onAccountChanged={() => {
+        void api<{ settings: Settings }>("/bootstrap").then((result) => setSettings(result.settings)).catch(() => setError("账户已更新，但工作区设置刷新失败，请刷新页面。"));
+      }} />}
     </div>
   );
 }
@@ -1122,7 +1131,7 @@ function Welcome({ onPrompt }: { onPrompt: (value: string) => void }) {
         <Sparkles size={23} />
       </div>
       <div className="eyebrow">AEROLYTICA RESEARCH WORKSPACE</div>
-      <h2>把下一个气象问题交给 Agent</h2>
+      <h2>把下一个气象问题交给智能体</h2>
       <p>从数据发现、下载、分析到可复现图件，在一个研究上下文里完成。</p>
       <div className="suggestion-grid">
         {suggestions.map((item) => (
@@ -1372,7 +1381,7 @@ function ActivityPanel({
       <div className="inspector-title">
         <div>
           <span className="eyebrow">LIVE RUN</span>
-          <h3>{running ? "Agent 正在工作" : "最近活动"}</h3>
+              <h3>{running ? "智能体正在工作" : "最近活动"}</h3>
         </div>
         {running && (
           <button
@@ -1398,7 +1407,7 @@ function ActivityPanel({
         <TerminalSquare size={23} />
         <p>{itemCount ? `${itemCount} 项操作记录` : "还没有运行活动"}</p>
         <span>
-          Agent 的操作过程会直接显示在对话中，任务完成后自动折叠，可点击记录标题重新展开。
+              智能体的操作过程会直接显示在对话中，任务完成后自动折叠，可点击记录标题重新展开。
         </span>
       </div>
     </div>
@@ -1421,7 +1430,7 @@ function ChangesPanel() {
       <div className="inspector-empty">
         <GitCompare size={24} />
         <p>当前没有待查看的变更</p>
-        <span>Agent 修改项目文件后，这里会显示安全检查点与差异。</span>
+                <span>智能体修改项目文件后，这里会显示安全检查点与差异。</span>
       </div>
     </div>
   );
@@ -1622,7 +1631,7 @@ function SettingsModal({
             <span className="eyebrow">
               {firstLaunch ? "FIRST RUN SETUP" : "WORKSPACE SETTINGS"}
             </span>
-            <h2>{firstLaunch ? "先配置你的 Agent" : "配置 Agent"}</h2>
+            <h2>{firstLaunch ? "先配置你的智能体" : "配置智能体"}</h2>
           </div>
           <button
             className="icon-button"

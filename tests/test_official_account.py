@@ -9,6 +9,7 @@ import pytest
 
 from aero.core.official_account import (
     CloudSyncClient,
+    OfficialAccountError,
     OfficialAccountSession,
     OfficialLoginRequiredError,
     OfficialSessionData,
@@ -147,3 +148,99 @@ async def test_cloud_sync_boundary_uses_shared_session():
     result = await sync.request("GET", "/v1/files", params={"cursor": "next"})
 
     assert result == ("GET", "/v1/files", {"params": {"cursor": "next"}})
+
+
+@pytest.mark.asyncio
+async def test_multiple_session_instances_share_rotating_token(secrets_path):
+    save_official_session(OfficialSessionData(
+        access_token="old", refresh_token="old-refresh", access_expires_at=1,
+        refresh_expires_at=time.time() + 3600, user_id="usr_1",
+    ))
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        await asyncio.sleep(0.02)
+        return httpx.Response(200, json=_token_payload())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        sessions = [OfficialAccountSession(client=client) for _ in range(4)]
+        assert await asyncio.gather(*(s.access_token() for s in sessions)) == ["jwt-new"] * 4
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_outage_does_not_log_user_out(secrets_path):
+    save_official_session(OfficialSessionData(
+        access_token="old", refresh_token="keep", access_expires_at=1,
+        refresh_expires_at=time.time() + 3600,
+    ))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(503)
+    )) as client:
+        with pytest.raises(OfficialAccountError, match="暂不可用"):
+            await OfficialAccountSession(client=client).access_token()
+    assert load_official_session().refresh_token == "keep"
+
+
+@pytest.mark.asyncio
+async def test_session_sees_logout_from_another_instance(secrets_path):
+    save_official_session(OfficialSessionData(
+        access_token="old", refresh_token="keep", access_expires_at=time.time() + 3600,
+    ))
+    session = OfficialAccountSession()
+    clear_official_session()
+    with pytest.raises(OfficialLoginRequiredError):
+        await session.access_token()
+    await session.close()
+
+
+@pytest.mark.asyncio
+async def test_upload_streams_without_jwt_then_completes(tmp_path):
+    path = tmp_path / "test.txt"
+    path.write_bytes(b"hello")
+    calls = []
+
+    class Session:
+        async def request(self, method, endpoint, **kwargs):
+            calls.append((endpoint, kwargs))
+            if endpoint.endswith("upload-url"):
+                return httpx.Response(200, json={
+                    "object_id": "obj_1", "upload_url": "https://oss.test/file",
+                })
+            return httpx.Response(200, json={"status": "active", "etag": "etag"})
+
+    async def put(request):
+        assert request.method == "PUT"
+        assert "authorization" not in request.headers
+        assert await request.aread() == b"hello"
+        return httpx.Response(200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(put)) as transfer:
+        result = await CloudSyncClient(Session(), transfer).upload_file(
+            path, project_id="p", directory_id="d",
+        )
+    assert result["status"] == "active"
+    assert calls[0][1]["json"]["project_id"] == "p"
+    assert calls[-1][0] == "/v1/storage/obj_1/complete"
+
+
+@pytest.mark.asyncio
+async def test_failed_put_releases_pending_upload(tmp_path):
+    path = tmp_path / "test.txt"
+    path.write_bytes(b"hello")
+    endpoints = []
+
+    class Session:
+        async def request(self, method, endpoint, **kwargs):
+            endpoints.append(endpoint)
+            return httpx.Response(200, json={
+                "object_id": "obj_1", "upload_url": "https://oss.test/file",
+            })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(403)
+    )) as transfer:
+        with pytest.raises(OfficialAccountError, match="上传失败"):
+            await CloudSyncClient(Session(), transfer).upload_file(path)
+    assert endpoints[-1] == "/v1/storage/obj_1/fail"

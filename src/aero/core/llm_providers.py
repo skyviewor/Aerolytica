@@ -5,9 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# Keep the official account implementation dormant until the public rollout.
-# This controls discoverability only; the provider/session code remains available.
-OFFICIAL_ACCOUNT_UI_ENABLED = False
+# Expose the official-account provider and login flows in the client UI.
+OFFICIAL_ACCOUNT_UI_ENABLED = True
 
 
 @dataclass(frozen=True)

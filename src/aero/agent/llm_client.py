@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -68,6 +69,10 @@ class LLMConfig:
 
     @property
     def endpoint(self) -> str:
+        if self.provider == "official":
+            from aero.core.official_account import relay_llm_url
+
+            return relay_llm_url() + "/chat/completions"
         if self.base_url:
             base_url = self.base_url.rstrip("/")
             if base_url.endswith(("/v1", "/v4")):
@@ -120,6 +125,7 @@ class LLMClient:
         self.last_search_references: list[str] = []
         self.last_search_performed = False
         self.last_request_started_at: datetime | None = None
+        self.last_request_id = ""
 
     async def close(self):
         await self._client.aclose()
@@ -136,6 +142,31 @@ class LLMClient:
         token = await self._official_session.access_token(force_refresh=force_refresh)
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
+    def _identify_request(self, headers: dict[str, str]) -> None:
+        if self.config.provider == "official":
+            self.last_request_id = uuid.uuid4().hex
+            headers["Idempotency-Key"] = self.last_request_id
+
+    async def _official_transport_failure(self, headers: dict[str, str]) -> None:
+        """An ambiguous billable request must never be blindly replayed."""
+        if self.config.provider != "official":
+            return
+        key = headers["Idempotency-Key"]
+        status = "unknown"
+        try:
+            from aero.core.official_account import relay_llm_url
+
+            url = relay_llm_url() + f"/requests/{key}"
+            result = await self._client.get(url, headers=await self._request_headers())
+            if result.status_code == 200:
+                status = str(result.json().get("status", "unknown"))
+        except (httpx.HTTPError, ValueError):
+            pass
+        raise RuntimeError(
+            f"官方模型连接中断（请求 {key}，状态 {status}）。"
+            "为避免重复执行或扣费，未自动重发；请查看官方额度明细后决定是否重新运行。"
+        )
+
     async def chat(self, messages: list[Message]) -> str:
         """Send messages to LLM and return text response."""
         response = await self._send(messages, tools=None)
@@ -148,6 +179,7 @@ class LLMClient:
         self.last_search_references = []
         self.last_search_performed = False
         headers = await self._request_headers()
+        self._identify_request(headers)
         body = self._request_body(messages, stream=True)
 
         logger.info("llm.stream", model=self.config.model)
@@ -162,7 +194,7 @@ class LLMClient:
                 ) as response:
                     if response.status_code == 401 and self.config.provider == "official":
                         if attempt < _TRANSIENT_RETRIES:
-                            headers = await self._request_headers(force_refresh=True)
+                            headers.update(await self._request_headers(force_refresh=True))
                             continue
                         raise RuntimeError(
                             "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
@@ -188,6 +220,8 @@ class LLMClient:
                         except json.JSONDecodeError:
                             continue
             except _TRANSIENT_HTTP_ERRORS as e:
+                if self.config.provider == "official":
+                    await self._official_transport_failure(headers)
                 if emitted:
                     raise _stream_interrupted_error(e) from e
                 if attempt < _TRANSIENT_RETRIES:
@@ -231,6 +265,7 @@ class LLMClient:
         self.last_search_references = []
         self.last_search_performed = False
         headers = await self._request_headers()
+        self._identify_request(headers)
         body = self._request_body(messages, tools=tools, stream=True)
 
         logger.info("llm.stream_tools", model=self.config.model, tool_count=len(tools))
@@ -248,7 +283,7 @@ class LLMClient:
                 ) as response:
                     if response.status_code == 401 and self.config.provider == "official":
                         if attempt < _TRANSIENT_RETRIES:
-                            headers = await self._request_headers(force_refresh=True)
+                            headers.update(await self._request_headers(force_refresh=True))
                             continue
                         raise RuntimeError(
                             "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
@@ -340,6 +375,8 @@ class LLMClient:
                             if "arguments" in fn:
                                 buf["function"]["arguments"] += fn["arguments"]
             except _TRANSIENT_HTTP_ERRORS as e:
+                if self.config.provider == "official":
+                    await self._official_transport_failure(headers)
                 if emitted:
                     raise _stream_interrupted_error(e) from e
                 if attempt < _TRANSIENT_RETRIES:
@@ -388,6 +425,7 @@ class LLMClient:
         self.last_search_references = []
         self.last_search_performed = False
         headers = await self._request_headers()
+        self._identify_request(headers)
         body = self._request_body(messages, tools=tools, stream=False)
         endpoint = self.config.endpoint
 
@@ -399,7 +437,7 @@ class LLMClient:
                 resp = await self._client.post(endpoint, json=body, headers=headers)
                 if resp.status_code == 401 and self.config.provider == "official":
                     if attempt < _TRANSIENT_RETRIES:
-                        headers = await self._request_headers(force_refresh=True)
+                        headers.update(await self._request_headers(force_refresh=True))
                         continue
                     raise RuntimeError(
                         "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
@@ -407,6 +445,8 @@ class LLMClient:
                 _raise_for_status(resp)
                 return resp.json()
             except _TRANSIENT_HTTP_ERRORS as e:
+                if self.config.provider == "official":
+                    await self._official_transport_failure(headers)
                 if attempt < _TRANSIENT_RETRIES:
                     logger.warning("llm.request.retry", error=repr(e), attempt=attempt + 1)
                     await asyncio.sleep(0.8 * (attempt + 1))

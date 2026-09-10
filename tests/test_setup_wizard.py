@@ -38,15 +38,16 @@ class WizardHost(App[None]):
 
 
 @pytest.mark.asyncio
-async def test_wizard_hides_official_account_source_until_rollout():
+async def test_wizard_offers_official_account_source():
     app = WizardHost()
 
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
         wizard = app.screen
         options = wizard.query_one("#setup-list", OptionList)
-        assert options.option_count == 1
+        assert options.option_count == 2
         assert options.get_option_at_index(0).id == "custom"
+        assert options.get_option_at_index(1).id == "official"
 
 
 @pytest.mark.asyncio

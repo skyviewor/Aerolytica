@@ -6745,27 +6745,20 @@ def _load_config() -> AeroConfig:
 
 
 def _serve(*, port: int, open_browser: bool) -> None:
-    """Run the local browser workbench without importing Textual widgets."""
+    """Start the detached local browser workbench through the resident service."""
     import webbrowser
 
-    import uvicorn
+    from aero.core.daemon import DaemonManager
 
-    from aero.server.app import create_app
-
-    launch_token = secrets.token_urlsafe(32)
-    app, runtime = create_app(Path.cwd(), launch_token=launch_token)
-    url = f"http://127.0.0.1:{port}/?token={launch_token}"
+    manager = DaemonManager(Path.cwd())
+    result = manager.start(port=port)
+    url = manager.browser_url()
     print(f"Aerolytica Web UI: {url}")
     print(f"项目目录: {Path.cwd().resolve()}")
-    print("按 Ctrl+C 停止服务。")
+    print(f"服务状态: {'运行中' if result.get('running') else '未运行'}")
     if open_browser:
         with suppress(Exception):
             webbrowser.open(url)
-    try:
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
-    finally:
-        with suppress(Exception):
-            asyncio.run(runtime.close())
 
 
 def _save_config(config: AeroConfig) -> None:
@@ -8483,6 +8476,12 @@ def main():
 
     cmd = sys.argv[1]
 
+    if cmd in {"service", "daemon", "web"}:
+        from aero.cli.daemon import main as daemon_main
+
+        daemon_main((["web"] if cmd == "web" else []) + sys.argv[2:])
+        return
+
     if cmd == "chat":
         chat_args = sys.argv[2:]
         removed_modes = [arg for arg in chat_args if arg in {"--simple", "--no-tui"}]
@@ -8491,7 +8490,7 @@ def main():
                 f"参数 {removed_modes[0]} 已移除；aero chat 现在只提供 Textual TUI 模式。"
             )
             sys.exit(2)
-        allowed_args = {"--mouse", "--no-mouse", "--continue", "-c"}
+        allowed_args = {"--mouse", "--no-mouse", "--continue", "-c", "--service", "--attach"}
         unknown_args = [arg for arg in chat_args if arg not in allowed_args]
         if unknown_args:
             print(f"未知参数: {unknown_args[0]}")
@@ -8508,14 +8507,21 @@ def main():
             standard_log_path=str(standard_log_path),
         )
 
-        config = _load_config()
+        if "--service" in chat_args or "--attach" in chat_args:
+            from aero.cli.attached_chat import AttachedChatApp
+            from aero.core.daemon import DaemonManager
 
-        app = AeroApp(config, resume_last_session=resume_last_session)
-        app.run(mouse=mouse_mode)
+            manager = DaemonManager(Path.cwd())
+            manager.start()
+            info = manager.connection_info()
+            AttachedChatApp(info["base_url"], info["token"]).run(mouse=mouse_mode)
+        else:
+            config = _load_config()
+            app = AeroApp(config, resume_last_session=resume_last_session)
+            app.run(mouse=mouse_mode)
 
     elif cmd == "serve":
         serve_args = sys.argv[2:]
-        allowed = {"--no-open"}
         port = 8765
         index = 0
         while index < len(serve_args):
@@ -8620,9 +8626,10 @@ Aero — 气象科研 AI Agent IDE
   aero runtime clean   删除 Aero 私有运行时（不影响项目和用户 Conda）
   aero agent register --name ocean [--description "备注"]  注册远程 Agent
   aero agent list       列出本地 Agent 及在线状态
-  aero agent run [Agent 名称或 Agent ID] [--cloud-memory]  前台常驻并等待云端指令
+  aero agent run [智能体名称或智能体 ID] [--cloud-memory]  前台常驻并等待云端指令
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
   aero chat            启动 Textual TUI 对话（支持中文输入和流式输出）
+  aero chat --service 通过本机常驻服务续接会话，关闭 TUI 不会终止任务
   aero chat --continue 续接当前目录上一次保存的会话（短参数: -c）
   aero serve           启动本地 Web Agent 工作台（默认端口 8765）
   aero serve --port N  使用指定端口启动本地 Web 工作台

@@ -9,7 +9,7 @@ import secrets
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,9 @@ class LocalSession:
         self.agent = AgentLoop(config)
         self.subagents = SubAgentManager()
         self.lock = asyncio.Lock()
+        # Hosting installs a fenced cloud project guard; foreground and background
+        # callers still use this same object and the same local project OS lock.
+        self.execution_guard = None
         self._events: dict[str, deque[RunEvent]] = {}
         self._event_counters: dict[str, int] = {}
         self._event_waiters: dict[str, asyncio.Condition] = {}
@@ -101,6 +104,19 @@ class LocalSession:
             for message in self.agent.messages
             if message.role in {"user", "assistant"}
         ]
+
+    def restore_messages(self, messages: list[dict[str, Any]]) -> None:
+        """Replace conversation context after an explicit cloud-memory restore."""
+        if self.metadata()["active_runs"]:
+            raise RuntimeError("cannot_restore_active_session")
+        restored: list[Message] = []
+        for item in messages:
+            role = str(item.get("role", ""))
+            content = str(item.get("content", ""))
+            if role in {"user", "assistant"} and content:
+                restored.append(Message(role=role, content=_safe_text(content)))
+        self.agent.messages = restored
+        self._save()
 
     def metadata(self) -> dict[str, Any]:
         active_runs = [
@@ -245,7 +261,49 @@ class LocalSession:
         self._run_tasks[run_id] = task
         return run_id
 
+    @asynccontextmanager
+    async def _project_lock(self):
+        from aero.core.daemon import WorkspaceLock
+
+        lock = WorkspaceLock(self.project_dir / ".aero" / "runtime" / "execution.lock")
+        while True:
+            try:
+                lock.acquire()
+                break
+            except BlockingIOError:
+                await asyncio.sleep(0.1)
+        try:
+            yield
+        finally:
+            lock.release()
+
     async def _run(self, run_id: str, prompt: str) -> None:
+        try:
+            async with self._project_lock():
+                async with AsyncExitStack() as stack:
+                    if self.execution_guard is not None:
+                        await stack.enter_async_context(self.execution_guard(run_id))
+                    await self._run_in_project(run_id, prompt)
+        except asyncio.CancelledError:
+            if self._run_states.get(run_id) != RunState.CANCELLED:
+                self._run_states[run_id] = RunState.CANCELLED
+                self._emit(run_id, "run_cancelled", {"state": RunState.CANCELLED.value})
+            raise
+        except Exception as exc:
+            self._run_states[run_id] = RunState.FAILED
+            self._run_errors[run_id] = _safe_text(exc)
+            self._emit(run_id, "error", {"message": _safe_text(exc)})
+            self._emit(run_id, "run_completed", {"state": RunState.FAILED.value})
+        finally:
+            self._run_tasks.pop(run_id, None)
+
+    async def wait_run(self, run_id: str) -> None:
+        """Wait until execution has actually quiesced, including cancellation."""
+        task = self._run_tasks.get(run_id)
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _run_in_project(self, run_id: str, prompt: str) -> None:
         self._run_states[run_id] = RunState.RUNNING
         self._emit(run_id, "run_state", {"state": RunState.RUNNING.value})
         workspace = self.project_dir
@@ -342,14 +400,12 @@ class LocalSession:
                 except asyncio.CancelledError:
                     self._run_states[run_id] = RunState.CANCELLED
                     self._emit(run_id, "run_cancelled", {"state": RunState.CANCELLED.value})
-                    self._run_tasks.pop(run_id, None)
                     raise
                 except Exception as exc:
                     self._run_states[run_id] = RunState.FAILED
                     self._run_errors[run_id] = _safe_text(exc)
                     self._emit(run_id, "error", {"message": _safe_text(exc)})
                     self._emit(run_id, "run_completed", {"state": RunState.FAILED.value})
-        self._run_tasks.pop(run_id, None)
 
     def _schedule_title_generation(self, run_id: str) -> None:
         if (

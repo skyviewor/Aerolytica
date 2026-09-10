@@ -42,6 +42,7 @@ class RemoteAgentRegistry:
         self._secrets = load_user_secrets()
 
     def list(self) -> list[RegisteredRemoteAgent]:
+        self._secrets = load_user_secrets()
         raw = self._secrets.get("remote_agents")
         records = raw.get("agents") if isinstance(raw, dict) else {}
         if not isinstance(records, dict):
@@ -160,6 +161,8 @@ class RemoteAgentClient:
         self.registry = RemoteAgentRegistry()
         selected = self.registry.resolve(agent_selector) if select_agent else None
         self.session = session or OfficialAccountSession()
+        self._owns_session = session is None
+        self._owns_http = agent_http is None
         self.agent_id = selected.agent_id if selected else ""
         self.agent_token = selected.token if selected else ""
         self.agent_name = selected.name if selected else ""
@@ -171,20 +174,29 @@ class RemoteAgentClient:
         )
 
     async def close(self) -> None:
-        await self._agent_http.aclose()
-        await self.session.close()
+        if self._owns_http:
+            await self._agent_http.aclose()
+        if self._owns_session:
+            await self.session.close()
 
     async def register(
         self,
         name: str,
         *,
         description: str = "",
+        project_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         name = self.registry.ensure_name_available(name)
         response = await self.session.request(
             "POST",
             "/v1/agents/register",
-            json={"name": name, "description": description[:500]},
+            json={
+                "name": name,
+                "description": description[:500],
+                **({"project_id": project_id} if project_id else {}),
+                **({"session_id": session_id} if session_id else {}),
+            },
         )
         if response.status_code >= 400:
             raise RemoteAgentError(_error(response, "远程 Agent 注册失败。"))
