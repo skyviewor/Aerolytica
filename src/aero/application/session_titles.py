@@ -7,23 +7,34 @@ import re
 from aero.core.types import Message
 
 
-def session_title_prompt(messages: list[Message], language: str) -> str:
-    transcript: list[str] = []
-    seen_user = False
+def _first_successful_exchange(messages: list[Message]) -> tuple[str, str] | None:
+    pending_user = ""
     for message in messages:
-        if message.role not in {"user", "assistant"} or not message.content.strip():
+        content = message.content.strip()
+        if message.role == "user" and content:
+            pending_user = content
             continue
-        if message.role == "assistant" and not seen_user:
-            continue
-        role = "用户" if message.role == "user" else "Aero"
-        content = clean_session_title_prompt_text(message.content)
-        if content:
-            transcript.append(f"{role}: {content}")
-        if message.role == "user":
-            seen_user = True
-        elif message.role == "assistant":
-            break
-    text = "\n".join(transcript) or "无有效对话内容"
+        if message.role == "assistant" and pending_user:
+            if content and not content.startswith("抱歉，出错了："):
+                return pending_user, content
+            pending_user = ""
+    return None
+
+
+def has_successful_first_exchange(messages: list[Message]) -> bool:
+    """Return true when at least one user turn has a real assistant answer."""
+    return _first_successful_exchange(messages) is not None
+
+
+def session_title_prompt(messages: list[Message], language: str) -> str:
+    exchange = _first_successful_exchange(messages)
+    text = "无有效对话内容"
+    if exchange is not None:
+        user_text, assistant_text = exchange
+        text = (
+            f"用户: {clean_session_title_prompt_text(user_text)}\n"
+            f"Aero: {clean_session_title_prompt_text(assistant_text)}"
+        )
     if language == "zh":
         return (
             "请根据下面第一轮对话为这个会话起一个简短标题。\n"

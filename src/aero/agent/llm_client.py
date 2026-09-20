@@ -205,11 +205,16 @@ class LLMClient:
                             continue
                         data_str = line.removeprefix("data: ")
                         if data_str == "[DONE]":
+                            if not emitted:
+                                raise RuntimeError(
+                                    "模型服务未返回有效正文，请稍后重试或切换模型。"
+                                )
                             self.last_usage = captured_usage
                             yield StreamEvent(type="done", usage=captured_usage)
                             return
                         try:
                             data = json.loads(data_str)
+                            _raise_for_stream_payload_error(data)
                             if "usage" in data:
                                 captured_usage = data["usage"]
                             delta = _first_choice(data).get("delta", {})
@@ -298,6 +303,14 @@ class LLMClient:
                             content_text, content_tool_calls = _parse_content_tool_calls(
                                 content_buffer
                             )
+                            if (
+                                not content_text
+                                and not content_tool_calls
+                                and not tool_calls_buffer
+                            ):
+                                raise RuntimeError(
+                                    "模型服务未返回有效正文或工具调用，请稍后重试或切换模型。"
+                                )
                             if len(content_text) > content_sent:
                                 emitted = True
                                 yield StreamEvent(
@@ -328,6 +341,7 @@ class LLMClient:
                             return
                         try:
                             data = json.loads(data_str)
+                            _raise_for_stream_payload_error(data)
                             if "usage" in data:
                                 captured_usage = data["usage"]
                             delta = _first_choice(data).get("delta", {})
@@ -939,6 +953,21 @@ def _error_message_from_body(body: str) -> str:
         if value:
             return str(value)
     return body
+
+
+def _raise_for_stream_payload_error(payload: object) -> None:
+    """Raise errors delivered inside an HTTP-200 SSE stream."""
+    if not isinstance(payload, dict):
+        return
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = str(error.get("message") or "模型服务返回流式错误")
+        code = str(error.get("code") or "upstream_error")
+        raise RuntimeError(f"模型服务请求失败（{code}）：{message}")
+    if "choices" not in payload and payload.get("message") and payload.get("code"):
+        raise RuntimeError(
+            f"模型服务请求失败（{payload['code']}）：{payload['message']}"
+        )
 
 
 async def _raise_for_status_stream(response: httpx.Response) -> None:

@@ -84,6 +84,10 @@ from aero.agent.subagent import (
     use_subagent_status_provider,
 )
 from aero.agent.checkpoint_context import use_checkpoint_creator
+from aero.application.session_titles import (
+    has_successful_first_exchange,
+    session_title_prompt as build_session_title_prompt,
+)
 from aero.core.config import (
     AeroConfig,
     clear_llm_api_key,
@@ -5363,7 +5367,9 @@ class AeroApp(App):
         mgr.save(sid, self.agent.messages, meta)
         if self._pending_session_title and meta.title_source == "manual":
             self._pending_session_title = ""
-        if meta.title_source == "pending":
+        if meta.title_source == "pending" and has_successful_first_exchange(
+            self.agent.messages
+        ):
             self._schedule_session_title_generation(
                 sid,
                 relay_turn_id=self.agent.llm.relay_turn_id,
@@ -8172,35 +8178,7 @@ def _normalize_checkpoint_title(title: str) -> str:
 
 
 def _session_title_prompt(messages: list[Message], language: str) -> str:
-    transcript = []
-    seen_user = False
-    for msg in messages:
-        if msg.role not in {"user", "assistant"} or not msg.content.strip():
-            continue
-        if msg.role == "assistant" and not seen_user:
-            continue
-        if msg.role == "user" and seen_user:
-            break
-        role = "用户" if msg.role == "user" else "Aero"
-        content = _clean_session_title_prompt_text(msg.content)
-        if content:
-            transcript.append(f"{role}: {content}")
-        if msg.role == "user":
-            seen_user = True
-        elif msg.role == "assistant":
-            break
-    text = "\n".join(transcript) or "无有效对话内容"
-    if language == "zh":
-        return (
-            "请根据下面第一轮对话为这个会话起一个简短标题。\n"
-            "要求：中文优先，8到18个字；不要加引号；不要解释；不要句号。\n\n"
-            f"{text}\n\n标题："
-        )
-    return (
-        "Create a short title for this chat from the first exchange below.\n"
-        "Requirements: 3 to 8 words, no quotes, no explanation, no trailing period.\n\n"
-        f"{text}\n\nTitle:"
-    )
+    return build_session_title_prompt(messages, language)
 
 
 def _clean_session_title_prompt_text(text: str) -> str:

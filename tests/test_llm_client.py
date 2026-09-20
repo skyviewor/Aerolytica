@@ -751,6 +751,85 @@ async def test_llm_stream_ignores_usage_only_chunk_with_empty_choices():
 
 
 @pytest.mark.asyncio
+async def test_llm_tool_stream_raises_error_delivered_inside_http_200_sse():
+    from unittest.mock import patch
+
+    class FakeStreamResponse:
+        is_error = False
+        status_code = 200
+
+        async def aread(self):
+            return b""
+
+        def raise_for_status(self):
+            pass
+
+        async def aiter_lines(self):
+            yield (
+                'data: {"error":{"message":"tool_stream is required",'
+                '"type":"upstream_error","code":"InvalidParameter"}}'
+            )
+            yield "data: [DONE]"
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeStreamResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    client = LLMClient(LLMConfig(api_key="sk-test"))
+    with patch.object(client._client, "stream", return_value=FakeStream()):
+        with pytest.raises(RuntimeError, match="InvalidParameter.*tool_stream is required"):
+            _ = [
+                event
+                async for event in client.chat_with_tools_stream(
+                    [Message(role="user", content="Hi")],
+                    tools=[],
+                )
+            ]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_llm_tool_stream_rejects_empty_success_response():
+    from unittest.mock import patch
+
+    class FakeStreamResponse:
+        is_error = False
+        status_code = 200
+
+        async def aread(self):
+            return b""
+
+        def raise_for_status(self):
+            pass
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0}}'
+            yield "data: [DONE]"
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeStreamResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    client = LLMClient(LLMConfig(api_key="sk-test"))
+    with patch.object(client._client, "stream", return_value=FakeStream()):
+        with pytest.raises(RuntimeError, match="未返回有效正文或工具调用"):
+            _ = [
+                event
+                async for event in client.chat_with_tools_stream(
+                    [Message(role="user", content="Hi")],
+                    tools=[],
+                )
+            ]
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_non_streaming_empty_choices_returns_empty_text():
     from unittest.mock import AsyncMock, patch
 

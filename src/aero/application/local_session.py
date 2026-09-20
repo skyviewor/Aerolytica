@@ -26,6 +26,7 @@ from aero.agent.subagent import (
 from aero.application.events import RunEvent, RunState
 from aero.application.session_titles import (
     fallback_session_title,
+    has_successful_first_exchange,
     normalize_session_title,
     session_title_prompt,
 )
@@ -420,6 +421,7 @@ class LocalSession:
             self._session_meta.title_source != "pending"
             or run_id in self._title_tasks
             or not self.config.llm.active_api_key()
+            or not has_successful_first_exchange(self.agent.messages)
         ):
             return
         self._title_pending[run_id] = True

@@ -93,6 +93,7 @@ def test_run_generates_and_persists_automatic_session_title(tmp_path, monkeypatc
 
     async def fake_run(prompt: str):
         session.agent.messages.append(Message(role="user", content=prompt))
+        session.agent.messages.append(Message(role="assistant", content="完成研究任务"))
         yield StreamEvent(type="text", content="完成研究任务")
         yield StreamEvent(type="done")
 
