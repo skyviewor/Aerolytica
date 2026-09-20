@@ -88,6 +88,8 @@ def test_run_generates_and_persists_automatic_session_title(tmp_path, monkeypatc
     created = client.post("/api/v1/sessions")
     session_id = created.json()["id"]
     session = runtime.active_sessions[session_id]
+    session.agent.llm.relay_turn_id = "turn-title-test"
+    title_clients = []
 
     async def fake_run(prompt: str):
         session.agent.messages.append(Message(role="user", content=prompt))
@@ -96,7 +98,8 @@ def test_run_generates_and_persists_automatic_session_title(tmp_path, monkeypatc
 
     class FakeTitleClient:
         def __init__(self, _config):
-            pass
+            self.relay_turn_id = ""
+            title_clients.append(self)
 
         async def chat(self, _messages):
             return "华北气温研究"
@@ -113,6 +116,7 @@ def test_run_generates_and_persists_automatic_session_title(tmp_path, monkeypatc
     assert "session_title_updated" in response.text
     assert runtime.active_sessions[session_id].metadata()["name"] == "华北气温研究"
     assert runtime.sessions.load(session_id)[1].title_source == "auto"
+    assert title_clients[0].relay_turn_id == "session-title:turn-title-test"
 
 
 def test_settings_never_returns_secret(tmp_path, monkeypatch):

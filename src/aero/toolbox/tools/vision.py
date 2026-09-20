@@ -16,12 +16,16 @@ from aero.toolbox.registry import register_tool
 
 
 def _ensure_vision_client():
-    from aero.agent.vision_client import VisionClient
-
     config = find_config()
     vision_config = resolved_vision_config(config)
     if vision_config is None:
         return None, config, None
+    if config.llm.provider == "official" and vision_config.mode == "official":
+        from aero.agent.official_vision_client import OfficialVisionClient
+
+        return OfficialVisionClient(vision_config), config, vision_config
+    from aero.agent.vision_client import VisionClient
+
     return VisionClient(vision_config), config, vision_config
 
 

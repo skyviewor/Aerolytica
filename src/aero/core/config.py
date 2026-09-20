@@ -462,7 +462,7 @@ def save_vision_profile(
     base_url: str = "",
 ) -> None:
     """Persist visual-model selection without duplicating a provider credential."""
-    if mode not in {"reuse_primary", "separate", "unconfigured"}:
+    if mode not in {"official", "reuse_primary", "separate", "unconfigured"}:
         raise ValueError(f"Unsupported vision mode: {mode}")
     secrets = load_user_secrets()
     vision = secrets.setdefault("vision", {})
@@ -525,6 +525,10 @@ def save_web_search_state(
 
 
 def vision_is_configured(config: AeroConfig) -> bool:
+    if config.llm.provider == "official" and config.vision.mode == "official":
+        from aero.core.official_account import load_official_session
+
+        return bool(config.vision.model and load_official_session().is_logged_in)
     if config.vision.mode == "separate":
         return bool(config.vision.model and _separate_vision_api_key(config))
     if config.vision.mode == "reuse_primary":
@@ -542,6 +546,17 @@ def vision_is_configured(config: AeroConfig) -> bool:
 
 
 def resolved_vision_config(config: AeroConfig) -> VisionConfig | None:
+    if config.llm.provider == "official" and config.vision.mode == "official":
+        from aero.core.official_account import relay_llm_url
+
+        return VisionConfig(
+            mode="official",
+            provider="official",
+            model=config.vision.model or "default",
+            api_key="",
+            base_url=relay_llm_url(),
+            cache_ttl_hours=config.vision.cache_ttl_hours,
+        )
     if config.vision.mode == "reuse_primary" and config.vision.model:
         saved_api_key = _separate_vision_api_key(config)
         if saved_api_key:

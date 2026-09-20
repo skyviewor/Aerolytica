@@ -116,6 +116,30 @@ async def test_authenticated_request_refreshes_once_after_401(secrets_path):
 
 
 @pytest.mark.asyncio
+async def test_request_to_uses_jwt_for_relay_model_catalog(secrets_path):
+    save_official_session(
+        OfficialSessionData(
+            access_token="jwt-catalog",
+            refresh_token="rfr-catalog",
+            access_expires_at=time.time() + 3600,
+            refresh_expires_at=time.time() + 7200,
+            user_id="usr_1",
+        )
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://llm.test/v1/models"
+        assert request.headers["Authorization"] == "Bearer jwt-catalog"
+        return httpx.Response(200, json={"object": "list", "data": []}, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        session = OfficialAccountSession(base_url="https://api.test", client=client)
+        response = await session.request_to("https://llm.test/v1", "GET", "/models")
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_expired_refresh_token_clears_session(secrets_path):
     save_official_session(
         OfficialSessionData(

@@ -256,13 +256,32 @@ class OfficialAccountSession:
         retry_unauthorized: bool = True,
         **kwargs: Any,
     ) -> httpx.Response:
+        return await self.request_to(
+            self.base_url,
+            method,
+            path,
+            retry_unauthorized=retry_unauthorized,
+            **kwargs,
+        )
+
+    async def request_to(
+        self,
+        base_url: str,
+        method: str,
+        path: str,
+        *,
+        retry_unauthorized: bool = True,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Call another official service with this account's JWT session."""
         owner = self.data.user_id
         token = await self.access_token()
         headers = dict(kwargs.pop("headers", {}) or {})
         headers["Authorization"] = f"Bearer {token}"
+        url = f"{base_url.rstrip('/')}{path}"
         try:
             response = await self._client.request(
-                method, f"{self.base_url}{path}", headers=headers, **kwargs
+                method, url, headers=headers, **kwargs
             )
         except httpx.HTTPError as exc:
             raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
@@ -275,7 +294,7 @@ class OfficialAccountSession:
             headers["Authorization"] = f"Bearer {token}"
             try:
                 response = await self._client.request(
-                    method, f"{self.base_url}{path}", headers=headers, **kwargs
+                    method, url, headers=headers, **kwargs
                 )
             except httpx.HTTPError as exc:
                 raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc

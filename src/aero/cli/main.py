@@ -87,9 +87,11 @@ from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.core.config import (
     AeroConfig,
     clear_llm_api_key,
+    load_user_secrets,
     resolved_vision_config,
     save_cds_credentials,
     save_llm_profile,
+    save_user_secrets,
     save_vision_api_key,
     save_vision_profile,
     save_web_search_api_key,
@@ -104,6 +106,7 @@ from aero.core.llm_providers import (
     normalize_provider_id,
     provider_options,
 )
+from aero.core.official_models import OfficialModel, OfficialModelCatalog
 from aero.core.logging import configure as configure_logging
 from aero.data.plans import set_session_id
 from aero.data.pricing import TokenTracker, context_window_for, format_cost, format_token_count
@@ -792,6 +795,63 @@ class OfficialLoginScreen(ModalScreen[dict[str, str] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class OfficialLoginApp(App[bool]):
+    """A focused official-account login flow without opening the chat UI."""
+
+    CSS = """
+    Screen {
+        background: $background;
+    }
+    """
+
+    def on_mount(self) -> None:
+        self.push_screen(OfficialLoginScreen(), self._handle_credentials)
+
+    def _handle_credentials(self, credentials: dict[str, str] | None) -> None:
+        if credentials is None:
+            self.exit(False)
+            return
+        self.run_worker(self._login(credentials), exclusive=True)
+
+    async def _login(self, credentials: dict[str, str]) -> None:
+        from aero.core.official_account import OfficialAccountError, OfficialAccountSession
+
+        session = OfficialAccountSession()
+        try:
+            account = await session.login(credentials["email"], credentials["password"])
+        except OfficialAccountError as exc:
+            self.notify(str(exc), severity="error", timeout=5)
+            self.push_screen(OfficialLoginScreen(), self._handle_credentials)
+            return
+        finally:
+            await session.close()
+
+        self.notify(f"已登录 {account.email}", severity="information")
+        self.exit(True)
+
+
+def _activate_official_account_provider() -> None:
+    """Make future local chat and Agent processes use the official Relay."""
+    from aero.core.official_account import relay_llm_url
+
+    save_llm_profile("official", "", "auto", relay_llm_url())
+
+
+def run_official_login() -> int:
+    """Run the standalone official-account login command."""
+    if not OFFICIAL_ACCOUNT_UI_ENABLED:
+        print("当前版本未启用 Aerolytica 官方账户登录。")
+        return 1
+    result = OfficialLoginApp().run()
+    if result:
+        _activate_official_account_provider()
+        print("登录成功，已启用 Aerolytica 官方模型。")
+        print("现在可直接运行 aero agent register 或 aero agent run。")
+        return 0
+    print("登录已取消。")
+    return 1
 
 
 class HelpScreen(ModalScreen[None]):
@@ -1718,6 +1778,7 @@ class AeroApp(App):
         self._footer_status_token = 0
         self._footer_temp_text = ""
         self._official_available_credits: str | None = None
+        self._official_model_catalog: OfficialModelCatalog | None = None
         self._subagent_notice_until = 0.0
         self._subagent_footer_active = False
         self._subagent_footer_frame = 0
@@ -1739,6 +1800,8 @@ class AeroApp(App):
         self._experiment_finish_worker: Worker | None = None
         self._project_dir = Path.cwd().resolve()
         self._session_id: str | None = None
+        self._official_text_override = ""
+        self._official_vision_override = ""
         self._session_saved_on_exit = False
         self._session_title_workers: set[str] = set()
         self._pending_session_title: str = ""
@@ -2517,6 +2580,14 @@ class AeroApp(App):
             self._image_attachments = []
             self._chat_log = [t("app.conversation_cleared", lang)]
             self._session_id = None
+            self._official_text_override = ""
+            self._official_vision_override = ""
+            if self.config.llm.provider == "official":
+                self.config.llm.model = "default"
+                self.config.vision.mode = "official"
+                self.config.vision.provider = "official"
+                self.config.vision.model = "default"
+                self._sync_agent_llm_config()
             set_session_id(None)
             chat.mount(
                 Static(
@@ -2550,6 +2621,11 @@ class AeroApp(App):
 
         if text == "/provider" or text.startswith("/provider "):
             self._handle_provider_command(text)
+            self.query_one("#user-input", TextArea).focus()
+            return
+
+        if text == "/ai-mode" or text.startswith("/ai-mode "):
+            self._handle_ai_mode_command(text)
             self.query_one("#user-input", TextArea).focus()
             return
 
@@ -3193,6 +3269,7 @@ class AeroApp(App):
             ("/new", t("cmd.new", self.config.language)),
             ("/preview", t("cmd.preview", self.config.language)),
             ("/provider", t("cmd.provider", self.config.language)),
+            ("/ai-mode official|byok", "整体切换官方 / BYOK 推理模式"),
             ("/quit", t("cmd.quit", self.config.language)),
             ("/revoke", t("cmd.revoke", self.config.language)),
             ("/set", t("cmd.set", self.config.language)),
@@ -3262,6 +3339,9 @@ class AeroApp(App):
         parts = text.split(maxsplit=1)
         lang = self.config.language
         if len(parts) == 1:
+            if self.config.llm.provider == "official":
+                self.run_worker(self._open_official_model_picker(), exclusive=True)
+                return
             self.push_screen(
                 SelectScreen(
                     "Select model",
@@ -3273,6 +3353,49 @@ class AeroApp(App):
             )
             return
         self._set_model(parts[1].strip())
+
+    def _official_models(self) -> OfficialModelCatalog:
+        if self._official_model_catalog is None:
+            self._official_model_catalog = OfficialModelCatalog()
+        return self._official_model_catalog
+
+    async def _open_official_model_picker(self) -> None:
+        catalog = self._official_models()
+        self._set_footer_status("正在获取 Aerolytica 官方模型列表…")
+        preferences = await catalog.official_preferences()
+        if catalog.last_error is not None:
+            self.notify(
+                "官方模型列表刷新失败，已使用"
+                f"{'缓存' if catalog.has_cached_models else '默认'}列表。",
+                severity="warning",
+                timeout=5,
+            )
+        self.push_screen(
+            SelectScreen(
+                "Select model",
+                _official_model_options(
+                    preferences.text_models,
+                    include_follow_default=True,
+                    default_model=preferences.text_default,
+                ),
+                self.config.llm.model,
+                self.config.language,
+                hint="模型列表来自 Aerolytica 官方服务，按需定期刷新。",
+            ),
+            callback=self._apply_selected_model,
+        )
+
+    def _handle_ai_mode_command(self, text: str) -> None:
+        parts = text.split(maxsplit=1)
+        if len(parts) == 1:
+            current = "official" if self.config.llm.provider == "official" else "byok"
+            self._set_footer_status(f"当前推理模式：{current}（可用 /ai-mode official|byok 切换）")
+            return
+        mode = parts[1].strip().lower()
+        if mode not in {"official", "byok"}:
+            self._set_footer_status("用法：/ai-mode official|byok")
+            return
+        self._set_ai_mode(mode)
 
     def _handle_preview_command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -3362,11 +3485,72 @@ class AeroApp(App):
             return
         self._set_provider(parts[1].strip())
 
+    def _set_ai_mode(self, mode: str) -> None:
+        """Switch the complete inference stack without affecting cloud login."""
+        from aero.core.official_account import load_official_session, relay_llm_url
+
+        if mode == "official":
+            if not load_official_session().is_logged_in:
+                self._set_footer_status("请先使用 /login 登录 Aerolytica 官方账户。")
+                return
+            secrets = load_user_secrets()
+            current_vision = secrets.get("vision")
+            if isinstance(current_vision, dict) and current_vision.get("mode") != "official":
+                secrets["byok_vision"] = dict(current_vision)
+            self.config.llm.provider = "official"
+            self.config.llm.model = "default"
+            self.config.llm.base_url = relay_llm_url()
+            self.config.llm.supports_vision = False
+            self.config.vision.mode = "official"
+            self.config.vision.provider = "official"
+            self.config.vision.model = "default"
+            self.config.vision.api_key = ""
+            self._official_text_override = ""
+            self._official_vision_override = ""
+            save_user_secrets(secrets)
+            save_vision_profile("official", provider="official", model="default", base_url=relay_llm_url())
+            save_llm_profile("official", "", "default", relay_llm_url())
+            if self.persist_config:
+                _save_config(self.config)
+            self._init_agent()
+            self._refresh_model_info()
+            self._set_footer_status("已切换到官方模式；文本和视觉请求都会通过 Relay 扣除官方额度。")
+            self.run_worker(self._refresh_official_credits(), exclusive=False)
+            return
+
+        secrets = load_user_secrets()
+        remembered = str(secrets.get("last_byok_provider") or "").strip()
+        candidates = [remembered, self.config.llm.provider]
+        candidates.extend(provider for provider, profile in self.config.llm.providers.items() if profile.api_key)
+        provider = next(
+            (item for item in candidates if item and item != "official" and self.config.llm.provider_config(item).api_key),
+            "",
+        )
+        if not provider:
+            self._set_footer_status("尚未配置 BYOK 模型服务，请使用 /provider 配置。")
+            self.call_after_refresh(self._open_provider_setup, "deepseek")
+            return
+        self.config.llm.switch_provider(provider)
+        vision = secrets.get("byok_vision")
+        if isinstance(vision, dict):
+            self.config.vision.mode = str(vision.get("mode") or "unconfigured")
+            self.config.vision.provider = str(vision.get("provider") or "bailian")
+            self.config.vision.model = str(vision.get("model") or "qwen3.7-plus")
+            self.config.vision.base_url = str(vision.get("base_url") or "")
+            self.config.vision.api_key = str(vision.get("api_key") or "")
+        self._official_text_override = ""
+        self._official_vision_override = ""
+        if self.persist_config:
+            _save_config(self.config)
+        save_user_secrets({**secrets, "last_byok_provider": provider})
+        self._sync_agent_llm_config()
+        self._refresh_model_info()
+        self._set_footer_status(f"已切换到 BYOK 模式：{_display_provider_name(provider)}。")
+
     async def _handle_official_login(self) -> None:
         from aero.core.official_account import (
             OfficialAccountError,
             OfficialAccountSession,
-            relay_llm_url,
         )
 
         credentials = await self.push_screen_wait(OfficialLoginScreen())
@@ -3383,15 +3567,7 @@ class AeroApp(App):
         finally:
             await session.close()
 
-        self.config.llm.provider = "official"
-        self.config.llm.model = "auto"
-        self.config.llm.base_url = relay_llm_url()
-        self.config.llm.supports_vision = False
-        self.config.llm.apply_active_provider_defaults()
-        save_llm_profile("official", "", "auto", self.config.llm.base_url)
-        if self.persist_config:
-            _save_config(self.config)
-        self._init_agent()
+        self._set_ai_mode("official")
         await self._refresh_official_credits()
         self._refresh_model_info()
         self._set_footer_status(
@@ -3543,6 +3719,13 @@ class AeroApp(App):
         self.query_one("#user-input", TextArea).focus()
 
     def _handle_vision_command(self, text: str) -> None:
+        if self.config.llm.provider == "official":
+            parts = text.split(maxsplit=1)
+            if len(parts) == 1:
+                self.run_worker(self._open_official_vision_picker(), exclusive=True)
+            else:
+                self._set_official_vision_model(parts[1].strip())
+            return
         from aero.data.vision_models import is_valid_vision_model, vision_model_options
 
         parts = text.split(maxsplit=1)
@@ -3575,9 +3758,46 @@ class AeroApp(App):
             return
         self._set_vision_model(value)
 
+    async def _open_official_vision_picker(self) -> None:
+        catalog = self._official_models()
+        self._set_footer_status("正在获取 Aerolytica 官方视觉模型列表…")
+        preferences = await catalog.official_preferences()
+        self.push_screen(
+            SelectScreen(
+                "Select vision model",
+                _official_model_options(
+                    preferences.vision_models,
+                    include_follow_default=True,
+                    default_model=preferences.vision_default,
+                ),
+                self.config.vision.model,
+                self.config.language,
+                hint="视觉模型来自当前账户的官方视觉模型池。",
+            ),
+            callback=self._apply_selected_vision_model,
+        )
+
+    def _set_official_vision_model(self, value: str) -> None:
+        value = value.strip()
+        if value not in {"default", "auto"}:
+            cached = self._official_models().preferences
+            allowed = {item.id for item in cached.vision_models} if cached else set()
+            if value not in allowed:
+                self._set_footer_status("该模型不在当前官方视觉模型池中。")
+                return
+        self._official_vision_override = "" if value == "default" else value
+        self.config.vision.mode = "official"
+        self.config.vision.provider = "official"
+        self.config.vision.model = value
+        self.config.vision.api_key = ""
+        self._refresh_model_info()
+        self._set_footer_status(f"官方视觉模型已切换为 {value}。")
+
     def _apply_selected_vision_model(self, selected: str | None) -> None:
         if selected == _REUSE_PRIMARY_VISION_OPTION:
             self._reuse_primary_vision_model()
+        elif selected is not None and self.config.llm.provider == "official":
+            self._set_official_vision_model(selected)
         elif selected is not None:
             self._set_vision_model(selected)
         self.query_one("#user-input", TextArea).focus()
@@ -4940,6 +5160,8 @@ class AeroApp(App):
             model=self.config.llm.model,
             provider=self.config.llm.provider,
             vision_model=self.config.vision.model,
+            official_text_model=self._official_text_override,
+            official_vision_model=self._official_vision_override,
             mode=self.config.mode,
             title_source="experiment",
             project_dir=str(self._project_dir),
@@ -5009,6 +5231,14 @@ class AeroApp(App):
         messages, meta = self._get_session_mgr().load_snapshot(snapshot)
         self.agent.messages = messages
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
+        if self.config.llm.provider == "official":
+            self._official_text_override = meta.official_text_model or ""
+            self._official_vision_override = meta.official_vision_model or ""
+            self.config.llm.model = self._official_text_override or "default"
+            self.config.vision.mode = "official"
+            self.config.vision.provider = "official"
+            self.config.vision.model = self._official_vision_override or "default"
+            self._sync_agent_llm_config()
         self._session_id = uuid.uuid4().hex[:12]
         set_session_id(self._session_id)
         self._pending_session_title = f"{meta.name}（恢复）" if meta.name else "恢复的会话"
@@ -5057,6 +5287,14 @@ class AeroApp(App):
             self.agent.messages = [self.agent.messages[0]]
             self.agent.tracker = TokenTracker()
         self._session_id = None
+        self._official_text_override = ""
+        self._official_vision_override = ""
+        if self.config.llm.provider == "official":
+            self.config.llm.model = "default"
+            self.config.vision.mode = "official"
+            self.config.vision.provider = "official"
+            self.config.vision.model = "default"
+            self._sync_agent_llm_config()
         set_session_id(None)
         self._pending_session_title = title
         self._session_saved_on_exit = False
@@ -5115,6 +5353,8 @@ class AeroApp(App):
             model=self.config.llm.model,
             provider=self.config.llm.provider,
             vision_model=self.config.vision.model,
+            official_text_model=self._official_text_override,
+            official_vision_model=self._official_vision_override,
             mode=self.config.mode,
             title_source=source,
             project_dir=str(self._project_dir),
@@ -5124,15 +5364,26 @@ class AeroApp(App):
         if self._pending_session_title and meta.title_source == "manual":
             self._pending_session_title = ""
         if meta.title_source == "pending":
-            self._schedule_session_title_generation(sid)
+            self._schedule_session_title_generation(
+                sid,
+                relay_turn_id=self.agent.llm.relay_turn_id,
+            )
 
-    def _schedule_session_title_generation(self, session_id: str) -> None:
+    def _schedule_session_title_generation(
+        self,
+        session_id: str,
+        *,
+        relay_turn_id: str = "",
+    ) -> None:
         if session_id in self._session_title_workers:
             return
         self._session_title_workers.add(session_id)
         try:
             self.run_worker(
-                self._generate_session_title(session_id),
+                self._generate_session_title(
+                    session_id,
+                    relay_turn_id=relay_turn_id,
+                ),
                 exclusive=False,
                 group="session-title",
             )
@@ -5140,7 +5391,12 @@ class AeroApp(App):
             self._session_title_workers.discard(session_id)
             debug_log("tui.session_title_schedule_failed", error=str(e))
 
-    async def _generate_session_title(self, session_id: str) -> None:
+    async def _generate_session_title(
+        self,
+        session_id: str,
+        *,
+        relay_turn_id: str = "",
+    ) -> None:
         try:
             mgr = self._get_session_mgr()
             loaded = mgr.load(session_id)
@@ -5160,6 +5416,8 @@ class AeroApp(App):
                     base_url=self.config.llm.base_url,
                 )
                 client = LLMClient(llm_cfg)
+                title_source_id = relay_turn_id or secrets.token_hex(16)
+                client.relay_turn_id = f"session-title:{title_source_id}"[:64]
                 prompt = _session_title_prompt(messages, self.config.language)
                 title = await client.chat([Message(role="user", content=prompt)])
             except Exception as e:
@@ -5242,6 +5500,13 @@ class AeroApp(App):
             return False
         if self._session_id == session_id:
             self._session_id = None
+            self._official_text_override = ""
+            self._official_vision_override = ""
+            if self.config.llm.provider == "official":
+                self.config.llm.model = "default"
+                self.config.vision.model = "default"
+                self.config.vision.mode = "official"
+                self._sync_agent_llm_config()
             set_session_id(None)
         message = t("app.session_deleted", self.config.language).format(id=session_id)
         self._set_footer_status(message)
@@ -5274,6 +5539,14 @@ class AeroApp(App):
             self._init_agent()
         self.agent.messages = messages
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
+        if self.config.llm.provider == "official":
+            self._official_text_override = meta.official_text_model or ""
+            self._official_vision_override = meta.official_vision_model or ""
+            self.config.llm.model = self._official_text_override or "default"
+            self.config.vision.mode = "official"
+            self.config.vision.provider = "official"
+            self.config.vision.model = self._official_vision_override or "default"
+            self._sync_agent_llm_config()
         self.config.mode = meta.mode or self.config.mode
         self.agent.config.mode = self.config.mode
         self.agent.reset_system_prompt(lang)
@@ -5786,6 +6059,25 @@ class AeroApp(App):
     def _set_model(self, value: str) -> None:
         lang = self.config.language
         chat = self.query_one("#chat-area", VerticalScroll)
+        if self.config.llm.provider == "official":
+            value = value.strip()
+            if value == "default":
+                self._official_text_override = ""
+            elif value == "auto":
+                self._official_text_override = "auto"
+            else:
+                cached = self._official_models().preferences
+                allowed = {item.id for item in cached.text_models} if cached else set()
+                if value not in allowed:
+                    chat.mount(Static("该模型不在当前官方文本模型池中。"))
+                    return
+                self._official_text_override = value
+            self.config.llm.model = value
+            self.config.llm.base_url = self.config.llm.base_url or ""
+            self._sync_agent_llm_config()
+            self._refresh_model_info()
+            self._set_footer_status(f"官方文本模型已切换为 {value}。")
+            return
         model = _resolve_model_alias(self.config.llm.provider, value)
         if not model:
             chat.mount(Static(t("error.model_empty", lang)))
@@ -5809,6 +6101,12 @@ class AeroApp(App):
         lang = self.config.language
         previous_provider = self.config.llm.provider
         provider = normalize_provider_id(value)
+        if provider == "official":
+            self._set_ai_mode("official")
+            return
+        if previous_provider == "official":
+            self._set_ai_mode("byok")
+            previous_provider = self.config.llm.provider
         if provider == "official" and not OFFICIAL_ACCOUNT_UI_ENABLED:
             self.query_one("#chat-area", VerticalScroll).mount(
                 Static("[error]当前版本暂未开放 Aerolytica 官方模型。[/error]")
@@ -5832,6 +6130,8 @@ class AeroApp(App):
         self._sync_agent_llm_config()
         if provider != "official":
             self._official_available_credits = None
+            secrets = load_user_secrets()
+            save_user_secrets({**secrets, "last_byok_provider": provider})
         if self.persist_config:
             _save_config(self.config)
         self._refresh_model_info()
@@ -7238,6 +7538,48 @@ def _model_options(provider: str) -> list[tuple[str, Any]]:
     ]
 
 
+def _official_model_options(
+    models: tuple[OfficialModel, ...],
+    *,
+    include_follow_default: bool = False,
+    default_model: str = "auto",
+) -> list[tuple[str, Any]]:
+    """Build picker rows entirely from the Relay-owned model metadata."""
+    options: list[tuple[str, Any]] = []
+    if include_follow_default:
+        prompt = Table.grid(expand=True, padding=0)
+        prompt.add_column(width=22, no_wrap=True)
+        prompt.add_column(ratio=1, no_wrap=True)
+        prompt.add_row("default", f"跟随后台默认（当前：{default_model}）")
+        options.append(("default", prompt))
+    for model in models:
+        prompt = Table.grid(expand=True, padding=0)
+        prompt.add_column(width=22, no_wrap=True)
+        prompt.add_column(width=22, no_wrap=True)
+        prompt.add_column(ratio=1, no_wrap=True)
+        prompt.add_column(width=4, justify="right", no_wrap=True)
+        capabilities = "、".join(model.capabilities)
+        description = " · ".join(
+            value
+            for value in (
+                model.description,
+                f"能力：{capabilities}" if capabilities else "",
+            )
+            if value
+        )
+        description_text = description
+        if model.price_multiplier:
+            description_text = f"{description_text} · 价格提示：{model.price_multiplier}"
+        prompt.add_row(
+            model.id,
+            model.display_name,
+            description_text,
+            "推荐" if model.recommended else "",
+        )
+        options.append((model.id, prompt))
+    return options
+
+
 def _variant_options() -> list[tuple[str, str]]:
     return [
         ("", "Auto    provider default"),
@@ -7945,6 +8287,7 @@ def _help_text(lang: str) -> str:
         t("help.slash_model", lang),
         t("help.slash_preview", lang),
         t("help.slash_provider", lang),
+        "  /ai-mode official|byok  整体切换官方或 BYOK 推理模式",
         t("help.slash_theme", lang),
         t("help.slash_variants", lang),
         t("help.slash_vision", lang),
@@ -8520,6 +8863,14 @@ def main():
             app = AeroApp(config, resume_last_session=resume_last_session)
             app.run(mouse=mouse_mode)
 
+    elif cmd == "login":
+        if sys.argv[2:]:
+            print("用法: aero login")
+            sys.exit(2)
+        exit_code = run_official_login()
+        if exit_code:
+            sys.exit(exit_code)
+
     elif cmd == "serve":
         serve_args = sys.argv[2:]
         port = 8765
@@ -8628,6 +8979,7 @@ Aero — 气象科研 AI Agent IDE
   aero agent list       列出本地 Agent 及在线状态
   aero agent run [智能体名称或智能体 ID] [--cloud-memory]  前台常驻并等待云端指令
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
+  aero login           弹出官方账户登录窗口并启用官方模型
   aero chat            启动 Textual TUI 对话（支持中文输入和流式输出）
   aero chat --service 通过本机常驻服务续接会话，关闭 TUI 不会终止任务
   aero chat --continue 续接当前目录上一次保存的会话（短参数: -c）

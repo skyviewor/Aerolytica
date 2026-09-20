@@ -75,6 +75,8 @@ class SessionMeta:
     model: str = ""
     provider: str = ""
     vision_model: str = ""
+    official_text_model: str = ""
+    official_vision_model: str = ""
     mode: str = ""
     title_source: str = ""
     project_dir: str = ""
@@ -91,6 +93,8 @@ class SessionMeta:
             "model": self.model,
             "provider": self.provider,
             "vision_model": self.vision_model,
+            "official_text_model": self.official_text_model,
+            "official_vision_model": self.official_vision_model,
             "mode": self.mode,
             "title_source": self.title_source,
             "project_dir": self.project_dir,
@@ -109,6 +113,8 @@ class SessionMeta:
             model=d.get("model", ""),
             provider=d.get("provider", ""),
             vision_model=d.get("vision_model", ""),
+            official_text_model=d.get("official_text_model", ""),
+            official_vision_model=d.get("official_vision_model", ""),
             mode=d.get("mode", ""),
             title_source=d.get("title_source", ""),
             project_dir=d.get("project_dir", ""),

@@ -388,7 +388,10 @@ class LocalSession:
                             )
                     self._run_states[run_id] = RunState.COMPLETED
                     self._save()
-                    self._schedule_title_generation(run_id)
+                    self._schedule_title_generation(
+                        run_id,
+                        relay_turn_id=self.agent.llm.relay_turn_id,
+                    )
                     self._emit(
                         run_id,
                         "run_completed",
@@ -407,7 +410,12 @@ class LocalSession:
                     self._emit(run_id, "error", {"message": _safe_text(exc)})
                     self._emit(run_id, "run_completed", {"state": RunState.FAILED.value})
 
-    def _schedule_title_generation(self, run_id: str) -> None:
+    def _schedule_title_generation(
+        self,
+        run_id: str,
+        *,
+        relay_turn_id: str = "",
+    ) -> None:
         if (
             self._session_meta.title_source != "pending"
             or run_id in self._title_tasks
@@ -415,10 +423,17 @@ class LocalSession:
         ):
             return
         self._title_pending[run_id] = True
-        task = asyncio.create_task(self._generate_title(run_id))
+        task = asyncio.create_task(
+            self._generate_title(run_id, relay_turn_id=relay_turn_id)
+        )
         self._title_tasks[run_id] = task
 
-    async def _generate_title(self, run_id: str) -> None:
+    async def _generate_title(
+        self,
+        run_id: str,
+        *,
+        relay_turn_id: str = "",
+    ) -> None:
         try:
             if not self.config.llm.active_api_key():
                 return
@@ -431,6 +446,8 @@ class LocalSession:
                     base_url=self.config.llm.base_url,
                 )
             )
+            title_source_id = relay_turn_id or uuid.uuid4().hex
+            client.relay_turn_id = f"session-title:{title_source_id}"[:64]
             try:
                 title = await client.chat(
                     [
