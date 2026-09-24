@@ -16,7 +16,7 @@ import re
 import stat
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,6 +25,7 @@ import httpx
 from cryptography.fernet import Fernet
 
 from aero.core.daemon import private_write
+from aero.core.official_account import OfficialLoginRequiredError
 
 if TYPE_CHECKING:
     from aero.application.local_session import LocalSession
@@ -37,25 +38,40 @@ class LeaseLostError(RuntimeError):
 LeaseLost = LeaseLostError
 
 
+class AccountRevokedError(LeaseLostError):
+    """The cloud login or Agent credential was revoked; do not reconnect."""
+
+
 class RelayRuntimeTransport:
     """Small explicit adapter; injected HTTP client remains caller-owned."""
 
-    def __init__(self, http: httpx.AsyncClient, agent_id: str, token: str):
+    def __init__(
+        self, http: httpx.AsyncClient, agent_id: str, token: str,
+        account_access_token: Callable[[], Awaitable[str]] | None = None,
+    ):
         self.http = http
         self.agent_id = agent_id
         self._token = token
+        self._account_access_token = account_access_token
         self.device_id = ""
         self.lease_token: int | None = None
 
     async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self._token}"}
+        if path == "runtime/acquire" and self._account_access_token:
+            try:
+                headers["X-Official-Access-Token"] = await self._account_access_token()
+            except OfficialLoginRequiredError as exc:
+                raise AccountRevokedError("客户端登录已失效，请重新登录。") from exc
         if self.lease_token is not None:
             headers.update({"X-Agent-Device-Id": self.device_id,
                             "X-Agent-Lease-Token": str(self.lease_token)})
         response = await self.http.request(
             method, f"/v1/agents/{self.agent_id}/{path}", headers=headers, **kwargs
         )
-        if response.status_code in {401, 403, 409, 410, 423}:
+        if response.status_code == 401:
+            raise AccountRevokedError("客户端登录或智能体授权已下线，请重新登录。")
+        if response.status_code in {403, 410, 423} or (response.status_code == 409 and path != "context"):
             raise LeaseLost(f"runtime_rejected_{response.status_code}")
         response.raise_for_status()
         return {} if response.status_code == 204 else response.json()
@@ -140,9 +156,12 @@ class CloudAgentRuntime:
         self._stop = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._deadline = 0.0
-        self._heartbeat_seconds = 30.0
+        self._heartbeat_seconds = 15.0
         self._memory: PortableMemory | None = None
         self.memory_version = 0
+        self.context_version = 0
+        self.context_sync_error = ""
+        self._context_hash = ""
         self._foreground_execution: str | None = None
         self._load_memory_state()
 
@@ -176,7 +195,8 @@ class CloudAgentRuntime:
                 "project_id": self.project_id, "state": self.state,
                 "active_run_id": self.active_run_id, "command_id": self.command_id,
                 "memory_enabled": self._memory is not None,
-                "memory_version": self.memory_version}
+                "memory_version": self.memory_version,
+                "context_sync_error": self.context_sync_error}
 
     async def start(self) -> dict[str, Any]:
         if self._task and not self._task.done():
@@ -214,20 +234,57 @@ class CloudAgentRuntime:
             raise LeaseLost("session_binding_mismatch")
         self.transport.lease_token = int(result["lease_token"])
         self._deadline = started + min(float(result.get("ttl_seconds", 120)), 120)
-        self._heartbeat_seconds = min(float(result.get("heartbeat_seconds", 30)), 30)
+        self._heartbeat_seconds = min(float(result.get("heartbeat_seconds", 15)), 15)
         self.session.execution_guard = self.project_execution
         self.state = "online"
+        try:
+            saved = await self.transport.request("GET", "context")
+            self.context_version = int(saved["version"])
+            local = self.session.session_manager.export_portable_context(self.session.id)
+            if local is None or not local.get("messages"):
+                self.session.restore_portable_context(saved["context"])
+            self.context_sync_error = ""
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                self.context_sync_error = f"云端上下文读取失败（{exc.response.status_code}）"
+        except (ValueError, KeyError) as exc:
+            self.context_sync_error = f"云端上下文格式错误：{type(exc).__name__}"
+
+    async def _sync_context(self) -> None:
+        payload = self.session.session_manager.export_portable_context(self.session.id)
+        if payload is None:
+            return
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if digest == self._context_hash:
+            return
+        try:
+            result = await self.transport.request("PUT", "context", json={
+                "context": payload, "expected_version": self.context_version,
+            })
+            self.context_version = int(result["version"])
+            self._context_hash = digest
+            self.context_sync_error = ""
+        except (httpx.HTTPError, LeaseLost) as exc:
+            self.context_sync_error = f"云端上下文同步失败：{type(exc).__name__}"
 
     async def _heartbeats(self) -> None:
         while not self._stop.is_set():
             await asyncio.sleep(self._heartbeat_seconds)
             self._assert_lease()
             started = time.monotonic()
-            result = await self.transport.request("POST", "runtime/heartbeat", json={})
+            metadata = self.session.metadata()
+            title = metadata.get("name") if metadata.get("title_source") in {"auto", "manual"} else ""
+            result = await self.transport.request("POST", "runtime/heartbeat", json={"title": title})
             self._deadline = started + min(float(result.get("ttl_seconds", 120)), 120)
+            if result.get("title_source") == "manual":
+                cloud_title = str(result.get("display_name") or "").strip()
+                if cloud_title and cloud_title != metadata.get("name"):
+                    self.session.rename(cloud_title)
             if self.command_id in result.get("cancel_requested_command_ids", []):
                 if self.active_run_id:
                     await self.session.cancel(self.active_run_id)
+            if not self.session.metadata().get("active_runs"):
+                await self._sync_context()
 
     async def _watch_identity(self) -> None:
         while not self._stop.is_set():
@@ -381,6 +438,9 @@ class CloudAgentRuntime:
                     for task in done:
                         task.result()
                     backoff = 1
+                except AccountRevokedError:
+                    self.state = "login_required"
+                    self._stop.set()
                 except (httpx.HTTPError, LeaseLost):
                     if self.state != "account_changed":
                         self.state = "interrupted"
@@ -401,7 +461,7 @@ class CloudAgentRuntime:
                         pass
                     backoff = min(backoff * 2, 30)
         finally:
-            if self.state != "account_changed":
+            if self.state not in {"account_changed", "login_required"}:
                 self.state = "stopped"
 
     async def stop(self) -> None:

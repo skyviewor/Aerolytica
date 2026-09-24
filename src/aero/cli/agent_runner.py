@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import signal
+import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,7 @@ from typing import Any
 import httpx
 
 from aero.agent.loop import AgentLoop
+from aero.agent.audit_snapshot import render_conversation, zip_conversation
 from aero.agent.session import SessionManager, SessionMeta
 from aero.application.cloud_runtime import CloudAgentRuntime, RelayRuntimeTransport
 from aero.application.local_session import LocalSession
@@ -24,6 +28,7 @@ from aero.core.remote_agent import (
     RemoteAgentError,
     renew_command_lease,
 )
+from aero.core.cloud_sync import CloudSyncEngine
 
 
 def run_agent_cli(args: list[str]) -> int:
@@ -46,6 +51,24 @@ def run_agent_cli(args: list[str]) -> int:
         if action == "status":
             selector = _selector_arg(args[1:], "status")
             return asyncio.run(_show_status(selector))
+        if action == "snapshot":
+            selector, upload, output = _snapshot_args(args[1:])
+            return asyncio.run(_export_snapshot(selector, upload=upload, output=output))
+        if action == "takeover":
+            selector = _selector_arg(args[1:], "takeover")
+            if selector is None:
+                raise ValueError("用法：aero agent takeover 智能体名称或 ID")
+            return asyncio.run(_takeover(selector))
+        if action == "clone":
+            selector = _selector_arg(args[1:], "clone")
+            if selector is None:
+                raise ValueError("用法：aero agent clone 智能体名称或 ID")
+            return asyncio.run(_takeover(selector, clone=True))
+        if action == "resume":
+            selector = _selector_arg(args[1:], "resume")
+            if selector is None:
+                raise ValueError("用法：aero agent resume 智能体名称或 ID")
+            return asyncio.run(_resume_stopped_agent(selector))
         raise ValueError(f"未知 Agent 子命令：{action}")
     except (OfficialAccountError, RemoteAgentError, ValueError) as exc:
         print(f"错误：{exc}")
@@ -99,6 +122,184 @@ def _run_args(args: list[str]) -> tuple[str | None, bool]:
                 "用法：aero agent run [智能体名称或智能体 ID] [--cloud-memory]"
             )
     return selector, cloud_memory
+
+
+def _snapshot_args(args: list[str]) -> tuple[str | None, bool, Path | None]:
+    selector = None
+    output = None
+    upload = False
+    index = 0
+    while index < len(args):
+        item = args[index]
+        if item == "--upload":
+            upload = True
+            index += 1
+        elif item == "--output" and index + 1 < len(args):
+            output = Path(args[index + 1]).expanduser()
+            index += 2
+        elif not item.startswith("-") and selector is None:
+            selector = item
+            index += 1
+        else:
+            raise ValueError("用法：aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]")
+    return selector, upload, output
+
+
+async def _export_snapshot(selector: str | None, *, upload: bool, output: Path | None) -> int:
+    try:
+        client = RemoteAgentClient(agent_selector=selector)
+        resident = True
+    except RemoteAgentError:
+        client = RemoteAgentClient(select_agent=False)
+        resident = False
+    try:
+        if resident:
+            remote = await client.status()
+        else:
+            response = await client.session.request("GET", "/v1/agents")
+            if response.status_code >= 400:
+                raise RemoteAgentError("读取云端智能体列表失败。")
+            matches = [item for item in response.json().get("agents", [])
+                       if item.get("agent_type") == "chat" and
+                       (selector is None or selector in {item.get("agent_id"), item.get("name")})]
+            if len(matches) != 1:
+                raise RemoteAgentError("请指定一个本机普通聊天的智能体 ID。")
+            remote = matches[0]
+            client.agent_id = remote["agent_id"]
+            client.agent_name = remote["name"]
+        session_id = str(remote.get("session_id") or _memory_session_id(client.agent_id, Path.cwd().resolve()))
+        manager = SessionManager()
+        if manager.load(session_id) is None:
+            manager = SessionManager(Path.home() / ".aero" / "agent-memory")
+        text = render_conversation(manager, session_id)
+        archive = zip_conversation(text)
+        destination = output or Path.cwd() / (
+            f"agent-{client.agent_id}-{time.strftime('%Y%m%d-%H%M%S')}.zip"
+        )
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(archive)
+        print(f"审计快照已导出：{destination}（{len(archive)} 字节）")
+        print("请先人工审阅 ZIP 中的 conversation.txt，脱敏无法识别所有敏感信息。")
+        if upload:
+            if not sys.stdin.isatty() or input("确认已审阅文件，允许上传云端？输入 YES：").strip() != "YES":
+                raise RemoteAgentError("上传已取消；本地 ZIP 已保留。")
+            await _upload_audit_snapshot(client, destination.name, archive)
+            print("审计快照已上传云端，可在网页智能体详情中查看或下载。")
+        return 0
+    finally:
+        await client.close()
+
+
+async def _upload_audit_snapshot(client: RemoteAgentClient, filename: str, archive: bytes) -> None:
+    content_type = "application/zip"
+    response = await client.session.request("POST", "/v1/storage/upload-url", json={
+        "filename": filename,
+        "size_bytes": len(archive),
+        "content_type": content_type,
+    })
+    if response.status_code >= 400:
+        raise RemoteAgentError(f"申请云端存储失败：{response.status_code}")
+    upload = response.json()
+    if httpx.URL(upload["upload_url"]).scheme != "https":
+        raise RemoteAgentError("云存储签名地址必须使用 HTTPS。")
+    async with httpx.AsyncClient(timeout=60) as http:
+        uploaded = await http.put(
+            upload["upload_url"], content=archive, headers={"Content-Type": content_type}
+        )
+        uploaded.raise_for_status()
+    completed = await client.session.request(
+        "POST", f"/v1/storage/{upload['object_id']}/complete"
+    )
+    if completed.status_code >= 400:
+        raise RemoteAgentError(f"云端文件校验失败：{completed.status_code}")
+    linked = await client.session.request(
+        "POST", f"/v1/agents/{client.agent_id}/audit-snapshots",
+        json={"object_id": upload["object_id"]},
+    )
+    if linked.status_code >= 400:
+        raise RemoteAgentError(f"云端快照关联失败：{linked.status_code}")
+
+
+async def _takeover(selector: str, *, clone: bool = False) -> int:
+    root = Path.cwd().resolve()
+    if any(root.iterdir()):
+        raise RemoteAgentError("请在空目录执行接管，避免云端文件覆盖本地内容。")
+    client = RemoteAgentClient(select_agent=False)
+    try:
+        await client.session.access_token()
+        response = await client.session.request("GET", "/v1/agents")
+        if response.status_code >= 400:
+            raise RemoteAgentError("读取云端智能体列表失败。")
+        matches = [item for item in response.json().get("agents", [])
+                   if selector in {item.get("agent_id"), item.get("name")}]
+        if len(matches) != 1:
+            raise RemoteAgentError("找不到唯一的目标智能体，请使用智能体 ID。")
+        agent_id = matches[0]["agent_id"]
+        if matches[0].get("agent_type") == "chat" and not clone:
+            existing_id = str(matches[0].get("session_id") or "")
+            if existing_id and SessionManager().load(existing_id) is not None:
+                raise RemoteAgentError("本机已有同 ID 会话，请先备份或选择另一设备，避免覆盖。")
+        response = await client.session.request(
+            "POST", f"/v1/agents/{agent_id}/{'clone' if clone else 'takeover'}"
+        )
+        if response.status_code >= 400:
+            raise RemoteAgentError(
+                f"{'克隆' if clone else '接管'}失败：{response.status_code}"
+                + ("，请确认原设备已离线。" if not clone else "。")
+            )
+        result = response.json()
+        if matches[0].get("agent_type") == "chat" and not clone:
+            context_response = await client.session.request(
+                "GET", f"/v1/agents/{result['agent_id']}/context"
+            )
+            if context_response.status_code >= 400:
+                raise RemoteAgentError("接管成功，但读取云端聊天上下文失败；请重试或联系管理员。")
+            payload = context_response.json()["context"]
+            payload.setdefault("meta", {})["project_dir"] = str(root)
+            SessionManager().import_portable_context(result["session_id"], payload)
+            print(f"聊天上下文已恢复到本机。请在当前目录运行 aero chat --continue 继续会话：{result['display_name']}")
+            return 0
+        client.registry.add(
+            agent_id=result["agent_id"], name=result["name"], description="", token=result["token"],
+        )
+        engine = CloudSyncEngine(root, client.session)
+        await engine.bind(client.session.data.user_id, result["project_id"])
+        await engine.sync_once()
+        print(f"云端项目和上下文准备就绪，正在此设备启动：{result['display_name']}")
+    finally:
+        await client.close()
+    return await _run_service(result["agent_id"])
+
+
+async def _resume_stopped_agent(selector: str) -> int:
+    """Re-issue a token after an explicit web stop, without moving files."""
+    client = RemoteAgentClient(select_agent=False)
+    try:
+        response = await client.session.request("GET", "/v1/agents")
+        response.raise_for_status()
+        matches = [item for item in response.json().get("agents", [])
+                   if selector in {item.get("agent_id"), item.get("name")}]
+        if len(matches) != 1:
+            raise RemoteAgentError("找不到唯一的智能体，请使用智能体 ID。")
+        target = matches[0]
+        if target.get("agent_type") == "chat":
+            raise RemoteAgentError("普通聊天请在客户端开启新会话。")
+        response = await client.session.request(
+            "POST", f"/v1/agents/{target['agent_id']}/takeover",
+            json={"resume_local": True},
+        )
+        if response.status_code >= 400:
+            raise RemoteAgentError("原设备仍在线或智能体没有可恢复会话，暂不能重新上线。")
+        result = response.json()
+        client.registry.add(
+            agent_id=result["agent_id"], name=result["name"],
+            description="", token=result["token"],
+        )
+        print(f"已恢复智能体授权：{result['display_name']}。请在已绑定云项目的工作区运行 aero agent run {result['agent_id']}。")
+        return 0
+    finally:
+        await client.close()
 
 
 async def _register(name: str, description: str) -> int:
@@ -169,10 +370,14 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
         await client.close()
         raise RemoteAgentError("请先将当前工作区绑定到云端项目，再启动常驻智能体。")
 
+    project_dir = Path.cwd().resolve()
+    remote_agent = await client.status()
+    session_id = str(remote_agent.get("session_id") or _memory_session_id(client.agent_id, project_dir))
+    if remote_agent.get("project_id") and remote_agent["project_id"] != project_id:
+        await client.close()
+        raise RemoteAgentError("本地云项目与智能体绑定项目不同，不能启动。")
     process_lock = AgentProcessLock(client.agent_id)
     process_lock.acquire()
-    project_dir = Path.cwd().resolve()
-    session_id = _memory_session_id(client.agent_id, project_dir)
     session = LocalSession(project_dir, config, session_id=session_id)
     http = httpx.AsyncClient(
         base_url=client.session.base_url,
@@ -180,7 +385,10 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
     )
     runtime = CloudAgentRuntime(
         session,
-        RelayRuntimeTransport(http, client.agent_id, client.agent_token),
+        RelayRuntimeTransport(
+            http, client.agent_id, client.agent_token,
+            account_access_token=client.session.access_token,
+        ),
         device_id=f"cli-{project_dir.name}",
         project_id=str(project_id),
         account_id=client.session.data.user_id,
@@ -204,8 +412,20 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
         print("加密云记忆已开启；请立即保存恢复密钥：" + memory_info["recovery_key"])
     print("正在等待云端指令，按 Ctrl+C 停止。")
     try:
-        await stop_event.wait()
-        return 0
+        stop_waiter = asyncio.create_task(stop_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                [stop_waiter, runtime._task], return_when=asyncio.FIRST_COMPLETED
+            )
+            if runtime._task in done and runtime.state == "login_required":
+                print("客户端登录或智能体授权已下线，请重新登录后重启智能体。")
+                return 1
+            if runtime._task in done:
+                runtime._task.result()
+                return 1
+            return 0
+        finally:
+            stop_waiter.cancel()
     finally:
         if memory_info:
             with suppress(Exception):
@@ -409,5 +629,9 @@ def _print_agent_usage() -> None:
   aero agent register --name ocean [--description \"备注\"]  注册并保存 Agent 凭据
   aero agent list                              列出本地 Agent 及在线状态
   aero agent run [Agent 名称或 Agent ID] [--cloud-memory]  前台常驻并等待云端指令
+  aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出可读审计快照
+  aero agent takeover [名称或 ID]  在空目录接管已离线智能体及云端项目
+  aero agent clone [名称或 ID]     在空目录克隆智能体和云端项目
+  aero agent resume [名称或 ID]    网页下线后恢复原工作区的智能体授权
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态"""
     )

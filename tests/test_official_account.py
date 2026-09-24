@@ -116,6 +116,27 @@ async def test_authenticated_request_refreshes_once_after_401(secrets_path):
 
 
 @pytest.mark.asyncio
+async def test_repeated_401_clears_login_and_requests_reauthentication(secrets_path):
+    save_official_session(OfficialSessionData(
+        access_token="jwt-old", refresh_token="rfr-old",
+        access_expires_at=time.time() + 3600,
+        refresh_expires_at=time.time() + 7200, user_id="usr_1",
+    ))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/auth/refresh":
+            return httpx.Response(200, json=_token_payload(), request=request)
+        return httpx.Response(401, json={"detail": "session revoked"}, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        session = OfficialAccountSession(base_url="https://api.test", client=client)
+        with pytest.raises(OfficialLoginRequiredError, match="重新登录"):
+            await session.request("GET", "/v1/agents")
+
+    assert not load_official_session().is_logged_in
+
+
+@pytest.mark.asyncio
 async def test_request_to_uses_jwt_for_relay_model_catalog(secrets_path):
     save_official_session(
         OfficialSessionData(

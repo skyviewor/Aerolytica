@@ -6,6 +6,8 @@ import asyncio
 import fcntl
 import mimetypes
 import os
+import platform
+import socket
 import time
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -188,7 +190,11 @@ class OfficialAccountSession:
             response = await self._client.post(
                 f"{self.base_url}/v1/auth/login",
                 json={"email": email.strip(), "password": password},
-                headers={"Cache-Control": "no-store"},
+                headers={
+                    "Cache-Control": "no-store", "X-Aero-Client": "cli",
+                    "X-Aero-Device": socket.gethostname()[:128],
+                    "X-Aero-OS": platform.system()[:64],
+                },
             )
         except httpx.HTTPError as exc:
             raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
@@ -230,7 +236,11 @@ class OfficialAccountSession:
                 response = await self._client.post(
                     f"{self.base_url}/v1/auth/refresh",
                     json={"refresh_token": current.refresh_token},
-                    headers={"Cache-Control": "no-store"},
+                    headers={
+                        "Cache-Control": "no-store", "X-Aero-Client": "cli",
+                        "X-Aero-Device": socket.gethostname()[:128],
+                        "X-Aero-OS": platform.system()[:64],
+                    },
                 )
             except httpx.HTTPError as exc:
                 raise OfficialAccountError("刷新官方账户登录失败，请检查网络。") from exc
@@ -298,6 +308,10 @@ class OfficialAccountSession:
                 )
             except httpx.HTTPError as exc:
                 raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
+            if response.status_code == 401:
+                clear_official_session()
+                self._session = OfficialSessionData()
+                raise OfficialLoginRequiredError("官方账户登录已失效，请重新登录。")
         return response
 
     async def me(self) -> dict[str, Any]:

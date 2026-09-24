@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import re
 import time
 import uuid
@@ -153,7 +154,16 @@ class SessionManager:
         path = self.storage_dir / f"{session_id}.json"
         data = [_serialize_message(m) for m in messages]
         payload = {"meta": meta.to_dict(), "messages": data}
-        path.write_bytes(self._encrypt(payload))
+        encrypted = self._encrypt(payload)
+        descriptor, temporary = tempfile.mkstemp(prefix="session-", suffix=".tmp", dir=self.storage_dir)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(encrypted)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         self._update_index(meta)
 
     def load(self, session_id: str) -> tuple[list[Message], SessionMeta] | None:
@@ -173,6 +183,26 @@ class SessionManager:
         """Return the encrypted bytes for a saved session."""
         path = self.storage_dir / f"{session_id}.json"
         return path.read_bytes() if path.is_file() else None
+
+    def export_portable_context(self, session_id: str) -> dict | None:
+        """Return sanitized, device-independent persisted context for HTTPS upload."""
+        loaded = self.load(session_id)
+        if loaded is None:
+            return None
+        messages, meta = loaded
+        return {"schema": 1, "meta": meta.to_dict(),
+                "messages": [_serialize_message(message) for message in messages]}
+
+    def import_portable_context(self, session_id: str, payload: dict) -> None:
+        if payload.get("schema") != 1 or not isinstance(payload.get("messages"), list):
+            raise ValueError("invalid_portable_context")
+        raw_messages = payload["messages"]
+        if len(raw_messages) > 100_000:
+            raise ValueError("portable_context_too_many_messages")
+        messages = [_deserialize_message(item) for item in raw_messages]
+        meta = SessionMeta.from_dict(payload.get("meta") or {})
+        meta.id = session_id
+        self.save(session_id, messages, meta)
 
     def load_snapshot(self, encrypted: bytes) -> tuple[list[Message], SessionMeta]:
         """Decode an encrypted session snapshot without changing saved sessions."""

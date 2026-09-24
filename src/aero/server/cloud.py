@@ -290,7 +290,10 @@ def cloud_router(require_auth) -> APIRouter:
             cloud.agents.pop(agent_id, None)
         client = httpx.AsyncClient(base_url=cloud.account.base_url, timeout=35)
         hosted = CloudAgentRuntime(
-            session, RelayRuntimeTransport(client, agent.agent_id, agent.token),
+            session, RelayRuntimeTransport(
+                client, agent.agent_id, agent.token,
+                account_access_token=cloud.account.access_token,
+            ),
             device_id=f"web-{cloud.web.project_dir.name}", project_id=body.project_id,
             account_id=cloud.account.data.user_id,
             account_identity=lambda: cloud.account.data.user_id,

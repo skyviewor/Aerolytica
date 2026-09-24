@@ -119,6 +119,15 @@ class LocalSession:
         self.agent.messages = restored
         self._save()
 
+    def restore_portable_context(self, payload: dict[str, Any]) -> None:
+        """Restore complete persisted roles/tool links, never execute them."""
+        if self.metadata()["active_runs"]:
+            raise RuntimeError("cannot_restore_active_session")
+        self.session_manager.import_portable_context(self.id, payload)
+        self._load_saved_session()
+        self._session_meta.project_dir = str(self.project_dir)
+        self._save()
+
     def metadata(self) -> dict[str, Any]:
         active_runs = [
             run_id

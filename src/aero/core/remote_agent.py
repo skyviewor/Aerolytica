@@ -98,8 +98,10 @@ class RemoteAgentRegistry:
         description: str,
         token: str,
     ) -> RegisteredRemoteAgent:
-        name = self.ensure_name_available(name)
         agents = self.list()
+        if not any(agent.agent_id == agent_id for agent in agents):
+            name = self.ensure_name_available(name)
+        agents = [agent for agent in agents if agent.agent_id != agent_id]
         record = RegisteredRemoteAgent(agent_id, name, description.strip()[:500], token)
         self._secrets.pop("remote_agent", None)
         self._secrets["remote_agents"] = {
@@ -409,7 +411,7 @@ async def renew_command_lease(
     command_id: str,
     stop_event: asyncio.Event,
     *,
-    interval_seconds: float = 30.0,
+    interval_seconds: float = 15.0,
 ) -> None:
     """Keep a running command lease alive until execution completes."""
     while not stop_event.is_set():

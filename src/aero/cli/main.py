@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -1807,6 +1808,7 @@ class AeroApp(App):
         self._official_text_override = ""
         self._official_vision_override = ""
         self._session_saved_on_exit = False
+        self._chat_presence = None
         self._session_title_workers: set[str] = set()
         self._pending_session_title: str = ""
         self._deferred_subagent_notices: list = []
@@ -1868,6 +1870,26 @@ class AeroApp(App):
             self._set_footer_status(f"当前实验：{active_experiment['name']}")
         elif self._resume_last_session:
             self._resume_latest_project_session()
+
+        from aero.application.chat_presence import ChatPresence
+
+        self._chat_presence = ChatPresence(
+            session_id=self._cloud_chat_session_id,
+            title=self._cloud_chat_title,
+            on_title=self._apply_cloud_chat_title,
+            on_command=self._run_cloud_chat_command,
+            on_login_required=self._handle_official_login,
+            export_context=self._export_cloud_chat_context,
+            restore_context=self._restore_cloud_chat_context,
+            is_idle=lambda: self._agent_worker is None or not self._agent_worker.is_running,
+            on_quota_full=lambda: self.notify(
+                "智能体在线名额已满，新聊天无法上线。", severity="warning", timeout=5
+            ),
+            on_taken_over=lambda: self.notify(
+                "当前聊天已在其他设备接管；请开启新会话。", severity="warning", timeout=8
+            ),
+        )
+        self.run_worker(self._chat_presence.run(), exclusive=False, group="chat-presence")
 
         if self.persist_config and _config_needs_llm_setup(self.config):
             self.call_after_refresh(self._open_first_run_setup)
@@ -2519,6 +2541,49 @@ class AeroApp(App):
 
     def on_unmount(self) -> None:
         self._save_session_on_exit()
+        if self._chat_presence is not None:
+            asyncio.create_task(self._chat_presence.close())
+
+    def _cloud_chat_session_id(self) -> str:
+        if self._session_id is None:
+            self._session_id = uuid.uuid4().hex[:12]
+        return self._session_id
+
+    def _cloud_chat_title(self) -> str:
+        if not self._session_id:
+            return ""
+        loaded = self._get_session_mgr().load(self._session_id)
+        if loaded is None:
+            return self._pending_session_title
+        meta = loaded[1]
+        return meta.name if meta.title_source in {"auto", "manual"} else ""
+
+    def _export_cloud_chat_context(self) -> dict | None:
+        if not self._session_id:
+            return None
+        return self._get_session_mgr().export_portable_context(self._session_id)
+
+    def _restore_cloud_chat_context(self, payload: dict) -> None:
+        session_id = self._cloud_chat_session_id()
+        self._get_session_mgr().import_portable_context(session_id, payload)
+        self._do_load_session(session_id)
+
+    def _apply_cloud_chat_title(self, title: str) -> None:
+        if self.agent is not None and len(self.agent.messages) > 1:
+            self._auto_save_session(name=title, title_source="manual")
+        else:
+            self._pending_session_title = title
+        self._set_footer_status(f"云端已重命名当前智能体：{title}")
+
+    async def _run_cloud_chat_command(self, content: str) -> str:
+        while self._agent_worker is not None and self._agent_worker.is_running:
+            await asyncio.sleep(0.2)
+        self._last_reply_text = ""
+        await self._process(content)
+        worker = self._agent_worker
+        if worker is not None:
+            await worker.wait()
+        return self._last_reply_text or "指令已处理。"
 
     def _save_session_on_exit(self) -> None:
         if self._session_saved_on_exit:
@@ -2560,6 +2625,14 @@ class AeroApp(App):
         return lines
 
     async def _process(self, text: str) -> None:
+        if (
+            self._chat_presence is not None
+            and self._session_id
+            and self._chat_presence._blocked_session_id == self._session_id
+            and not text.startswith(("/new", "/session", "/clear", "/quit"))
+        ):
+            self.notify("此会话已下线或已在其他设备接管，请开启新会话。", severity="warning", timeout=5)
+            return
         chat = self.query_one("#chat-area", VerticalScroll)
         debug_log(
             "tui.process",
@@ -3368,6 +3441,12 @@ class AeroApp(App):
         self._set_footer_status("正在获取 Aerolytica 官方模型列表…")
         preferences = await catalog.official_preferences()
         if catalog.last_error is not None:
+            from aero.core.official_account import OfficialLoginRequiredError
+
+            if isinstance(catalog.last_error, OfficialLoginRequiredError):
+                self.notify("官方账户登录已失效，请重新登录。", severity="warning", timeout=5)
+                await self._handle_official_login()
+                return
             self.notify(
                 "官方模型列表刷新失败，已使用"
                 f"{'缓存' if catalog.has_cached_models else '默认'}列表。",
@@ -8956,6 +9035,10 @@ Aero — 气象科研 AI Agent IDE
   aero agent register --name ocean [--description "备注"]  注册远程 Agent
   aero agent list       列出本地 Agent 及在线状态
   aero agent run [智能体名称或智能体 ID] [--cloud-memory]  前台常驻并等待云端指令
+  aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出审计快照
+  aero agent takeover 智能体名称或 ID  在空目录接管离线智能体
+  aero agent clone 智能体名称或 ID     在空目录克隆智能体
+  aero agent resume 智能体名称或 ID    网页下线后在原工作区恢复授权
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
   aero login           弹出官方账户登录窗口并启用官方模型
   aero chat            启动 Textual TUI 对话（支持中文输入和流式输出）
