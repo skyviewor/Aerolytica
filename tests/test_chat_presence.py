@@ -58,6 +58,8 @@ async def test_chat_context_restores_when_local_empty_and_syncs_once():
     presence.token = "agt_secret"
     presence._context_version = 0
     presence._context_hash = ""
+    presence.context_sync_enabled = True
+    presence._pending_compactions = []
     presence._http = AsyncMock()
     payload = {"schema": 1, "meta": {}, "messages": [{"role": "user", "content": "你好"}]}
     request = httpx.Request("GET", "https://example.test/context")
@@ -81,3 +83,34 @@ async def test_chat_context_restores_when_local_empty_and_syncs_once():
     await presence._sync_context()
     assert presence._context_version == 4
     presence._http.put.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_context_does_not_upload_when_sync_disabled():
+    presence = ChatPresence.__new__(ChatPresence)
+    presence.context_sync_enabled = False
+    presence._http = AsyncMock()
+    presence.export_context = lambda: {"messages": [{"role": "user", "content": "hello"}]}
+    await presence._sync_context()
+    presence._http.put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recovered_oss_append_requires_retry_of_newer_context():
+    presence = ChatPresence.__new__(ChatPresence)
+    presence.context_sync_enabled = True
+    presence._pending_compactions = []
+    presence._context_version = 0
+    presence._context_hash = ""
+    presence.agent_id = "agent_1"
+    presence.token = "agt_secret"
+    presence.export_context = lambda: {"schema": 1, "meta": {}, "messages": [
+        {"role": "user", "content": "one"}, {"role": "assistant", "content": "two"}]}
+    presence._http = AsyncMock()
+    presence._http.put.return_value = httpx.Response(
+        200, request=httpx.Request("PUT", "https://example.test/context"),
+        json={"version": 1, "applied": False},
+    )
+    await presence._sync_context()
+    assert presence._context_version == 1
+    assert presence._context_hash == ""

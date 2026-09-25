@@ -12,11 +12,13 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
+from collections.abc import Awaitable, Callable
 
 from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.agent.llm_client import LLMClient, LLMConfig
 from aero.agent.loop import AgentLoop
 from aero.agent.session import SessionManager, SessionMeta
+from aero.application.context_compaction import compacted_messages, summary_prompt_for
 from aero.agent.subagent import (
     SubAgentManager,
     use_subagent_canceller,
@@ -34,6 +36,7 @@ from aero.checkpoints import CheckpointManager
 from aero.core.config import AeroConfig
 from aero.core.types import Message
 from aero.data.plans import use_session_id
+from aero.data.pricing import context_window_for
 from aero.toolbox.file_access import use_read_files
 from aero.toolbox.paths import use_workspace
 from aero.toolbox.secret_input import use_secret_input_provider
@@ -71,6 +74,7 @@ class LocalSession:
         # Hosting installs a fenced cloud project guard; foreground and background
         # callers still use this same object and the same local project OS lock.
         self.execution_guard = None
+        self.on_compaction: Callable[[dict, dict], Awaitable[None]] | None = None
         self._events: dict[str, deque[RunEvent]] = {}
         self._event_counters: dict[str, int] = {}
         self._event_waiters: dict[str, asyncio.Condition] = {}
@@ -167,6 +171,39 @@ class LocalSession:
         self._session_meta.vision_model = self.config.vision.model
         self._session_meta.mode = self.config.mode
         self.session_manager.save(self.id, self.agent.messages, self._session_meta)
+
+    async def compact_if_needed(self, upcoming_prompt: str = "") -> bool:
+        """Compact a known-context model before another request crosses 80%."""
+        limit = context_window_for(self.config.llm.model)
+        if not limit or len(self.agent.messages) <= 3:
+            return False
+        estimated_chars = len(upcoming_prompt)
+        for message in self.agent.messages:
+            estimated_chars += len(message.role) + len(message.content or "")
+            estimated_chars += sum(len(call.name) + len(json.dumps(call.arguments, ensure_ascii=False))
+                                   for call in message.tool_calls or [])
+        estimated = estimated_chars // 3
+        if estimated < limit * .8:
+            return False
+        self._save()
+        before = self.session_manager.export_portable_context(self.id)
+        prompt = summary_prompt_for(self.agent.messages)
+        config = LLMConfig(provider=self.config.llm.provider, model=self.config.llm.model,
+                           api_key=self.config.llm.active_api_key(),
+                           base_url=self.config.llm.base_url)
+        client = LLMClient(config)
+        try:
+            summary = (await client.chat([Message(role="user", content=prompt)])).strip()
+        finally:
+            await client.close()
+        if not summary:
+            return False
+        self.agent.messages = compacted_messages(self.agent.messages[0], summary)
+        self._save()
+        after = self.session_manager.export_portable_context(self.id)
+        if self.on_compaction and before and after:
+            await self.on_compaction(before, after)
+        return True
 
     def _notify(self, run_id: str) -> None:
         condition = self._condition(run_id)
@@ -340,6 +377,7 @@ class LocalSession:
                 )
                 stack.enter_context(use_checkpoint_creator(self._create_checkpoint))
                 try:
+                    await self.compact_if_needed(prompt)
                     response_text = ""
                     async for event in self.agent.run_stream(prompt):
                         if event.type == "text":

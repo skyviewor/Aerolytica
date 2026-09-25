@@ -51,6 +51,10 @@ def run_agent_cli(args: list[str]) -> int:
         if action == "status":
             selector = _selector_arg(args[1:], "status")
             return asyncio.run(_show_status(selector))
+        if action == "context-sync":
+            if len(args) != 3 or args[2] not in {"on", "off"}:
+                raise ValueError("用法：aero agent context-sync 智能体名称或 ID on|off")
+            return asyncio.run(_set_context_sync(args[1], args[2] == "on"))
         if action == "snapshot":
             selector, upload, output = _snapshot_args(args[1:])
             return asyncio.run(_export_snapshot(selector, upload=upload, output=output))
@@ -343,6 +347,24 @@ async def _show_status(selector: str | None) -> int:
         print(f"状态：{status.get('status') or 'unknown'}")
         if status.get("last_seen_at"):
             print(f"最后活动：{status['last_seen_at']}")
+        response = await client.session.request("GET", f"/v1/agents/{client.agent_id}/context-sync")
+        if response.status_code == 200:
+            print(f"上下文自动同步：{'开启' if response.json()['enabled'] else '关闭'}")
+        return 0
+    finally:
+        await client.close()
+
+
+async def _set_context_sync(selector: str, enabled: bool) -> int:
+    client = RemoteAgentClient(agent_selector=selector)
+    try:
+        response = await client.session.request(
+            "PATCH", f"/v1/agents/{client.agent_id}/context-sync",
+            json={"enabled": enabled},
+        )
+        if response.status_code >= 400:
+            raise RemoteAgentError(f"修改上下文同步设置失败（{response.status_code}）")
+        print(f"上下文自动同步已{'开启' if response.json()['enabled'] else '关闭'}。")
         return 0
     finally:
         await client.close()
@@ -633,5 +655,6 @@ def _print_agent_usage() -> None:
   aero agent takeover [名称或 ID]  在空目录接管已离线智能体及云端项目
   aero agent clone [名称或 ID]     在空目录克隆智能体和云端项目
   aero agent resume [名称或 ID]    网页下线后恢复原工作区的智能体授权
-  aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态"""
+  aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
+  aero agent context-sync [名称或 ID] on|off  开关该智能体的自动上下文同步"""
     )

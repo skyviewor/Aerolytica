@@ -71,7 +71,7 @@ class RelayRuntimeTransport:
         )
         if response.status_code == 401:
             raise AccountRevokedError("客户端登录或智能体授权已下线，请重新登录。")
-        if response.status_code in {403, 410, 423} or (response.status_code == 409 and path != "context"):
+        if response.status_code in {403, 410, 423} or (response.status_code == 409 and path not in {"context", "context/compact"}):
             raise LeaseLost(f"runtime_rejected_{response.status_code}")
         response.raise_for_status()
         return {} if response.status_code == 204 else response.json()
@@ -147,6 +147,13 @@ class CloudAgentRuntime:
         key = hashlib.sha256(transport.agent_id.encode()).hexdigest()
         self._journal_path = state_dir / f"{key}.json"
         self._memory_path = state_dir / f"{key}.memory.json"
+        self._context_events_path = state_dir / f"{key}.context-events.json"
+        self._pending_compactions: list[dict] = []
+        if self._context_events_path.exists():
+            try:
+                self._pending_compactions = json.loads(self._context_events_path.read_text())
+            except (OSError, ValueError):
+                pass
         self._journal: dict[str, str] = {}
         if self._journal_path.exists():
             self._journal = json.loads(self._journal_path.read_text())
@@ -160,10 +167,18 @@ class CloudAgentRuntime:
         self._memory: PortableMemory | None = None
         self.memory_version = 0
         self.context_version = 0
+        self.context_sync_enabled = False
         self.context_sync_error = ""
         self._context_hash = ""
         self._foreground_execution: str | None = None
         self._load_memory_state()
+        self.session.on_compaction = self._queue_compaction
+
+    async def _queue_compaction(self, before: dict, after: dict) -> None:
+        self._pending_compactions.append({"event_id": uuid.uuid4().hex,
+                                          "before": before, "after": after})
+        private_write(self._context_events_path,
+                      json.dumps(self._pending_compactions, ensure_ascii=False))
 
     def _load_memory_state(self) -> None:
         """Restore only local memory configuration; the encrypted snapshot stays remote."""
@@ -196,6 +211,7 @@ class CloudAgentRuntime:
                 "active_run_id": self.active_run_id, "command_id": self.command_id,
                 "memory_enabled": self._memory is not None,
                 "memory_version": self.memory_version,
+                "context_sync_enabled": self.context_sync_enabled,
                 "context_sync_error": self.context_sync_error}
 
     async def start(self) -> dict[str, Any]:
@@ -237,6 +253,8 @@ class CloudAgentRuntime:
         self._heartbeat_seconds = min(float(result.get("heartbeat_seconds", 15)), 15)
         self.session.execution_guard = self.project_execution
         self.state = "online"
+        self.context_sync_enabled = bool(result.get("context_sync_enabled"))
+        self.context_version = int(result.get("context_version") or 0)
         try:
             saved = await self.transport.request("GET", "context")
             self.context_version = int(saved["version"])
@@ -251,6 +269,23 @@ class CloudAgentRuntime:
             self.context_sync_error = f"云端上下文格式错误：{type(exc).__name__}"
 
     async def _sync_context(self) -> None:
+        if not self.context_sync_enabled:
+            return
+        try:
+            while self._pending_compactions:
+                result = await self.transport.request("POST", "context/compact", json={
+                    **self._pending_compactions[0], "expected_version": self.context_version,
+                })
+                if not result.get("sync_enabled", True):
+                    self.context_sync_enabled = False
+                    return
+                self.context_version = int(result["version"])
+                self._pending_compactions.pop(0)
+                private_write(self._context_events_path,
+                              json.dumps(self._pending_compactions, ensure_ascii=False))
+        except (httpx.HTTPError, LeaseLost) as exc:
+            self.context_sync_error = f"云端上下文轮转失败：{type(exc).__name__}"
+            return
         payload = self.session.session_manager.export_portable_context(self.session.id)
         if payload is None:
             return
@@ -262,7 +297,8 @@ class CloudAgentRuntime:
                 "context": payload, "expected_version": self.context_version,
             })
             self.context_version = int(result["version"])
-            self._context_hash = digest
+            if result.get("sync_enabled", True) and result.get("applied", True):
+                self._context_hash = digest
             self.context_sync_error = ""
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文同步失败：{type(exc).__name__}"
@@ -275,6 +311,10 @@ class CloudAgentRuntime:
             metadata = self.session.metadata()
             title = metadata.get("name") if metadata.get("title_source") in {"auto", "manual"} else ""
             result = await self.transport.request("POST", "runtime/heartbeat", json={"title": title})
+            if bool(result.get("context_sync_enabled")) and not self.context_sync_enabled:
+                self._context_hash = ""
+                self.context_version = int(result.get("context_version") or 0)
+            self.context_sync_enabled = bool(result.get("context_sync_enabled"))
             self._deadline = started + min(float(result.get("ttl_seconds", 120)), 120)
             if result.get("title_source") == "manual":
                 cloud_title = str(result.get("display_name") or "").strip()

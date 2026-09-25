@@ -1885,6 +1885,7 @@ class AeroApp(App):
             on_quota_full=lambda: self.notify(
                 "智能体在线名额已满，新聊天无法上线。", severity="warning", timeout=5
             ),
+            on_sync_error=lambda message: self.notify(message, severity="warning", timeout=10),
             on_taken_over=lambda: self.notify(
                 "当前聊天已在其他设备接管；请开启新会话。", severity="warning", timeout=8
             ),
@@ -2839,6 +2840,23 @@ class AeroApp(App):
         if text == "/compact" or text.startswith("/compact "):
             await self._handle_compact_command(text)
             self.query_one("#user-input", TextArea).focus()
+            return
+
+        if text == "/context-sync" or text.startswith("/context-sync "):
+            choice = text.split(maxsplit=1)[1].strip().lower() if " " in text else ""
+            if not choice:
+                enabled = bool(self._chat_presence and self._chat_presence.context_sync_enabled)
+                self.notify(f"当前智能体自动同步上下文：{'开启' if enabled else '关闭'}。用 /context-sync on|off 修改。", timeout=6)
+            elif choice not in {"on", "off"}:
+                self.notify("用法：/context-sync on|off", timeout=5)
+            elif self._chat_presence is None or not self._chat_presence.agent_id:
+                self.notify("请先发送一条消息，使当前聊天在云端登记。", severity="warning", timeout=5)
+            else:
+                try:
+                    await self._chat_presence.set_context_sync(choice == "on")
+                    self.notify(f"当前智能体自动同步上下文已{'开启' if choice == 'on' else '关闭'}。", timeout=5)
+                except Exception as exc:
+                    self.notify(f"修改同步设置失败：{type(exc).__name__}", severity="error", timeout=5)
             return
 
         if text == "/instructions" or text.startswith("/instructions "):
@@ -6027,22 +6045,11 @@ class AeroApp(App):
             return
 
         before_tokens = _estimate_context_tokens(messages)
+        self._auto_save_session()
+        before_context = self._export_cloud_chat_context()
 
-        summary_prompt = (
-            "Summarize the full conversation below so future turns can continue "
-            "from the summary alone. Remove unimportant chatter and redundant detail. "
-            "Keep user goals, decisions, constraints, current task state, completed work, "
-            "tool results, file paths, URLs, data names, numerical values, errors, and any "
-            "preferences the user expressed. Be concise but complete.\n\n"
-        )
-        for msg in messages[1:]:
-            role = msg.role
-            content = msg.content[:2000]
-            if msg.tool_calls:
-                names = [tc.name for tc in msg.tool_calls]
-                content += f"\n[tool_calls: {', '.join(names)}]"
-            summary_prompt += f"[{role}]: {content}\n\n"
-        summary_prompt += "\nNow provide the compacted context summary only."
+        from aero.application.context_compaction import summary_prompt_for
+        summary_prompt = summary_prompt_for(messages)
 
         loading = Static("", classes="divider")
         chat.mount(loading)
@@ -6097,6 +6104,10 @@ class AeroApp(App):
 
         compacted = _compacted_context_messages(system_msg, summary_text)
         self.agent.messages = compacted
+        self._auto_save_session()
+        after_context = self._export_cloud_chat_context()
+        if before_context and after_context and self._chat_presence is not None:
+            self._chat_presence.queue_compaction(before_context, after_context)
         after_tokens = _estimate_context_tokens(compacted)
         self.agent.tracker.current_prompt_tokens = after_tokens
         ratio = (1 - after_tokens / max(before_tokens, 1)) * 100
@@ -7969,11 +7980,8 @@ def _estimate_context_tokens(messages: list[Message]) -> int:
 
 
 def _compacted_context_messages(system_msg: Message, summary_text: str) -> list[Message]:
-    return [
-        system_msg,
-        Message(role="user", content=f"[compact_summary]\n{summary_text}"),
-        Message(role="assistant", content="OK, I understand the context above."),
-    ]
+    from aero.application.context_compaction import compacted_messages
+    return compacted_messages(system_msg, summary_text)
 
 
 def _is_compact_summary_message(msg: Message) -> bool:
