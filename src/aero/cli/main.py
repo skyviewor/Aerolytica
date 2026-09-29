@@ -1814,6 +1814,7 @@ class AeroApp(App):
         self._deferred_subagent_notices: list = []
         self._streaming_text = False
         self._queued_message: str | None = None
+        self._queued_message_from_cloud = False
         self._user_scrolled_up = False
         saved_theme = _load_saved_theme()
         if saved_theme:
@@ -1882,6 +1883,7 @@ class AeroApp(App):
             export_context=self._export_cloud_chat_context,
             restore_context=self._restore_cloud_chat_context,
             is_idle=lambda: self._agent_worker is None or not self._agent_worker.is_running,
+            image_roots=self._cloud_image_roots,
             on_quota_full=lambda: self.notify(
                 "智能体在线名额已满，新聊天无法上线。", severity="warning", timeout=5
             ),
@@ -2580,7 +2582,7 @@ class AeroApp(App):
         while self._agent_worker is not None and self._agent_worker.is_running:
             await asyncio.sleep(0.2)
         self._last_reply_text = ""
-        await self._process(content)
+        await self._process(content, from_cloud=True)
         worker = self._agent_worker
         if worker is not None:
             await worker.wait()
@@ -2625,7 +2627,7 @@ class AeroApp(App):
                 lines.extend(self._collect_log_lines(child))
         return lines
 
-    async def _process(self, text: str) -> None:
+    async def _process(self, text: str, *, from_cloud: bool = False) -> None:
         if (
             self._chat_presence is not None
             and self._session_id
@@ -2856,7 +2858,18 @@ class AeroApp(App):
                     await self._chat_presence.set_context_sync(choice == "on")
                     self.notify(f"当前智能体自动同步上下文已{'开启' if choice == 'on' else '关闭'}。", timeout=5)
                 except Exception as exc:
-                    self.notify(f"修改同步设置失败：{type(exc).__name__}", severity="error", timeout=5)
+                    response = getattr(exc, "response", None)
+                    detail = None
+                    if response is not None:
+                        try:
+                            detail = response.json().get("detail")
+                        except (ValueError, AttributeError):
+                            pass
+                    self.notify(
+                        f"修改同步设置失败：{detail or type(exc).__name__}",
+                        severity="error",
+                        timeout=5,
+                    )
             return
 
         if text == "/instructions" or text.startswith("/instructions "):
@@ -2912,6 +2925,7 @@ class AeroApp(App):
         if self._agent_worker is not None and self._agent_worker.is_running:
             if _should_queue_input_during_run(self._main_run_state):
                 self._queued_message = text
+                self._queued_message_from_cloud = from_cloud
                 self._set_footer_status("消息已排队，等待回复完成...")
                 return
             self._handoff_main_run_to_background()
@@ -2934,6 +2948,9 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
             return
 
+        if not from_cloud and self._chat_presence is not None:
+            self._chat_presence.queue_local_message("user", text)
+
         self.sub_title = t("app.thinking", self.config.language)
         state = AgentRunState(
             agent=self.agent,
@@ -2942,7 +2959,7 @@ class AeroApp(App):
             base_messages=copy.deepcopy(self.agent.messages),
         )
         self._main_run_state = state
-        self._agent_worker = self._run_agent(text, state)
+        self._agent_worker = self._run_agent(text, state, from_cloud=from_cloud)
         self._start_activity()
 
     async def _handle_local_llm_setup(self, text: str, setup: dict) -> None:
@@ -3154,6 +3171,11 @@ class AeroApp(App):
         body = ChatMarkdown("", classes="agent-content")
         await stack.mount(body)
         return body
+
+    def _cloud_image_roots(self) -> list[Path]:
+        from aero.application.chat_images import workspace_roots
+
+        return workspace_roots(self._project_dir)
 
     def _resolve_inline_image_paths(self, text: str) -> list[Path]:
         """Resolve image references in a chat message to existing local files."""
@@ -6104,6 +6126,9 @@ class AeroApp(App):
 
         compacted = _compacted_context_messages(system_msg, summary_text)
         self.agent.messages = compacted
+        self._chat_log.append(f"[上下文压缩总结]\n{summary_text}")
+        if self._chat_presence is not None:
+            self._chat_presence.queue_local_message("summary", summary_text)
         self._auto_save_session()
         after_context = self._export_cloud_chat_context()
         if before_context and after_context and self._chat_presence is not None:
@@ -6456,7 +6481,7 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
 
     @work(exclusive=False)
-    async def _run_agent(self, text: str, state: AgentRunState) -> None:
+    async def _run_agent(self, text: str, state: AgentRunState, *, from_cloud: bool = False) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
         lang = self.config.language
         debug_log("tui.agent_worker_started", text_length=len(text))
@@ -6637,6 +6662,8 @@ class AeroApp(App):
                 sanitized_response = _sanitize_user_facing_text(response_text)
                 self._last_reply_text = sanitized_response
                 self._chat_log.append(f"Aero:\n{sanitized_response}")
+                if not from_cloud and self._chat_presence is not None:
+                    self._chat_presence.queue_local_message("assistant", sanitized_response)
                 self._collapse_status(done=True)
                 chat.mount(Static("─", classes="divider"))
                 await self._render_inline_images(sanitized_response)
@@ -6718,9 +6745,11 @@ class AeroApp(App):
 
     def _flush_queued_message(self) -> None:
         msg = self._queued_message
+        from_cloud = self._queued_message_from_cloud
         self._queued_message = None
+        self._queued_message_from_cloud = False
         if msg:
-            self.run_worker(self._process(msg), exclusive=False)
+            self.run_worker(self._process(msg, from_cloud=from_cloud), exclusive=False)
 
     def action_copy_last_reply(self) -> None:
         if not self._last_reply_text.strip():

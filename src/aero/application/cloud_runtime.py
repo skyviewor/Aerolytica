@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from cryptography.fernet import Fernet
 
+from aero.application.chat_images import ImagePublisher, describe_images, workspace_roots
 from aero.core.daemon import private_write
 from aero.core.official_account import OfficialLoginRequiredError
 
@@ -71,7 +72,13 @@ class RelayRuntimeTransport:
         )
         if response.status_code == 401:
             raise AccountRevokedError("客户端登录或智能体授权已下线，请重新登录。")
-        if response.status_code in {403, 410, 423} or (response.status_code == 409 and path not in {"context", "context/compact"}):
+        image_path = path.startswith("messages/") and "/images/" in path
+        if (
+            response.status_code in {410, 423}
+            or (response.status_code == 403 and not image_path)
+            or (response.status_code == 409
+                and path not in {"context", "context/compact"} and not image_path)
+        ):
             raise LeaseLost(f"runtime_rejected_{response.status_code}")
         response.raise_for_status()
         return {} if response.status_code == 204 else response.json()
@@ -148,6 +155,15 @@ class CloudAgentRuntime:
         self._journal_path = state_dir / f"{key}.json"
         self._memory_path = state_dir / f"{key}.memory.json"
         self._context_events_path = state_dir / f"{key}.context-events.json"
+        self.images = ImagePublisher(
+            self._image_request, lambda: workspace_roots(session.project_dir),
+            state_dir / f"{key}.images.json",
+        )
+        self._conversation_events_path = state_dir / f"{key}.messages.json"
+        try:
+            self._conversation_events = json.loads(self._conversation_events_path.read_text())
+        except (OSError, ValueError):
+            self._conversation_events = []
         self._pending_compactions: list[dict] = []
         if self._context_events_path.exists():
             try:
@@ -173,6 +189,44 @@ class CloudAgentRuntime:
         self._foreground_execution: str | None = None
         self._load_memory_state()
         self.session.on_compaction = self._queue_compaction
+
+    async def _image_request(self, method: str, path: str, **kwargs) -> dict:
+        self._assert_lease()
+        return await self.transport.request(method, path, **kwargs)
+
+    async def _sync_images(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._assert_lease()
+                while self._conversation_events:
+                    await self.transport.request(
+                        "POST", "events", json=self._conversation_events[0]
+                    )
+                    self._conversation_events.pop(0)
+                    private_write(
+                        self._conversation_events_path, json.dumps(self._conversation_events)
+                    )
+                await self.images.flush()
+            except (httpx.HTTPError, OSError, ValueError, RuntimeError):
+                pass
+            await asyncio.sleep(5)
+
+    def _queue_foreground_messages(self, run_id: str) -> None:
+        if self.session.run_status(run_id).get("state") != "completed":
+            return
+        messages = self.session.messages_view()
+        start = next((i for i in range(len(messages) - 1, -1, -1)
+                      if messages[i]["role"] == "user"), len(messages))
+        for index, message in enumerate(messages[start:]):
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            event_id = hashlib.sha256(f"{run_id}:{index}".encode()).hexdigest()
+            role = "user_message" if message["role"] == "user" else "message"
+            attachments = self.images.describe(content, event_id) if role == "message" else []
+            self._conversation_events.append({"type": role, "content": content,
+                                              "client_event_id": event_id, "images": attachments})
+        private_write(self._conversation_events_path, json.dumps(self._conversation_events))
 
     async def _queue_compaction(self, before: dict, after: dict) -> None:
         self._pending_compactions.append({"event_id": uuid.uuid4().hex,
@@ -268,15 +322,16 @@ class CloudAgentRuntime:
         except (ValueError, KeyError) as exc:
             self.context_sync_error = f"云端上下文格式错误：{type(exc).__name__}"
 
-    async def _sync_context(self) -> None:
-        if not self.context_sync_enabled:
+    async def _sync_context(self, *, manual_request_id: str = "") -> None:
+        if not self.context_sync_enabled and not manual_request_id:
             return
         try:
             while self._pending_compactions:
                 result = await self.transport.request("POST", "context/compact", json={
                     **self._pending_compactions[0], "expected_version": self.context_version,
+                    "manual_request_id": manual_request_id,
                 })
-                if not result.get("sync_enabled", True):
+                if not result.get("sync_enabled", True) and not manual_request_id:
                     self.context_sync_enabled = False
                     return
                 self.context_version = int(result["version"])
@@ -285,23 +340,39 @@ class CloudAgentRuntime:
                               json.dumps(self._pending_compactions, ensure_ascii=False))
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文轮转失败：{type(exc).__name__}"
+            if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
             return
         payload = self.session.session_manager.export_portable_context(self.session.id)
         if payload is None:
+            if manual_request_id:
+                await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
             return
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        if digest == self._context_hash:
+        if digest == self._context_hash and not manual_request_id:
             return
         try:
             result = await self.transport.request("PUT", "context", json={
                 "context": payload, "expected_version": self.context_version,
+                "manual_request_id": manual_request_id,
             })
             self.context_version = int(result["version"])
-            if result.get("sync_enabled", True) and result.get("applied", True):
+            if result.get("applied", True):
                 self._context_hash = digest
             self.context_sync_error = ""
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文同步失败：{type(exc).__name__}"
+            if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
+
+    async def _fail_manual_sync(self, request_id: str, reason: str) -> None:
+        try:
+            await self.transport.request(
+                "POST", f"context/manual-sync/{request_id}/fail",
+                json={"reason": reason},
+            )
+        except (httpx.HTTPError, LeaseLost):
+            pass
 
     async def _heartbeats(self) -> None:
         while not self._stop.is_set():
@@ -324,7 +395,9 @@ class CloudAgentRuntime:
                 if self.active_run_id:
                     await self.session.cancel(self.active_run_id)
             if not self.session.metadata().get("active_runs"):
-                await self._sync_context()
+                await self._sync_context(
+                    manual_request_id=str(result.get("manual_sync_request_id") or "")
+                )
 
     async def _watch_identity(self) -> None:
         while not self._stop.is_set():
@@ -345,6 +418,8 @@ class CloudAgentRuntime:
         try:
             yield
         finally:
+            with suppress(OSError, ValueError, RuntimeError):
+                self._queue_foreground_messages(run_id)
             self._foreground_execution = None
             with suppress(httpx.HTTPError, LeaseLost):
                 await self.transport.request("POST", "runtime/project/release", json={
@@ -403,11 +478,15 @@ class CloudAgentRuntime:
                 self._assert_lease()
                 if event.type == "confirmation_required":
                     await self._approval(command_id, self.active_run_id, event)
-                elif event.type == "text":
-                    response_parts.append(event.content or "")
-                elif event.type == "status" and event.content:
+                elif event.type in {"text", "assistant_delta"}:
+                    response_parts.append(getattr(event, "content", None)
+                                          or event.data.get("text", ""))
+                elif event.type in {"status", "tool_progress"}:
+                    content = getattr(event, "content", None) or event.data.get("text", "")
+                    if not content:
+                        continue
                     await self.transport.request("POST", "events", json={
-                        "type": "progress", "content": str(event.content)[:20_000],
+                        "type": "progress", "content": str(content)[:20_000],
                         "in_reply_to": command_id,
                         "client_event_id": f"progress-{uuid.uuid4().hex}",
                     })
@@ -418,14 +497,18 @@ class CloudAgentRuntime:
             final = {"completed": "completed", "cancelled": "canceled"}.get(state, "failed")
             self._record(command_id, final)
             if final == "completed":
+                content = "".join(response_parts).strip() or "指令已处理，但没有可返回的文本结果。"
+                event_id = f"result-{uuid.uuid4().hex}"
+                try:
+                    attachments = self.images.describe(content, event_id)
+                except OSError:
+                    attachments = describe_images(content, event_id)
                 await self.transport.request("POST", "events", json={
                     "type": "message",
-                    "content": (
-                        "".join(response_parts).strip()
-                        or "指令已处理，但没有可返回的文本结果。"
-                    ),
+                    "content": content,
+                    "images": attachments,
                     "in_reply_to": command_id,
-                    "client_event_id": f"result-{uuid.uuid4().hex}",
+                    "client_event_id": event_id,
                 })
             elif final == "failed":
                 await self.transport.request("POST", "events", json={
@@ -473,7 +556,8 @@ class CloudAgentRuntime:
                     self.state = "connecting"
                     await self._acquire()
                     tasks = [asyncio.create_task(fn()) for fn in
-                             (self._heartbeats, self._watch_identity, self._poll)]
+                             (self._heartbeats, self._watch_identity,
+                              self._poll, self._sync_images)]
                     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:
                         task.result()

@@ -363,7 +363,12 @@ async def _set_context_sync(selector: str, enabled: bool) -> int:
             json={"enabled": enabled},
         )
         if response.status_code >= 400:
-            raise RemoteAgentError(f"修改上下文同步设置失败（{response.status_code}）")
+            try:
+                detail = response.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            message = str(detail) if detail else f"HTTP {response.status_code}"
+            raise RemoteAgentError(f"修改上下文同步设置失败：{message}")
         print(f"上下文自动同步已{'开启' if response.json()['enabled'] else '关闭'}。")
         return 0
     finally:
