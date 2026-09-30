@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import re
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -82,6 +82,7 @@ class SessionMeta:
     title_source: str = ""
     project_dir: str = ""
     transcript: list[dict[str, str]] = field(default_factory=list)
+    sync_conflicts: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -100,6 +101,7 @@ class SessionMeta:
             "title_source": self.title_source,
             "project_dir": self.project_dir,
             "transcript": _redact_secret_value(self.transcript),
+            "sync_conflicts": _redact_secret_value(self.sync_conflicts),
         }
 
     @classmethod
@@ -120,6 +122,7 @@ class SessionMeta:
             title_source=d.get("title_source", ""),
             project_dir=d.get("project_dir", ""),
             transcript=_redact_secret_value(d.get("transcript", [])),
+            sync_conflicts=_redact_secret_value(d.get("sync_conflicts", [])),
         )
 
 
@@ -148,6 +151,32 @@ class SessionManager:
     ) -> None:
         if meta is None:
             meta = SessionMeta(id=session_id)
+        from difflib import SequenceMatcher
+
+        previous = self.load(session_id)
+        old_transcript = previous[1].transcript if previous else []
+
+        # Display-only messages also need stable IDs; preserve ordered repeated
+        # occurrences when the UI reconstructs its transcript on each save.
+        def key(item):
+            return item.get("role"), item.get("content")
+
+        matcher = SequenceMatcher(
+            None,
+            [key(x) for x in old_transcript],
+            [key(x) for x in meta.transcript],
+            autojunk=False,
+        )
+        for block in matcher.get_matching_blocks():
+            for offset in range(block.size):
+                old = old_transcript[block.a + offset]
+                item = meta.transcript[block.b + offset]
+                if not item.get("message_id") and old.get("message_id"):
+                    item["message_id"] = old["message_id"]
+        for item in meta.transcript:
+            item.setdefault("message_id", uuid.uuid4().hex)
+        if previous and not meta.sync_conflicts:
+            meta.sync_conflicts = previous[1].sync_conflicts
         meta.id = session_id
         meta.updated_at = time.time()
         meta.message_count = len(messages)
@@ -155,7 +184,9 @@ class SessionManager:
         data = [_serialize_message(m) for m in messages]
         payload = {"meta": meta.to_dict(), "messages": data}
         encrypted = self._encrypt(payload)
-        descriptor, temporary = tempfile.mkstemp(prefix="session-", suffix=".tmp", dir=self.storage_dir)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix="session-", suffix=".tmp", dir=self.storage_dir
+        )
         try:
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(encrypted)
@@ -190,8 +221,13 @@ class SessionManager:
         if loaded is None:
             return None
         messages, meta = loaded
-        return {"schema": 1, "meta": meta.to_dict(),
-                "messages": [_serialize_message(message) for message in messages]}
+        if any(not message.message_id for message in messages):
+            self.save(session_id, messages, meta)
+        return {
+            "schema": 1,
+            "meta": meta.to_dict(),
+            "messages": [_serialize_message(message) for message in messages],
+        }
 
     def import_portable_context(self, session_id: str, payload: dict) -> None:
         if payload.get("schema") != 1 or not isinstance(payload.get("messages"), list):
@@ -274,7 +310,9 @@ class SessionManager:
 
 
 def _serialize_message(m: Message) -> dict:
-    d = {"role": m.role, "content": _redact_secret_text(m.content)}
+    if not m.message_id:
+        m.message_id = uuid.uuid4().hex
+    d = {"role": m.role, "content": _redact_secret_text(m.content), "message_id": m.message_id}
     if m.tool_call_id:
         d["tool_call_id"] = m.tool_call_id
     if m.tool_calls:
@@ -305,6 +343,7 @@ def _deserialize_message(d: dict) -> Message:
         content=_redact_secret_text(d.get("content", "")),
         tool_call_id=d.get("tool_call_id"),
         tool_calls=tool_calls,
+        message_id=str(d.get("message_id") or ""),
     )
 
 

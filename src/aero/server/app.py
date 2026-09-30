@@ -106,6 +106,10 @@ class WebRuntime:
         from aero.toolbox import builtin_tools  # noqa: F401
 
         self.config = self._load_config()
+        from aero.core.config import apply_client_inference_policy
+
+        apply_client_inference_policy(self.config)
+
         self.sessions = SessionManager()
         self.artifacts = ArtifactService(self.project_dir)
         self.active_sessions: dict[str, LocalSession] = {}

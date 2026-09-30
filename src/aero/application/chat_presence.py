@@ -215,6 +215,8 @@ class ChatPresence:
     async def _sync_context(self, *, manual_request_id: str = "") -> None:
         if not self.context_sync_enabled and not manual_request_id:
             return
+        if not self.is_idle():
+            return
         if manual_request_id:
             await self._flush_messages()
             if self._pending_messages or not self.is_idle():
@@ -266,12 +268,10 @@ class ChatPresence:
                 await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
             return
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        if digest == self._context_hash and not manual_request_id:
-            return
         response = await self._http.put(
             f"/v1/agents/{self.agent_id}/context",
             json={"context": payload, "expected_version": self._context_version,
-                  "manual_request_id": manual_request_id},
+                  "manual_request_id": manual_request_id, "reconcile": True},
             headers={"Authorization": f"Bearer {self.token}"},
         )
         if response.status_code == 409:
@@ -284,6 +284,14 @@ class ChatPresence:
         response.raise_for_status()
         result = response.json()
         self._context_version = int(result["version"])
+        merged = result.get("context")
+        # A user may start a new turn while the network request is pending.
+        # Never replace that in-flight state; the next sync will merge it again.
+        current = self.export_context()
+        if merged is not None and merged != payload and self.is_idle() and current == payload:
+            self.restore_context(merged)
+            self.on_sync_error("已对比并合并本地与云端记录，双方新增内容均已保留")
+        self._sync_blocked_version = None
         if result.get("applied", True):
             self._context_hash = digest
 

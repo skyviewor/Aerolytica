@@ -69,14 +69,7 @@ if os.environ.get("AERO_TEXTUAL_IMAGE_PROTOCOL") != "0":
     except Exception:
         TerminalImage = None
 
-from aero.cli.image_widget import (
-    extract_image_paths,
-    image_metadata,
-    resolve_image_path,
-    strip_image_markdown,
-    terminal_half_block_preview,
-    terminal_image_preview,
-)
+from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.agent.subagent import (
     SubAgentManager,
     SubAgentTask,
@@ -84,10 +77,19 @@ from aero.agent.subagent import (
     use_subagent_launcher,
     use_subagent_status_provider,
 )
-from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.application.session_titles import (
     has_successful_first_exchange,
+)
+from aero.application.session_titles import (
     session_title_prompt as build_session_title_prompt,
+)
+from aero.cli.image_widget import (
+    extract_image_paths,
+    image_metadata,
+    resolve_image_path,
+    strip_image_markdown,
+    terminal_half_block_preview,
+    terminal_image_preview,
 )
 from aero.core.config import (
     AeroConfig,
@@ -105,20 +107,21 @@ from aero.core.config import (
 )
 from aero.core.debug_log import configure_debug_logging, debug_log
 from aero.core.llm_providers import (
+    BYOK_UI_ENABLED,
     OFFICIAL_ACCOUNT_UI_ENABLED,
     get_provider_preset,
     model_alias_for_provider,
     normalize_provider_id,
     provider_options,
 )
-from aero.core.official_models import OfficialModel, OfficialModelCatalog
 from aero.core.logging import configure as configure_logging
+from aero.core.official_models import OfficialModel, OfficialModelCatalog
+from aero.core.types import Message
 from aero.data.plans import set_session_id
 from aero.data.pricing import TokenTracker, context_window_for, format_cost, format_token_count
-from aero.core.types import Message
 from aero.i18n import is_supported_language, language_label, language_options, t
-from aero.paper_versions import PaperVersionManager
 from aero.paper_export import PaperExportError, export_paper
+from aero.paper_versions import PaperVersionManager
 from aero.toolbox.paths import use_workspace
 from aero.toolbox.secret_input import (
     SecretInputRequest,
@@ -1759,6 +1762,9 @@ class AeroApp(App):
         resume_last_session: bool = False,
     ):
         super().__init__()
+        from aero.core.config import apply_client_inference_policy
+
+        apply_client_inference_policy(config)
         self.config = config
         self.persist_config = persist_config
         self._resume_last_session = resume_last_session
@@ -1993,6 +1999,9 @@ class AeroApp(App):
         self._set_footer_status("主模型已配置，可以开始对话。")
 
     def _open_provider_setup(self, previous_provider: str) -> None:
+        if not BYOK_UI_ENABLED:
+            self.run_worker(self._handle_official_login(), exclusive=True)
+            return
         from aero.cli.setup_wizard import FirstRunSetupScreen
 
         primary = {
@@ -2053,6 +2062,9 @@ class AeroApp(App):
         self.agent.config.llm.set_active_api_key(self.config.llm.active_api_key())
 
     async def _open_vision_setup_for_current_task(self) -> bool:
+        if not BYOK_UI_ENABLED:
+            await self._handle_official_login()
+            return self.config.llm.provider == "official"
         from aero.cli.setup_wizard import FirstRunSetupScreen
 
         result = await self.push_screen_wait(
@@ -2294,11 +2306,15 @@ class AeroApp(App):
     def _input_meta_text(self) -> str:
         model_name = _display_model_name(self.config.llm.model)
         provider = _display_provider_name(self.config.llm.provider)
-        effort = self.config.llm.reasoning_effort or "auto"
-        text = (
-            f"{escape(model_name)} [dim]{escape(provider)} ·[/dim] "
-            f"[bold warning]{escape(effort)}[/bold warning]"
-        )
+        effort = self.config.llm.reasoning_effort.strip().lower()
+        text = escape(model_name)
+        if self.config.llm.provider != "official":
+            text += f" [dim]{escape(provider)}[/dim]"
+        effort_labels = {
+            "low": "低", "medium": "中", "high": "高", "xhigh": "极高", "max": "最高",
+        }
+        if effort in effort_labels:
+            text += f" [dim]·[/dim] 思考强度 [bold warning]{effort_labels[effort]}[/bold warning]"
         vision_config = resolved_vision_config(self.config)
         if vision_config is not None and not self._vision_matches_primary(vision_config):
             vision_model = _display_vision_model_name(vision_config.model)
@@ -2319,7 +2335,7 @@ class AeroApp(App):
         ):
             text += (
                 " [dim]|[/dim] [dim]剩余额度[/dim] "
-                f"{escape(self._official_available_credits)} credits"
+                f"{escape(self._official_available_credits)} 点"
             )
         return text
 
@@ -2692,6 +2708,13 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
             return
 
+        if not BYOK_UI_ENABLED and text.partition(" ")[0] in {
+            "/provider", "/ai-mode", "/vision"
+        }:
+            self._set_footer_status("当前使用官方账号；视觉能力由官方接口自动提供。")
+            self.query_one("#user-input", TextArea).focus()
+            return
+
         if text == "/model" or text.startswith("/model "):
             self._handle_model_command(text)
             self.query_one("#user-input", TextArea).focus()
@@ -2893,14 +2916,18 @@ class AeroApp(App):
             return
 
         api_key = _extract_llm_api_key(text)
-        if api_key and _mentions_vision_model(text):
+        if BYOK_UI_ENABLED and api_key and _mentions_vision_model(text):
             await self._handle_local_vision_key_setup(text, api_key)
             self.query_one("#user-input", TextArea).focus()
             return
 
-        if _requests_primary_vision_reuse(text):
+        if BYOK_UI_ENABLED and _requests_primary_vision_reuse(text):
             await self._handle_local_vision_reuse(text)
             self.query_one("#user-input", TextArea).focus()
+            return
+
+        if api_key and not BYOK_UI_ENABLED:
+            self._set_footer_status("当前仅支持官方账号登录，无需提供模型 API Key。")
             return
 
         if api_key:
@@ -3416,11 +3443,16 @@ class AeroApp(App):
                 ]
             )
             self._commands_list.sort(key=lambda command: command[0])
+        if not BYOK_UI_ENABLED:
+            self._commands_list = [
+                item for item in self._commands_list
+                if item[0].split()[0] not in {"/provider", "/ai-mode", "/vision"}
+            ]
         self._secondary_commands_list = [
             ("/websearch on", "开启网页搜索"),
             ("/websearch off", "关闭网页搜索"),
             ("/websearch status", "查看网页搜索状态"),
-            ("/websearch provider", "切换网页搜索服务"),
+            *(([("/websearch provider", "切换网页搜索服务")]) if BYOK_UI_ENABLED else []),
             ("/set max_tool_rounds ", "设置最大工具调用轮次"),
             ("/set model ", "切换模型  如 flash 或 pro"),
             ("/set variants ", "设置推理强度  low/medium/high/max/auto"),
@@ -3479,8 +3511,9 @@ class AeroApp(App):
 
     async def _open_official_model_picker(self) -> None:
         catalog = self._official_models()
-        self._set_footer_status("正在获取 Aerolytica 官方模型列表…")
-        preferences = await catalog.official_preferences()
+        self._set_footer_status("正在获取官方模型列表…")
+        preferences = await catalog.official_preferences(force_refresh=True)
+        models = preferences.text_models
         if catalog.last_error is not None:
             from aero.core.official_account import OfficialLoginRequiredError
 
@@ -3488,23 +3521,20 @@ class AeroApp(App):
                 self.notify("官方账户登录已失效，请重新登录。", severity="warning", timeout=5)
                 await self._handle_official_login()
                 return
-            self.notify(
-                "官方模型列表刷新失败，已使用"
-                f"{'缓存' if catalog.has_cached_models else '默认'}列表。",
-                severity="warning",
-                timeout=5,
-            )
+            if not catalog.has_cached_models:
+                self._set_footer_status("模型列表获取失败，请稍后重试。")
+                self.notify(str(catalog.last_error), severity="error", timeout=5)
+                return
+            self.notify("模型列表刷新失败，暂时显示缓存列表。", severity="warning", timeout=5)
+        models = tuple(model for model in models if model.id != "default")
+        current = "auto" if self.config.llm.model == "default" else self.config.llm.model
         self.push_screen(
             SelectScreen(
-                "Select model",
-                _official_model_options(
-                    preferences.text_models,
-                    include_follow_default=True,
-                    default_model=preferences.text_default,
-                ),
-                self.config.llm.model,
+                "选择模型",
+                _official_model_options(models),
+                current,
                 self.config.language,
-                hint="模型列表来自 Aerolytica 官方服务，按需定期刷新。",
+                hint="参考倍率：相对 V4.1 Flash，主来源峰价，输入/输出各 1000 token，缓存 0；实际扣点按用量计算。",
             ),
             callback=self._apply_selected_model,
         )
@@ -3715,7 +3745,7 @@ class AeroApp(App):
         if self.config.llm.provider == "official":
             message += (
                 " 当前仍选择官方模型，请重新登录，"
-                "或使用 `/provider` 切换模型服务。"
+                "即可继续使用。"
             )
         self._official_available_credits = None
         self._refresh_model_info()
@@ -3749,8 +3779,8 @@ class AeroApp(App):
             "### Aerolytica 官方账户\n\n"
             f"- 邮箱：`{email}`\n"
             f"- 套餐：{plan}\n"
-            f"- 可用额度：{available} credits\n"
-            f"- 冻结额度：{reserved} credits\n"
+            f"- 可用额度：{available} 点\n"
+            f"- 冻结额度：{reserved} 点\n"
             f"- 当前周期结束：{period_end}"
         )
         self.query_one("#chat-area", VerticalScroll).mount(Markdown(message))
@@ -3786,7 +3816,7 @@ class AeroApp(App):
         if len(parts) == 1:
             self.push_screen(
                 SelectScreen(
-                    "Select variant",
+                    "选择思考强度",
                     _variant_options(),
                     self.config.llm.reasoning_effort,
                     lang,
@@ -4631,7 +4661,7 @@ class AeroApp(App):
         fallback = _checkpoint_title_from_messages(messages) or "当前工作进度"
         client = None
         try:
-            from aero.agent.llm_client import LLMConfig, LLMClient
+            from aero.agent.llm_client import LLMClient, LLMConfig
 
             llm_cfg = LLMConfig(
                 provider=self.config.llm.provider,
@@ -5240,7 +5270,7 @@ class AeroApp(App):
         memo_context = render_memo_context(self._project_dir)
         client = None
         try:
-            from aero.agent.llm_client import LLMConfig, LLMClient
+            from aero.agent.llm_client import LLMClient, LLMConfig
 
             client = LLMClient(
                 LLMConfig(
@@ -5364,7 +5394,7 @@ class AeroApp(App):
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
-            self._official_vision_override = meta.official_vision_model or ""
+            self._official_vision_override = (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
             self.config.llm.model = self._official_text_override or "default"
             if (self._official_vision_override
                     and self.config.vision.mode in {"unconfigured", "official"}):
@@ -5458,8 +5488,9 @@ class AeroApp(App):
             self._save_experiment_slot(active_experiment["id"], active_experiment["name"])
             return
         mgr = self._get_session_mgr()
-        from aero.agent.session import SessionMeta
         import uuid
+
+        from aero.agent.session import SessionMeta
         sid = self._session_id or uuid.uuid4().hex[:12]
         existing = mgr.load(sid)
         self._session_id = sid
@@ -5540,7 +5571,7 @@ class AeroApp(App):
                 return
             client = None
             try:
-                from aero.agent.llm_client import LLMConfig, LLMClient
+                from aero.agent.llm_client import LLMClient, LLMConfig
 
                 llm_cfg = LLMConfig(
                     provider=self.config.llm.provider,
@@ -5673,7 +5704,7 @@ class AeroApp(App):
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
-            self._official_vision_override = meta.official_vision_model or ""
+            self._official_vision_override = (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
             self.config.llm.model = self._official_text_override or "default"
             if (self._official_vision_override
                     and self.config.vision.mode in {"unconfigured", "official"}):
@@ -6104,7 +6135,7 @@ class AeroApp(App):
                 await loading_task
 
         try:
-            from aero.agent.llm_client import LLMConfig, LLMClient
+            from aero.agent.llm_client import LLMClient, LLMConfig
             llm_cfg = LLMConfig(
                 provider=self.config.llm.provider,
                 model=self.config.llm.model,
@@ -6156,7 +6187,11 @@ class AeroApp(App):
         self.query_one("#user-input", TextArea).focus()
 
     async def _handle_instructions_command(self, text: str) -> None:
-        from aero.data.instructions import load_instructions, clear_instructions, GLOBAL_INSTRUCTIONS_PATH
+        from aero.data.instructions import (
+            GLOBAL_INSTRUCTIONS_PATH,
+            clear_instructions,
+            load_instructions,
+        )
 
         lang = self.config.language
         chat = self.query_one("#chat-area", VerticalScroll)
@@ -6186,6 +6221,21 @@ class AeroApp(App):
             classes="divider",
         ))
 
+    async def _select_official_text_model(self, value: str) -> None:
+        from aero.core.official_account import OfficialAccountError
+
+        try:
+            await self._official_models().enable_text_model(value)
+        except OfficialAccountError as exc:
+            self.notify(str(exc), severity="error", timeout=5)
+            self._set_footer_status(str(exc))
+            return
+        self._official_text_override = value
+        self.config.llm.model = value
+        self._sync_agent_llm_config()
+        self._refresh_model_info()
+        self._set_footer_status(f"官方文本模型已切换为 {_display_model_name(value)}。")
+
     def _set_model(self, value: str) -> None:
         lang = self.config.language
         chat = self.query_one("#chat-area", VerticalScroll)
@@ -6196,12 +6246,8 @@ class AeroApp(App):
             elif value == "auto":
                 self._official_text_override = "auto"
             else:
-                cached = self._official_models().preferences
-                allowed = {item.id for item in cached.text_models} if cached else set()
-                if value not in allowed:
-                    chat.mount(Static("该模型不在当前官方文本模型池中。"))
-                    return
-                self._official_text_override = value
+                self.run_worker(self._select_official_text_model(value), exclusive=True)
+                return
             self.config.llm.model = value
             self.config.llm.base_url = self.config.llm.base_url or ""
             self._sync_agent_llm_config()
@@ -7175,6 +7221,9 @@ class AeroApp(App):
         )
 
     def _init_agent(self) -> None:
+        from aero.core.config import apply_client_inference_policy
+
+        apply_client_inference_policy(self.config)
         try:
             from aero.agent.loop import AgentLoop
             from aero.toolbox.builtin_tools import download_era5  # noqa: F401
@@ -7707,6 +7756,7 @@ def _official_model_options(
         prompt = Table.grid(expand=True, padding=0)
         prompt.add_column(width=22, no_wrap=True)
         prompt.add_column(width=22, no_wrap=True)
+        prompt.add_column(width=18, no_wrap=True)
         prompt.add_column(ratio=1, no_wrap=True)
         prompt.add_column(width=4, justify="right", no_wrap=True)
         capabilities = "、".join(model.capabilities)
@@ -7718,13 +7768,15 @@ def _official_model_options(
             )
             if value
         )
-        description_text = description
-        if model.price_multiplier:
-            description_text = f"{description_text} · 价格提示：{model.price_multiplier}"
+        multiplier_text = (
+            "参考倍率 随模型" if model.id == "auto"
+            else f"参考倍率 {model.price_multiplier}" if model.price_multiplier else "参考倍率 —"
+        )
         prompt.add_row(
             model.id,
             model.display_name,
-            description_text,
+            multiplier_text,
+            description,
             "推荐" if model.recommended else "",
         )
         options.append((model.id, prompt))
@@ -7733,12 +7785,12 @@ def _official_model_options(
 
 def _variant_options() -> list[tuple[str, str]]:
     return [
-        ("", "Auto    provider default"),
-        ("low", "Low"),
-        ("medium", "Medium"),
-        ("high", "High"),
-        ("max", "Max"),
-        ("xhigh", "XHigh"),
+        ("", "默认（使用模型默认强度）"),
+        ("low", "低"),
+        ("medium", "中"),
+        ("high", "高"),
+        ("max", "最高"),
+        ("xhigh", "极高"),
     ]
 
 
@@ -7768,6 +7820,8 @@ def _display_theme_name(name: str) -> str:
 
 def _display_model_name(model: str) -> str:
     names = {
+        "auto": "自动模型",
+        "default": "自动模型",
         "deepseek-v4-pro": "DeepSeek V4 Pro",
         "deepseek-v4-flash": "DeepSeek V4 Flash",
     }
@@ -8406,11 +8460,12 @@ def _help_text(lang: str) -> str:
         t("help.slash_language", lang),
         t("help.slash_model", lang),
         t("help.slash_preview", lang),
-        t("help.slash_provider", lang),
-        "  /ai-mode official|byok  整体切换官方或 BYOK 推理模式",
+        *([t("help.slash_provider", lang),
+           "  /ai-mode official|byok  整体切换官方或 BYOK 推理模式"]
+          if BYOK_UI_ENABLED else []),
         t("help.slash_theme", lang),
         t("help.slash_variants", lang),
-        t("help.slash_vision", lang),
+        *([t("help.slash_vision", lang)] if BYOK_UI_ENABLED else []),
         "  /websearch [on|off|status]  管理网页搜索开关并查看状态",
         t("help.slash_bill", lang),
         t("help.slash_mode", lang),

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import mimetypes
+from pathlib import Path
+
+import httpx
 
 from aero.agent.vision_client import VisionAnalysisError
 from aero.core.config import VisionConfig
@@ -21,24 +23,52 @@ class OfficialVisionClient:
 
     async def analyze(self, image_paths: list[str], prompt: str, detail: str = "high") -> str:
         parts: list[dict] = [{"type": "text", "text": prompt}]
-        for path in image_paths:
-            mime_type, _ = mimetypes.guess_type(path)
-            mime_type = mime_type or "image/png"
-            with open(path, "rb") as handle:
-                raw = handle.read()
-            parts.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}",
-                        "detail": detail,
-                    },
-                }
-            )
+        async with httpx.AsyncClient(timeout=120) as uploads:
+            for path in image_paths:
+                mime_type = mimetypes.guess_type(path)[0] or "image/png"
+                image = Path(path)
+                ticket = await self._session.request_to(
+                    relay_llm_url(),
+                    "POST",
+                    "/vision/upload-url",
+                    json={"content_type": mime_type, "size_bytes": image.stat().st_size},
+                )
+                if ticket.status_code >= 400:
+                    raise VisionAnalysisError(
+                        f"无法获取图片直传地址（HTTP {ticket.status_code}）：{ticket.text}",
+                        error_type="image_upload",
+                        status_code=ticket.status_code,
+                    )
+                signed = ticket.json()
+
+                async def chunks():
+                    with image.open("rb") as handle:
+                        while chunk := handle.read(256 * 1024):
+                            yield chunk
+
+                try:
+                    uploaded = await uploads.put(
+                        signed["upload_url"],
+                        content=chunks(),
+                        headers={**signed["headers"], "Content-Length": str(image.stat().st_size)},
+                    )
+                    uploaded.raise_for_status()
+                except httpx.HTTPError as exc:
+                    raise VisionAnalysisError(
+                        "图片直传 OSS 失败，请检查网络连接。",
+                        error_type="image_upload",
+                    ) from exc
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": signed["image_url"], "detail": detail},
+                    }
+                )
         response = await self._session.request_to(
             relay_llm_url(),
             "POST",
             "/chat/completions",
+            timeout=120,
             json={
                 "model": self._config.model or "default",
                 "messages": [{"role": "user", "content": parts}],

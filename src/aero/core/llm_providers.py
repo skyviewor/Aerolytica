@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 # Expose the official-account provider and login flows in the client UI.
 OFFICIAL_ACCOUNT_UI_ENABLED = True
+# Keep BYOK implementations available, but hide them in the current client release.
+BYOK_UI_ENABLED = False
 
 
 @dataclass(frozen=True)

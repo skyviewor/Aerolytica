@@ -666,3 +666,21 @@ def _is_legacy_web_search_in_vision(values: object) -> bool:
         str(values.get("provider") or "").strip().lower() == "bailian"
         and str(values.get("model") or "").strip().lower() == "qwen-turbo"
     )
+
+
+def apply_client_inference_policy(config: AeroConfig) -> None:
+    """Select the current client mode without deleting saved BYOK profiles."""
+    from aero.core.llm_providers import BYOK_UI_ENABLED
+    from aero.core.official_account import relay_llm_url
+
+    if BYOK_UI_ENABLED:
+        return
+    if config.llm.provider != "official":
+        config.llm.model = "auto"
+    config.llm.provider = "official"
+    config.llm.base_url = relay_llm_url()
+    config.llm.supports_vision = False
+    config.vision.mode = "official"
+    config.vision.provider = "official"
+    config.vision.model = "auto"
+    config.vision.base_url = relay_llm_url()

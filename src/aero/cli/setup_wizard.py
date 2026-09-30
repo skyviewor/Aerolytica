@@ -11,6 +11,7 @@ from typing import Any
 from rich.table import Table
 from textual import events, on
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Input, OptionList, Static
@@ -18,6 +19,7 @@ from textual.widgets._option_list import Option
 
 from aero.core.llm_providers import (
     BUILTIN_LLM_PROVIDERS,
+    BYOK_UI_ENABLED,
     OFFICIAL_ACCOUNT_UI_ENABLED,
     model_supports_vision,
     model_tags,
@@ -175,6 +177,10 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         margin-top: 1;
     }
 
+    #setup-error.setup-progress {
+        color: $text-muted;
+    }
+
     #setup-error.setup-success {
         color: $success;
     }
@@ -188,7 +194,11 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
     }
     """
 
-    BINDINGS = [("escape", "cancel", "取消")]
+    BINDINGS = [
+        ("escape", "cancel", "取消"),
+        Binding("tab", "navigate_tab(1)", show=False, priority=True),
+        Binding("shift+tab", "navigate_tab(-1)", show=False, priority=True),
+    ]
     _FORM_INPUT_IDS = ("#setup-url", "#setup-model", "#setup-key")
     _ACTION_IDS = ("#setup-next", "#setup-skip", "#setup-back", "#setup-cancel")
     _CONNECTION_SUCCESS_DELAY = 1.0
@@ -211,6 +221,8 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             if primary_only
             else "source"
         )
+        if not BYOK_UI_ENABLED:
+            self._page = "official"
         self._primary: dict[str, Any] = dict(primary or {})
         self._primary_supports_vision = primary_supports_vision
         self._vision: dict[str, Any] = {"mode": "unconfigured"}
@@ -237,7 +249,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 yield Static("跳过", id="setup-skip", classes="setup-action")
                 yield Static("返回", id="setup-back", classes="setup-action")
                 yield Static("取消", id="setup-cancel", classes="setup-action")
-            yield Static("↑↓ 内容 · ←→ 操作 · Enter 确认", id="setup-hint")
+            yield Static("Tab 切换 · ↑↓ 内容 · ←→ 操作 · Enter 确认", id="setup-hint")
 
     def on_mount(self) -> None:
         self.call_after_refresh(self._render_page)
@@ -296,7 +308,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 self._focus_actions()
             return
 
-        if self._page in {"primary_form", "vision_form", "web_search_form"}:
+        if self._page in {"official", "primary_form", "vision_form", "web_search_form"}:
             if event.key in {"up", "down", "tab", "shift+tab"}:
                 event.stop()
                 event.prevent_default()
@@ -316,6 +328,36 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_navigate_tab(self, delta: int) -> None:
+        """Cycle through visible fields and custom actions in display order."""
+        fields = (
+            self._visible_input_ids()
+            if self._page in {"official", "primary_form", "vision_form", "web_search_form"}
+            else []
+        )
+        options = self._current_option_list()
+        content = fields or (["#setup-list"] if options is not None else [])
+        actions = [self._ACTION_IDS[index] for index in self._visible_action_indices()]
+        targets = content + actions
+        if not targets:
+            return
+        current = (
+            self._ACTION_IDS[self._selected_action]
+            if self._action_focused
+            else f"#{self.focused.id}" if self.focused is not None else None
+        )
+        if current in targets:
+            target = targets[(targets.index(current) + delta) % len(targets)]
+        else:
+            target = targets[0 if delta > 0 else -1]
+        if target in actions:
+            self._selected_action = self._ACTION_IDS.index(target)
+            self._focus_actions()
+        else:
+            self._action_focused = False
+            self.set_focus(self.query_one(target))
+            self._sync_selected_action()
 
     def _render_page(self) -> None:
         title = self.query_one("#setup-title", Static)
@@ -352,7 +394,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             options.display = choice_page
             options.clear_options()
 
-        error.remove_class("setup-success")
+        error.remove_class("setup-success", "setup-progress")
         error.update("")
         form.display = False
         for selector in self._FORM_INPUT_IDS:
@@ -393,8 +435,10 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             password = self.query_one("#setup-key", Input)
             password.placeholder = "密码"
             password.value = ""
-            self._set_actions(next_visible=True, back_visible=True)
+            self._set_actions(next_visible=True, back_visible=BYOK_UI_ENABLED)
             self.query_one("#setup-next", Static).update("登录并继续")
+            if not BYOK_UI_ENABLED:
+                self.query_one("#setup-back", Static).display = False
             email.focus()
         elif self._page == "primary_provider":
             subtitle.update("选择主模型服务商。下一步会列出该服务商支持的模型。")
@@ -692,7 +736,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             return
         # API keys are the only value users normally need to type on a
         # pre-filled connection form, so place the cursor there first.
-        target = "#setup-key" if "#setup-key" in visible else visible[0]
+        target = (
+            "#setup-key" if self._page != "official" and "#setup-key" in visible else visible[0]
+        )
         self.set_focus(self.query_one(target, Input))
 
     def _move_form_focus(self, delta: int) -> None:
@@ -741,7 +787,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             options.focus()
             if options.option_count and options.highlighted is None:
                 options.highlighted = options.option_count - 1
-        elif self._page in {"primary_form", "vision_form", "web_search_form"}:
+        elif self._page in {"official", "primary_form", "vision_form", "web_search_form"}:
             field_ids = self._visible_input_ids()
             self.set_focus(self.query_one(field_ids[-1], Input))
         self._sync_selected_action()
@@ -885,7 +931,10 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 self.query_one("#setup-error", Static).update("请输入邮箱和密码。")
                 return
             self._verifying_primary = True
-            self.query_one("#setup-error", Static).update("正在登录官方账户…")
+            status = self.query_one("#setup-error", Static)
+            status.remove_class("setup-success")
+            status.add_class("setup-progress")
+            status.update("正在登录官方账户…")
             self._set_actions(next_visible=False, back_visible=False)
             self.run_worker(self._verify_official_login(email, password), exclusive=True)
             return
@@ -897,7 +946,8 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 return
             self._verifying_primary = True
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
+            status.add_class("setup-progress")
             status.update("正在测试模型连接，请稍候…")
             for selector in self._FORM_INPUT_IDS:
                 self.query_one(selector, Input).disabled = True
@@ -912,7 +962,8 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 return
             self._verifying_vision = True
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
+            status.add_class("setup-progress")
             status.update("正在测试视觉模型连接，请稍候…")
             for selector in self._FORM_INPUT_IDS:
                 self.query_one(selector, Input).disabled = True
@@ -931,7 +982,8 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             self._verifying_web_search = True
             self._web_search.update(values)
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
+            status.add_class("setup-progress")
             status.update("正在测试网页搜索连接，请稍候…")
             self.query_one("#setup-key", Input).disabled = True
             self._set_actions(next_visible=False, back_visible=False)
@@ -949,9 +1001,11 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             await session.login(email, password)
         except OfficialAccountError as exc:
             self._verifying_primary = False
-            self._set_actions(next_visible=True, back_visible=True)
+            self._set_actions(next_visible=True, back_visible=BYOK_UI_ENABLED)
             self.query_one("#setup-next", Static).update("登录并继续")
-            self.query_one("#setup-error", Static).update(str(exc))
+            status = self.query_one("#setup-error", Static)
+            status.remove_class("setup-progress")
+            status.update(str(exc))
             self.query_one("#setup-key", Input).value = ""
             self.query_one("#setup-key", Input).focus()
             return
@@ -965,6 +1019,10 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             "api_key": "",
         }
         self._primary_supports_vision = False
+        if not BYOK_UI_ENABLED:
+            self._vision = {"mode": "official"}
+            self._finish()
+            return
         self._page = "vision_mode"
         self._render_page()
 
@@ -985,7 +1043,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             if len(detail) > 240:
                 detail = detail[:237] + "…"
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
             status.update(
                 f"连通性测试失败：{detail or '无法连接模型服务。'} 请检查 API Key、接口地址和模型 ID。"
             )
@@ -993,6 +1051,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             return
 
         status = self.query_one("#setup-error", Static)
+        status.remove_class("setup-progress")
         status.add_class("setup-success")
         status.update("测试通过")
         await asyncio.sleep(self._CONNECTION_SUCCESS_DELAY)
@@ -1022,7 +1081,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             if len(detail) > 240:
                 detail = detail[:237] + "…"
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
             status.update(
                 f"连通性测试失败：{detail or '无法连接视觉模型服务。'} 请检查 API Key、接口地址和模型 ID。"
             )
@@ -1030,6 +1089,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             return
 
         status = self.query_one("#setup-error", Static)
+        status.remove_class("setup-progress")
         status.add_class("setup-success")
         status.update("测试通过")
         await asyncio.sleep(self._CONNECTION_SUCCESS_DELAY)
@@ -1059,11 +1119,12 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             self._set_actions(next_visible=True, back_visible=True)
             detail = str(exc).replace("\n", " ").strip()[:240]
             status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-success")
+            status.remove_class("setup-success", "setup-progress")
             status.update(f"网页搜索连通性测试失败：{detail or '服务不可用'}")
             self._focus_first_visible_field()
             return
         status = self.query_one("#setup-error", Static)
+        status.remove_class("setup-progress")
         status.add_class("setup-success")
         status.update("测试通过")
         await asyncio.sleep(self._CONNECTION_SUCCESS_DELAY)

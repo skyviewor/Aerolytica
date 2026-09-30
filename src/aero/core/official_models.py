@@ -69,14 +69,14 @@ class OfficialModelCatalog:
     def preferences(self) -> OfficialModelPreferences | None:
         return self._preferences
 
-    async def models(self) -> tuple[OfficialModel, ...]:
+    async def models(self, *, force_refresh: bool = False) -> tuple[OfficialModel, ...]:
         now = self._clock()
-        if self._models and now - self._loaded_at < self._ttl_seconds:
+        if not force_refresh and self._models and now - self._loaded_at < self._ttl_seconds:
             return self._models
 
         async with self._refresh_lock:
             now = self._clock()
-            if self._models and now - self._loaded_at < self._ttl_seconds:
+            if not force_refresh and self._models and now - self._loaded_at < self._ttl_seconds:
                 return self._models
             try:
                 models = await self._fetch()
@@ -112,31 +112,20 @@ class OfficialModelCatalog:
             model_id = str(item.get("id") or "").strip()
             if not model_id:
                 continue
-            capabilities = item.get("capabilities")
-            if not isinstance(capabilities, list):
-                capabilities = ["text"]
-            parsed.append(
-                OfficialModel(
-                    id=model_id,
-                    display_name=str(item.get("name") or item.get("display_name") or model_id),
-                    description=str(item.get("description") or ""),
-                    capabilities=tuple(str(value) for value in capabilities if str(value)),
-                    recommended=bool(item.get("recommended", False)),
-                )
-            )
+            parsed.append(self._parse_model(item))
         if not parsed:
             raise OfficialAccountError("官方模型列表为空。")
         if not any(model.id == "auto" for model in parsed):
             parsed.insert(0, _fallback_model())
         return tuple(parsed)
 
-    async def official_preferences(self) -> OfficialModelPreferences:
+    async def official_preferences(self, *, force_refresh: bool = False) -> OfficialModelPreferences:
         now = self._clock()
-        if self._preferences and now - self._loaded_at < self._ttl_seconds:
+        if not force_refresh and self._preferences and now - self._loaded_at < self._ttl_seconds:
             return self._preferences
         async with self._refresh_lock:
             now = self._clock()
-            if self._preferences and now - self._loaded_at < self._ttl_seconds:
+            if not force_refresh and self._preferences and now - self._loaded_at < self._ttl_seconds:
                 return self._preferences
             try:
                 preferences = await self._fetch_preferences()
@@ -183,7 +172,7 @@ class OfficialModelCatalog:
                 for item in items
                 if (
                     isinstance(item, dict)
-                    and str(item.get("id") or "").strip() in pool
+                    and str(item.get("id") or "").strip()
                 )
             )
             if not any(model.id == "auto" for model in parsed):
@@ -196,6 +185,31 @@ class OfficialModelCatalog:
         text_models, text_default = parse_group("text")
         vision_models, vision_default = parse_group("vision")
         return OfficialModelPreferences(text_models, vision_models, text_default, vision_default)
+
+    async def enable_text_model(self, model_id: str) -> None:
+        """Add a selected model while preserving both existing model pools."""
+        session = OfficialAccountSession()
+        try:
+            response = await session.request_to(relay_llm_url(), "GET", "/model-preferences")
+            if response.status_code >= 400:
+                raise OfficialAccountError("无法获取当前模型设置，请稍后重试。")
+            payload = response.json()
+            text, vision = payload["text"], payload["vision"]
+            available = {item["id"] for item in text["models"]}
+            if model_id not in available:
+                raise OfficialAccountError("该模型当前不可用，请刷新模型列表。")
+            pool = list(dict.fromkeys([*text["pool"], model_id]))
+            response = await session.request_to(
+                relay_llm_url(), "PUT", "/model-preferences",
+                json={"text_pool": pool, "text_default": text["default"],
+                      "vision_pool": vision["pool"], "vision_default": vision["default"]},
+            )
+            if response.status_code >= 400:
+                raise OfficialAccountError("模型设置保存失败，请稍后重试。")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise OfficialAccountError("官方模型设置格式无效。") from exc
+        finally:
+            await session.close()
 
     @staticmethod
     def _parse_model(item: dict) -> OfficialModel:

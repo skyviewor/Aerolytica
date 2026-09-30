@@ -258,6 +258,8 @@ class CloudAgentRuntime:
 
         if not self.context_sync_enabled and not manual_request_id:
             return
+        if self.session.metadata().get("active_runs") or self._foreground_execution or self.command_id:
+            return
         if manual_request_id:
             if self._foreground_execution or self.command_id:
                 return
@@ -310,14 +312,18 @@ class CloudAgentRuntime:
                 await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
             return
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        if digest == self._context_hash and not manual_request_id:
-            return
         try:
             result = await self.transport.request("PUT", "context", json={
                 "context": payload, "expected_version": self.context_version,
-                "manual_request_id": manual_request_id,
+                "manual_request_id": manual_request_id, "reconcile": True,
             })
             self.context_version = int(result["version"])
+            merged = result.get("context")
+            current = self.session.session_manager.export_portable_context(self.session.id)
+            if (merged is not None and merged != payload and current == payload
+                    and not self.session.metadata().get("active_runs")
+                    and not self._foreground_execution and not self.command_id):
+                self.session.restore_portable_context(merged)
             if result.get("applied", True):
                 self._context_hash = digest
             self.context_sync_error = ""

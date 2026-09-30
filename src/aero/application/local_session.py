@@ -8,23 +8,22 @@ import re
 import secrets
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
-from collections.abc import Awaitable, Callable
 
 from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.agent.llm_client import LLMClient, LLMConfig
 from aero.agent.loop import AgentLoop
 from aero.agent.session import SessionManager, SessionMeta
-from aero.application.context_compaction import compacted_messages, summary_prompt_for
 from aero.agent.subagent import (
     SubAgentManager,
     use_subagent_canceller,
     use_subagent_launcher,
     use_subagent_status_provider,
 )
+from aero.application.context_compaction import compacted_messages, summary_prompt_for
 from aero.application.events import RunEvent, RunState
 from aero.application.session_titles import (
     fallback_session_title,
@@ -66,6 +65,9 @@ class LocalSession:
     ) -> None:
         self.project_dir = project_dir.resolve()
         self.config = config
+        from aero.core.config import apply_client_inference_policy
+
+        apply_client_inference_policy(self.config)
         self.id = session_id or uuid.uuid4().hex[:12]
         self.session_manager = session_manager or SessionManager()
         self.agent = AgentLoop(config)
@@ -229,6 +231,10 @@ class LocalSession:
     def update_config(self, config: AeroConfig) -> None:
         """Apply workspace settings to a session that was created earlier."""
         self.config = config.model_copy(deep=True)
+        from aero.core.config import apply_client_inference_policy
+
+        apply_client_inference_policy(self.config)
+
         self.agent.config = self.config
         self.agent.llm.config.provider = self.config.llm.provider
         self.agent.llm.config.model = self.config.llm.model

@@ -1,5 +1,6 @@
 """Aero shared types."""
 
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ class Message:
     content: str
     tool_call_id: str | None = None
     tool_calls: list[ToolCall] | None = None
+    message_id: str = field(default_factory=lambda: uuid.uuid4().hex, compare=False)
 
 
 @dataclass

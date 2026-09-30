@@ -123,6 +123,8 @@ type SecretPrompt = {
   multiline?: boolean;
 };
 
+const BYOK_UI_ENABLED = false;
+
 const API = "/api/v1";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -378,7 +380,8 @@ function App() {
         setProviders(bootstrap.providers);
         if (!bootstrap.settings.llm_configured) {
           setFirstLaunchSetup(true);
-          setShowSettings(true);
+          if (BYOK_UI_ENABLED) setShowSettings(true);
+          else setShowCloud(true);
         }
         setProjectName(bootstrap.project_name);
         const first =
@@ -741,7 +744,8 @@ function App() {
           className="icon-button"
           onClick={() => {
             setFirstLaunchSetup(false);
-            setShowSettings(true);
+            if (BYOK_UI_ENABLED) setShowSettings(true);
+            else setShowCloud(true);
           }}
           aria-label="设置"
         >
@@ -1025,7 +1029,8 @@ function App() {
               settings={settings}
               onOpen={() => {
                 setFirstLaunchSetup(false);
-                setShowSettings(true);
+                if (BYOK_UI_ENABLED) setShowSettings(true);
+            else setShowCloud(true);
               }}
             />
           )}
@@ -1038,7 +1043,7 @@ function App() {
           onClose={() => setSelectedFile(null)}
         />
       )}
-      {showSettings && (
+      {BYOK_UI_ENABLED && showSettings && (
         <SettingsModal
           settings={settings}
           providers={providers}
@@ -1484,11 +1489,11 @@ function QuickSettings({
       </div>
       <div className="quick-setting">
         <span>图片分析</span>
-        <strong>{settings?.vision.configured ? "已配置" : "未配置（需要时跳过）"}</strong>
+        <strong>{BYOK_UI_ENABLED ? (settings?.vision.configured ? "已配置" : "未配置（需要时跳过）") : "官方视觉（自动路由）"}</strong>
       </div>
       <button className="full-width-button" onClick={onOpen}>
         <Settings2 size={15} />
-        打开完整设置
+        {BYOK_UI_ENABLED ? "打开完整设置" : "官方账户与额度"}
       </button>
     </div>
   );
@@ -1533,6 +1538,7 @@ function FilePreview({
   );
 }
 
+// BYOK components remain available for a future release.
 function SettingsModal({
   settings,
   providers,
