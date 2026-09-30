@@ -50,8 +50,6 @@ async def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> dict:
     if not path.exists():
         return {"status": "error", "message": f"路径不存在: {short_path(file_path)}"}
 
-    READ_FILES.add(resolved_file_path)
-
     if path.is_dir():
         entries = []
         for entry in sorted(path.iterdir()):
@@ -78,6 +76,7 @@ async def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> dict:
     except Exception as e:
         return {"status": "error", "message": f"读取失败: {e}"}
 
+    READ_FILES.add(resolved_file_path)
     start = max(0, offset - 1)
     end = min(len(lines), start + limit)
     content_lines = []

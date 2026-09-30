@@ -345,18 +345,23 @@ async def run_shell(
         stderr = stderr[-limit:]
         err_truncated = True
 
+    no_matches = _search_has_no_matches(command, result)
+    successful = result.success or no_matches
     error_message = result.error or ""
-    if not result.success and not error_message:
+    if not successful and not error_message:
         if stderr.strip():
             error_message = stderr.strip().splitlines()[-1]
         else:
             error_message = f"命令退出码 {result.exit_code}"
-    message = "命令执行完成" if result.success else f"命令执行失败：{error_message}"
+    message = "未找到匹配内容" if no_matches else (
+        "命令执行完成" if successful else f"命令执行失败：{error_message}"
+    )
 
     return {
-        "status": "success" if result.success else "error",
+        "status": "success" if successful else "error",
         "message": message,
-        "error": error_message if not result.success else "",
+        "search_no_matches": no_matches,
+        "error": error_message if not successful else "",
         "command": command,
         "workdir": workdir,
         "context_correction": context_correction,
@@ -371,6 +376,73 @@ async def run_shell(
         or result.stderr_bytes > len(stderr.encode(errors="replace")),
         "duration_ms": result.duration_ms,
     }
+
+
+def _has_multiple_subplots(source: str) -> bool:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    constants = {}
+    assignments = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            assignments[node.id] = assignments.get(node.id, 0) + 1
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and assignments.get(target.id) == 1:
+                    constants[target.id] = node.value.value
+
+    def dimension(value):
+        if isinstance(value, ast.Constant):
+            return value.value if type(value.value) is int else None
+        if isinstance(value, ast.Name):
+            candidate = constants.get(value.id)
+            return candidate if type(candidate) is int else None
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.attr if isinstance(node.func, ast.Attribute) else (
+            node.func.id if isinstance(node.func, ast.Name) else ""
+        )
+        if name != "subplots":
+            continue
+        if any(isinstance(arg, ast.Starred) for arg in node.args) or any(
+            kw.arg is None for kw in node.keywords
+        ):
+            continue
+        keywords = {kw.arg: kw.value for kw in node.keywords}
+        rows = dimension(keywords["nrows"]) if "nrows" in keywords else (
+            dimension(node.args[0]) if node.args else 1
+        )
+        columns = dimension(keywords["ncols"]) if "ncols" in keywords else (
+            dimension(node.args[1]) if len(node.args) > 1 else 1
+        )
+        if rows is not None and columns is not None and rows > 0 and columns > 0 and rows * columns > 1:
+            return True
+    return False
+
+
+def _search_has_no_matches(command: str, result) -> bool:
+    if result.exit_code != 1 or result.stderr.strip() or result.stdout.strip() or result.error:
+        return False
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars="|;&<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if not tokens or Path(tokens[0]).name not in {"grep", "rg"}:
+        return False
+    if any(token in {";", "&&", "||", "&", ">", ">>", "<", "<<"} for token in tokens):
+        return False
+    if "|" in tokens:
+        index = tokens.index("|")
+        return tokens.count("|") == 1 and index + 1 < len(tokens) and Path(tokens[index + 1]).name == "head"
+    return True
 
 
 def _scientific_plot_script_error(command: str, workdir: str) -> dict | None:
@@ -407,66 +479,36 @@ def _scientific_plot_script_error(command: str, workdir: str) -> dict | None:
             continue
 
         is_cartopy_contour_map = "cartopy" in source and "contourf(" in source
-        label_violations = _scientific_label_violations(source)
-        if label_violations:
-            return {
-                "status": "error",
-                "scientific_plot_validation_failed": True,
-                "message": (
-                    "科学绘图脚本的文字标签未通过执行前检查："
-                    + "；".join(label_violations)
-                    + "。请修正 MathText 后重新执行。"
-                ),
-                "script_path": str(script_path),
-                "violations": label_violations,
-            }
+        violations = _scientific_label_violations(source)
         if re.search(
             r"(?:savefig|print_(?:png|jpg|jpeg|tif|tiff))\s*\([^)]*"
             r"\blayout\s*=",
             source,
             flags=re.DOTALL,
         ):
-            violations = [
+            violations.append(
                 "layout 只能在 plt.subplots()/plt.figure() 创建画布时设置，"
                 "不能传给 savefig/print_png"
-            ]
-            return {
-                "status": "error",
-                "scientific_plot_validation_failed": True,
-                "message": (
-                    "科学绘图脚本未通过执行前检查："
-                    + "；".join(violations)
-                    + "。请先编辑脚本并重新执行。"
-                ),
-                "script_path": str(script_path),
-                "violations": violations,
-            }
+            )
         if is_cartopy_contour_map and re.search(
             r"bbox_inches\s*=\s*['\"]tight['\"]", source
         ):
-            violations = [
+            violations.append(
                 "Cartopy 地图不得使用 bbox_inches='tight'；请使用 "
                 "layout='compressed'、合适的 figsize 和 colorbar 参数控制留白"
-            ]
-            return {
-                "status": "error",
-                "scientific_plot_validation_failed": True,
-                "message": (
-                    "Cartopy 科学绘图脚本未通过执行前检查："
-                    + "；".join(violations)
-                    + "。请先编辑脚本并重新执行，不能交付不稳定的裁剪结果。"
-                ),
-                "script_path": str(script_path),
-                "violations": violations,
-            }
-        is_multi_panel = "axes.flat" in source or re.search(
-            r"plt\.subplots\s*\(\s*[^,]+\s*,\s*[^,]+",
-            source,
-        )
+            )
+        is_multi_panel = _has_multiple_subplots(source)
         if not (is_cartopy_contour_map and is_multi_panel):
+            if violations:
+                return {
+                    "status": "error",
+                    "scientific_plot_validation_failed": True,
+                    "message": "科学绘图检查未通过：" + "；".join(violations),
+                    "script_path": str(script_path),
+                    "violations": violations,
+                }
             continue
 
-        violations = []
         if not re.search(r"extend\s*=\s*['\"]both['\"]", source):
             violations.append("每个有限 levels 的 contourf 必须显式使用 extend='both'")
         if not re.search(r"layout\s*=\s*['\"]compressed['\"]", source):

@@ -122,7 +122,7 @@ class LLMConfig(BaseModel):
 class VisionConfig(BaseModel):
     """Optional visual capability, separate from the required primary model."""
 
-    mode: str = "unconfigured"  # unconfigured | reuse_primary | separate
+    mode: str = "unconfigured"  # unconfigured | reuse_primary | separate | official
     provider: str = "bailian"
     model: str = "qwen3.7-plus"
     api_key: str = ""
@@ -170,6 +170,8 @@ class AeroConfig(BaseModel):
     language: str = "zh"
     mode: str = "execute"  # plan | qa | execute
     max_tool_rounds: int = 999
+    search_simple_budget: int = Field(default=2, ge=1, le=100)
+    search_research_budget: int = Field(default=8, ge=1, le=100)
 
     @classmethod
     def load(cls, path: Path | str) -> "AeroConfig":
@@ -314,7 +316,7 @@ def apply_user_secrets(config: AeroConfig) -> AeroConfig:
     legacy_web_search_secret = _is_legacy_web_search_in_vision(vision)
     if isinstance(vision, dict):
         saved_mode = str(vision.get("mode") or "").strip()
-        if saved_mode in {"reuse_primary", "separate", "unconfigured"}:
+        if saved_mode in {"reuse_primary", "separate", "unconfigured", "official"}:
             config.vision.mode = saved_mode
         config.vision.api_key = str(vision.get("api_key") or config.vision.api_key)
         if "base_url" in vision:
@@ -524,11 +526,19 @@ def save_web_search_state(
     save_user_secrets(secrets)
 
 
+def _automatic_official_vision(config: AeroConfig) -> bool:
+    if config.vision.mode != "unconfigured":
+        return False
+    from aero.core.official_account import load_official_session
+
+    return load_official_session().is_logged_in
+
+
 def vision_is_configured(config: AeroConfig) -> bool:
-    if config.llm.provider == "official" and config.vision.mode == "official":
+    if config.vision.mode == "official" or _automatic_official_vision(config):
         from aero.core.official_account import load_official_session
 
-        return bool(config.vision.model and load_official_session().is_logged_in)
+        return bool(load_official_session().is_logged_in)
     if config.vision.mode == "separate":
         return bool(config.vision.model and _separate_vision_api_key(config))
     if config.vision.mode == "reuse_primary":
@@ -546,13 +556,13 @@ def vision_is_configured(config: AeroConfig) -> bool:
 
 
 def resolved_vision_config(config: AeroConfig) -> VisionConfig | None:
-    if config.llm.provider == "official" and config.vision.mode == "official":
+    if config.vision.mode == "official" or _automatic_official_vision(config):
         from aero.core.official_account import relay_llm_url
 
         return VisionConfig(
             mode="official",
             provider="official",
-            model=config.vision.model or "default",
+            model=(config.vision.model or "auto") if config.vision.mode == "official" else "auto",
             api_key="",
             base_url=relay_llm_url(),
             cache_ttl_hours=config.vision.cache_ttl_hours,

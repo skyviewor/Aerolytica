@@ -1,5 +1,7 @@
 """Tests for Aero agent modules."""
 
+import json
+
 import pytest
 
 from aero.agent.session import SessionManager
@@ -1126,7 +1128,8 @@ async def test_official_provider_loads_and_executes_relay_mcp_tool():
         async def list_tools(self):
             return [remote_tool]
 
-        async def call(self, name, arguments):
+        async def call(self, name, arguments, *, turn_id, call_id):
+            assert call_id == "call_1"
             assert name == "web_search"
             assert arguments == {"query": "今天最新台风"}
             return {"content": "来自官方 MCP 的结果", "is_error": False}
@@ -1151,7 +1154,8 @@ async def test_official_provider_loads_and_executes_relay_mcp_tool():
     )
 
     assert remote_tool in tools
-    assert content == "来自官方 MCP 的结果"
+    assert json.loads(content)["content"] == "来自官方 MCP 的结果"
+    assert json.loads(content)["search_remaining"] == 1
     assert agent._is_official_mcp_tool("web_search") is True
     await agent.close()
 

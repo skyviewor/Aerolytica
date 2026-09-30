@@ -73,7 +73,30 @@ def _suppress_progress_line(label: str, text: str) -> bool:
 class Runtime:
     """Execute tools supporting both sync/async functions and subprocess."""
 
+    def __init__(self):
+        self.read_files: set[str] = set()
+        self.search_budget = None
+
     async def execute(self, tool_func, args: dict) -> ExecutionResult:
+        from aero.agent.search_budget import SEARCH_TOOLS
+        from aero.toolbox.file_access import use_read_files
+
+        with use_read_files(self.read_files):
+            if self.search_budget is not None and tool_func.__name__ in SEARCH_TOOLS:
+
+                async def search():
+                    result = await self._execute(tool_func, args)
+                    return (
+                        result.result
+                        if result.success
+                        else {"status": "unknown", "content": result.error}
+                    )
+
+                result = await self.search_budget.execute(args, "", search)
+                return ExecutionResult(success=True, result=result)
+            return await self._execute(tool_func, args)
+
+    async def _execute(self, tool_func, args: dict) -> ExecutionResult:
         try:
             if inspect.iscoroutinefunction(tool_func):
                 result = await tool_func(**args)

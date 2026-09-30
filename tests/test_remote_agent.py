@@ -45,7 +45,7 @@ class Session:
 
 
 def test_remote_agent_cli_uses_positional_agent_selector():
-    assert _run_args(["ocean", "--cloud-memory"]) == ("ocean", True)
+    assert _run_args(["ocean"]) == "ocean"
     assert _selector_arg(["ocean"], "status") == "ocean"
     with pytest.raises(ValueError, match="用法"):
         _selector_arg(["--agent", "ocean"], "status")
@@ -168,12 +168,6 @@ async def test_local_agent_memory_is_encrypted_and_restored(tmp_path, monkeypatc
         agent_id = "agent_1"
         agent_name = "测试 Agent"
 
-        async def download_memory(self, memory_key):
-            return None
-
-        async def upload_memory(self, memory_key, encrypted):
-            raise AssertionError("cloud memory must remain disabled by default")
-
     class Agent:
         def __init__(self, messages):
             self.messages = messages
@@ -201,7 +195,6 @@ async def test_local_agent_memory_is_encrypted_and_restored(tmp_path, monkeypatc
         manager,
         session_id,
         project_dir,
-        cloud_memory=False,
     )
     encrypted = manager.snapshot(session_id)
     assert encrypted is not None
@@ -213,7 +206,6 @@ async def test_local_agent_memory_is_encrypted_and_restored(tmp_path, monkeypatc
         restored,
         manager,
         session_id,
-        cloud_memory=False,
     )
     assert source == "本地记忆"
     assert [message.content for message in restored.messages[1:]] == [

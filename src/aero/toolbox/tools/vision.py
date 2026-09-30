@@ -20,7 +20,7 @@ def _ensure_vision_client():
     vision_config = resolved_vision_config(config)
     if vision_config is None:
         return None, config, None
-    if config.llm.provider == "official" and vision_config.mode == "official":
+    if vision_config.mode == "official":
         from aero.agent.official_vision_client import OfficialVisionClient
 
         return OfficialVisionClient(vision_config), config, vision_config
@@ -77,14 +77,15 @@ def _vision_error_payload(exc: Exception, *, config, image_paths: list[str], det
 def check_vision_model_config() -> dict:
     config = find_config()
     configured = vision_is_configured(config)
-    mode = config.vision.mode
+    resolved = resolved_vision_config(config)
+    mode = resolved.mode if resolved else config.vision.mode
     if configured and mode == "reuse_primary":
         resolved = resolved_vision_config(config)
         assert resolved is not None
         provider, model = resolved.provider, resolved.model
         message = f"视觉能力已配置：复用已保存的视觉模型 {provider}/{model}。"
     elif configured:
-        provider, model = config.vision.provider, config.vision.model
+        provider, model = resolved.provider, resolved.model
         message = f"视觉模型已配置：{provider}/{model}。"
     else:
         provider, model = config.vision.provider, config.vision.model
@@ -128,7 +129,7 @@ async def analyze_image(
     from aero.data.vision_cache import get as cache_get
     from aero.data.vision_cache import put as cache_put
 
-    client, _, vision_config = _ensure_vision_client()
+    client, config, vision_config = _ensure_vision_client()
     if client is None or vision_config is None:
         return {
             "status": "not_configured",
@@ -137,6 +138,13 @@ async def analyze_image(
                 "选择或配置视觉模型；可复用支持多模态的主模型，或配置独立视觉模型。"
             ),
             "setup_required": "vision",
+        }
+
+    if vision_config.mode == "official" and not vision_is_configured(config):
+        await client.close()
+        return {
+            "status": "error", "error_type": "authentication",
+            "message": "官方登录已失效，请重新登录后分析图片。",
         }
 
     for path in image_paths:

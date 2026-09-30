@@ -8,12 +8,8 @@ interpreted as permission to replay an uncertain operation.
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
-import os
-import re
-import stat
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,7 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from cryptography.fernet import Fernet
 
 from aero.application.chat_images import ImagePublisher, describe_images, workspace_roots
 from aero.core.daemon import private_write
@@ -77,58 +72,11 @@ class RelayRuntimeTransport:
             response.status_code in {410, 423}
             or (response.status_code == 403 and not image_path)
             or (response.status_code == 409
-                and path not in {"context", "context/compact"} and not image_path)
+                and path not in {"context", "context/compact", "history"} and not image_path)
         ):
             raise LeaseLost(f"runtime_rejected_{response.status_code}")
         response.raise_for_status()
         return {} if response.status_code == 204 else response.json()
-
-
-class PortableMemory:
-    """Encrypted, explicitly sanitized conversation context and notes.
-
-The random recovery key is portable across machines and must be kept by the user.
-This class deliberately does not derive keys from a hostname, machine ID or token.
-"""
-
-    def __init__(self, recovery_key: str | None = None):
-        self.recovery_key = recovery_key or Fernet.generate_key().decode()
-        self._cipher = Fernet(self.recovery_key.encode())
-        self.memory_key = hashlib.sha256(self.recovery_key.encode()).hexdigest()
-
-    def encrypt(
-        self, notes: list[str], *, session_id: str, project_id: str,
-        messages: list[dict[str, Any]] | None = None,
-    ) -> bytes:
-        if not all(isinstance(note, str) for note in notes):
-            raise ValueError("memory_requires_explicit_text_notes")
-        # Reject known secret formats; callers must never pass raw conversation or config.
-        for note in [*notes, *[str(item.get("content", "")) for item in (messages or [])]]:
-            if re.search(
-                r"(?i)(?:\b(?:sk-|agt_)[\w.-]{6,}|bearer\s+\S+|"
-                r"(?:api[_ -]?key|password|secret|token)\s*[:=]\s*\S+|"
-                r"-----BEGIN .*PRIVATE KEY-----)", note
-            ):
-                raise ValueError("memory_may_contain_secret")
-        safe_messages = []
-        for item in messages or []:
-            role = str(item.get("role", ""))
-            content = str(item.get("content", ""))
-            if role in {"user", "assistant"} and content:
-                safe_messages.append({"role": role, "content": content[:100_000]})
-        payload = {"schema": 1, "notes": notes, "messages": safe_messages,
-                  "session_id": session_id, "project_id": project_id}
-        raw = json.dumps(payload, ensure_ascii=False).encode()
-        if len(raw) > 5 * 1024 * 1024:
-            raise ValueError("memory_snapshot_too_large")
-        return self._cipher.encrypt(raw)
-
-    def decrypt(self, encrypted: bytes) -> dict[str, Any]:
-        payload = json.loads(self._cipher.decrypt(encrypted))
-        if (payload.get("schema") != 1 or not isinstance(payload.get("notes"), list)
-                or not isinstance(payload.get("messages", []), list)):
-            raise ValueError("invalid_memory_snapshot")
-        return payload
 
 
 class CloudAgentRuntime:
@@ -153,13 +101,13 @@ class CloudAgentRuntime:
         self.state_dir = state_dir
         key = hashlib.sha256(transport.agent_id.encode()).hexdigest()
         self._journal_path = state_dir / f"{key}.json"
-        self._memory_path = state_dir / f"{key}.memory.json"
         self._context_events_path = state_dir / f"{key}.context-events.json"
         self.images = ImagePublisher(
             self._image_request, lambda: workspace_roots(session.project_dir),
             state_dir / f"{key}.images.json",
         )
         self._conversation_events_path = state_dir / f"{key}.messages.json"
+        self._conversation_flush_lock = asyncio.Lock()
         try:
             self._conversation_events = json.loads(self._conversation_events_path.read_text())
         except (OSError, ValueError):
@@ -180,14 +128,11 @@ class CloudAgentRuntime:
         self._task: asyncio.Task | None = None
         self._deadline = 0.0
         self._heartbeat_seconds = 15.0
-        self._memory: PortableMemory | None = None
-        self.memory_version = 0
         self.context_version = 0
         self.context_sync_enabled = False
         self.context_sync_error = ""
         self._context_hash = ""
         self._foreground_execution: str | None = None
-        self._load_memory_state()
         self.session.on_compaction = self._queue_compaction
 
     async def _image_request(self, method: str, path: str, **kwargs) -> dict:
@@ -198,26 +143,34 @@ class CloudAgentRuntime:
         while not self._stop.is_set():
             try:
                 self._assert_lease()
-                while self._conversation_events:
-                    await self.transport.request(
-                        "POST", "events", json=self._conversation_events[0]
-                    )
-                    self._conversation_events.pop(0)
-                    private_write(
-                        self._conversation_events_path, json.dumps(self._conversation_events)
-                    )
+                await self._flush_conversation_events()
                 await self.images.flush()
             except (httpx.HTTPError, OSError, ValueError, RuntimeError):
                 pass
             await asyncio.sleep(5)
 
-    def _queue_foreground_messages(self, run_id: str) -> None:
-        if self.session.run_status(run_id).get("state") != "completed":
-            return
-        messages = self.session.messages_view()
+    async def _flush_conversation_events(self) -> None:
+        async with self._conversation_flush_lock:
+            while self._conversation_events:
+                await self.transport.request("POST", "events", json=self._conversation_events[0])
+                self._conversation_events.pop(0)
+                private_write(self._conversation_events_path, json.dumps(self._conversation_events))
+
+    def _queue_foreground_messages(self, run_id: str, status: str | None = None) -> None:
+        state = self.session.run_status(run_id).get("state")
+        status = status or {"completed": "completed", "cancelled": "canceled"}.get(
+            state, "failed"
+        )
+        turn_id = hashlib.sha256(f"{run_id}:0".encode()).hexdigest()
+        from aero.application.conversation_history import visible_history
+
+        saved = self.session.session_manager.export_portable_context(self.session.id)
+        messages = (visible_history(saved) if saved else self.session.messages_view())
         start = next((i for i in range(len(messages) - 1, -1, -1)
                       if messages[i]["role"] == "user"), len(messages))
         for index, message in enumerate(messages[start:]):
+            if index == 0 or state != "completed":
+                continue  # The user message was queued when execution started.
             content = str(message.get("content") or "").strip()
             if not content:
                 continue
@@ -225,7 +178,12 @@ class CloudAgentRuntime:
             role = "user_message" if message["role"] == "user" else "message"
             attachments = self.images.describe(content, event_id) if role == "message" else []
             self._conversation_events.append({"type": role, "content": content,
-                                              "client_event_id": event_id, "images": attachments})
+                                              "client_event_id": event_id, "images": attachments,
+                                              "local_turn_id": turn_id})
+        self._conversation_events.append({
+            "type": "local_turn_status", "local_turn_id": turn_id,
+            "status": status, "client_event_id": f"end-{run_id}",
+        })
         private_write(self._conversation_events_path, json.dumps(self._conversation_events))
 
     async def _queue_compaction(self, before: dict, after: dict) -> None:
@@ -234,37 +192,10 @@ class CloudAgentRuntime:
         private_write(self._context_events_path,
                       json.dumps(self._pending_compactions, ensure_ascii=False))
 
-    def _load_memory_state(self) -> None:
-        """Restore only local memory configuration; the encrypted snapshot stays remote."""
-        try:
-            if self._memory_path.is_symlink() or not self._memory_path.exists():
-                return
-            metadata = self._memory_path.stat()
-            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
-                raise ValueError("unsafe_memory_state_permissions")
-            state = json.loads(self._memory_path.read_text())
-            recovery_key = str(state.get("recovery_key") or "")
-            version = int(state.get("version") or 0)
-            if len(recovery_key) < 16 or version < 0:
-                return
-            self._memory = PortableMemory(recovery_key)
-            self.memory_version = version
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            self._memory = None
-            self.memory_version = 0
-
-    def _save_memory_state(self) -> None:
-        private_write(self._memory_path, json.dumps({
-            "recovery_key": self._memory.recovery_key if self._memory else "",
-            "version": self.memory_version,
-        }))
-
     def status(self) -> dict[str, Any]:
         return {"agent_id": self.transport.agent_id, "session_id": self.session.id,
                 "project_id": self.project_id, "state": self.state,
                 "active_run_id": self.active_run_id, "command_id": self.command_id,
-                "memory_enabled": self._memory is not None,
-                "memory_version": self.memory_version,
                 "context_sync_enabled": self.context_sync_enabled,
                 "context_sync_error": self.context_sync_error}
 
@@ -323,8 +254,36 @@ class CloudAgentRuntime:
             self.context_sync_error = f"云端上下文格式错误：{type(exc).__name__}"
 
     async def _sync_context(self, *, manual_request_id: str = "") -> None:
+        from aero.application.conversation_history import sync_error_reason, visible_history
+
         if not self.context_sync_enabled and not manual_request_id:
             return
+        if manual_request_id:
+            if self._foreground_execution or self.command_id:
+                return
+            try:
+                await self._flush_conversation_events()
+            except (httpx.HTTPError, LeaseLost):
+                return
+            if (self.session.metadata().get("active_runs") or self._foreground_execution
+                    or self.command_id):
+                return
+            payload = self.session.session_manager.export_portable_context(self.session.id)
+            if payload is None:
+                await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
+                return
+            try:
+                await self.transport.request("POST", "history", json={
+                    "manual_request_id": manual_request_id,
+                    "messages": visible_history(payload),
+                }, timeout=120)
+            except (httpx.HTTPError, LeaseLost) as exc:
+                await self._fail_manual_sync(
+                    manual_request_id, sync_error_reason(
+                        exc.response, "聊天记录同步失败，请确认 Relay 和客户端均已更新"
+                    ) if isinstance(exc, httpx.HTTPStatusError) else "聊天记录上传失败，请稍后重试"
+                )
+                return
         try:
             while self._pending_compactions:
                 result = await self.transport.request("POST", "context/compact", json={
@@ -341,7 +300,9 @@ class CloudAgentRuntime:
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文轮转失败：{type(exc).__name__}"
             if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
+                await self._fail_manual_sync(
+                    manual_request_id, sync_error_reason(exc.response, "上下文归档同步失败")
+                )
             return
         payload = self.session.session_manager.export_portable_context(self.session.id)
         if payload is None:
@@ -363,7 +324,9 @@ class CloudAgentRuntime:
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文同步失败：{type(exc).__name__}"
             if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
+                await self._fail_manual_sync(
+                    manual_request_id, sync_error_reason(exc.response, "上下文同步失败")
+                )
 
     async def _fail_manual_sync(self, request_id: str, reason: str) -> None:
         try:
@@ -415,11 +378,29 @@ class CloudAgentRuntime:
         result = await self.transport.request("POST", "runtime/project/acquire",
                                               json={"execution_id": run_id})
         self._foreground_execution = run_id
+        terminal_status = None
         try:
+            async for event in self.session.events(run_id):
+                if event.type == "run_started":
+                    turn_id = hashlib.sha256(f"{run_id}:0".encode()).hexdigest()
+                    self._conversation_events.append({
+                        "type": "user_message", "content": event.data["prompt"],
+                        "client_event_id": turn_id, "local_turn_id": turn_id,
+                    })
+                    with suppress(OSError):
+                        private_write(self._conversation_events_path,
+                                      json.dumps(self._conversation_events))
+                    break
             yield
+        except asyncio.CancelledError:
+            terminal_status = "canceled"
+            raise
+        except BaseException:
+            terminal_status = "failed"
+            raise
         finally:
             with suppress(OSError, ValueError, RuntimeError):
-                self._queue_foreground_messages(run_id)
+                self._queue_foreground_messages(run_id, terminal_status)
             self._foreground_execution = None
             with suppress(httpx.HTTPError, LeaseLost):
                 await self.transport.request("POST", "runtime/project/release", json={
@@ -596,44 +577,3 @@ class CloudAgentRuntime:
         if self.active_run_id:
             await self.session.cancel(self.active_run_id)
         self.state = "stopped"
-
-    def enable_memory(self, recovery_key: str | None = None) -> dict[str, Any]:
-        self._memory = PortableMemory(recovery_key)
-        self.memory_version = 0
-        self._save_memory_state()
-        return {"enabled": True, "recovery_key": self._memory.recovery_key,
-                "memory_key": self._memory.memory_key, "version": self.memory_version}
-
-    async def export_memory(self, notes: list[str] | None = None) -> dict[str, Any]:
-        self._assert_lease()
-        if self._memory is None:
-            raise RuntimeError("memory_not_enabled")
-        encrypted = self._memory.encrypt(
-            notes or [], session_id=self.session.id, project_id=self.project_id,
-            messages=self.session.messages_view(),
-        )
-        result = await self.transport.request("PUT", "memory",
-            params={"memory_key": self._memory.memory_key}, json={
-                "snapshot": base64.b64encode(encrypted).decode(),
-                "checksum": hashlib.sha256(encrypted).hexdigest(),
-                "expected_version": self.memory_version,
-        })
-        self.memory_version = int(result["version"])
-        self._save_memory_state()
-        return {"version": self.memory_version, "memory_key": self._memory.memory_key}
-
-    async def import_memory(self, recovery_key: str) -> dict[str, Any]:
-        self._identity_check()
-        memory = PortableMemory(recovery_key)
-        result = await self.transport.request("GET", "memory",
-                                              params={"memory_key": memory.memory_key})
-        encrypted = base64.b64decode(result["snapshot"], validate=True)
-        if hashlib.sha256(encrypted).hexdigest() != result["checksum"]:
-            raise ValueError("memory_checksum_mismatch")
-        payload = memory.decrypt(encrypted)
-        self._memory = memory
-        self.memory_version = int(result["version"])
-        self._save_memory_state()
-        self.session.restore_messages(payload.get("messages", []))
-        # Restored content is context only; it never auto-executes a task.
-        return {**payload, "version": self.memory_version}

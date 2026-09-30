@@ -225,8 +225,6 @@ function AgentSection({ sessionId, projectId }: { sessionId: string; projectId: 
   const [selected, setSelected] = useState<Agent | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [approvals, setApprovals] = useState<AgentApproval[]>([]);
-  const [memoryRecoveryKey, setMemoryRecoveryKey] = useState("");
-  const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [reply, setReply] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -273,17 +271,6 @@ function AgentSection({ sessionId, projectId }: { sessionId: string; projectId: 
     finally { setBusy(false); }
   }
 
-  function downloadRecoveryKey() {
-    if (!memoryRecoveryKey) return;
-    const blob = new Blob([`${memoryRecoveryKey}\n`], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `aerolytica-memory-${selected?.agent_id ?? "recovery"}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
   return <section className="cloud-card"><h3>远程智能体</h3><p className="cloud-muted">关闭窗口后由本机常驻服务继续保持心跳；重新打开可继续查看同一会话。</p>
     {error && <p className="cloud-alert" role="alert">{error}</p>}
     <form className="cloud-inline-form" onSubmit={register}><label>注册名称<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：ocean_research" /></label><button disabled={busy || !projectId}>注册智能体</button></form>
@@ -294,7 +281,6 @@ function AgentSection({ sessionId, projectId }: { sessionId: string; projectId: 
         <div className="cloud-agent-messages">{messages.length ? messages.map((message) => <div className={`cloud-agent-message ${message.sender}`} key={message.message_id}><strong>{message.sender === "user" ? "我" : "智能体"}</strong><p>{message.content}</p></div>) : <p className="cloud-muted">暂无会话消息。</p>}</div>
         <form className="cloud-agent-reply" onSubmit={(event) => { event.preventDefault(); if (!reply.trim()) return; void act(async () => { await cloud(`/agents/${agent.agent_id}/messages`, "POST", { content: reply.trim(), client_message_id: `web-${Date.now()}` }); setReply(""); }); }}><input value={reply} onChange={(event) => setReply(event.target.value)} placeholder="向后台智能体发送消息" /><button disabled={busy || !reply.trim()}>发送</button></form>
         {approvals.filter((item) => item.status === "pending").map((approval) => <div className="cloud-approval" key={approval.approval_id}><span>等待审批：{approval.payload?.tool || "本地操作"}</span><div className="cloud-actions"><button disabled={busy} onClick={() => void act(async () => { await cloud(`/agents/${agent.agent_id}/approvals/${approval.approval_id}/resolve`, "POST", { decision: "approved" }); })}>允许</button><button disabled={busy} onClick={() => void act(async () => { await cloud(`/agents/${agent.agent_id}/approvals/${approval.approval_id}/resolve`, "POST", { decision: "denied" }); })}>拒绝</button><button disabled={busy} onClick={() => void act(async () => { await cloud(`/agents/${agent.agent_id}/commands/${approval.command_id}/cancel`, "POST", {}); })}>取消任务</button></div></div>)}
-        <div className="cloud-memory"><strong>加密云记忆</strong><p className="cloud-muted">默认只保存在本机。开启后只上传密文；恢复密钥不会上传，请自行保存。</p><div className="cloud-actions"><button disabled={busy} onClick={() => void act(async () => { const result = await cloud<{ recovery_key: string }>(`/agents/${agent.agent_id}/memory/enable`, "POST", {}); setMemoryEnabled(true); setMemoryRecoveryKey(result.recovery_key); })}>{memoryEnabled ? "已开启" : "开启备份"}</button><button disabled={busy || !memoryEnabled} onClick={() => void act(async () => { await cloud(`/agents/${agent.agent_id}/memory/export`, "POST", {}); })}>立即备份</button></div>{memoryRecoveryKey && <p className="cloud-recovery-key"><span>请保存恢复密钥：</span><code>{memoryRecoveryKey}</code><button type="button" onClick={downloadRecoveryKey}>下载密钥</button></p>}<form className="cloud-agent-reply" onSubmit={(event) => { event.preventDefault(); if (!memoryRecoveryKey.trim()) return; void act(async () => { await cloud(`/agents/${agent.agent_id}/memory/import`, "POST", { recovery_key: memoryRecoveryKey.trim() }); }); }}><input value={memoryRecoveryKey} onChange={(event) => setMemoryRecoveryKey(event.target.value)} placeholder="输入恢复密钥以恢复云端记忆" /><button disabled={busy || !memoryRecoveryKey.trim()}>恢复</button></form></div>
       </div>}
     </div>)}
   </section>;

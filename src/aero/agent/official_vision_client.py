@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 
+from aero.agent.vision_client import VisionAnalysisError
 from aero.core.config import VisionConfig
 from aero.core.official_account import OfficialAccountSession, relay_llm_url
 
@@ -25,13 +26,15 @@ class OfficialVisionClient:
             mime_type = mime_type or "image/png"
             with open(path, "rb") as handle:
                 raw = handle.read()
-            parts.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}",
-                    "detail": detail,
-                },
-            })
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}",
+                        "detail": detail,
+                    },
+                }
+            )
         response = await self._session.request_to(
             relay_llm_url(),
             "POST",
@@ -47,7 +50,16 @@ class OfficialVisionClient:
                 detail_text = response.json().get("error", {}).get("message", response.text)
             except (ValueError, AttributeError):
                 detail_text = response.text
-            raise RuntimeError(f"官方视觉模型请求失败（HTTP {response.status_code}）：{detail_text}")
+            error_type, message = {
+                401: ("authentication", "官方登录已失效，请重新登录。"),
+                402: ("insufficient_credits", "官方账户额度不足。"),
+                503: ("route_unavailable", "Relay 视觉路由当前不可用。"),
+            }.get(response.status_code, ("upstream_error", "官方视觉模型请求失败。"))
+            raise VisionAnalysisError(
+                f"{message}{detail_text}",
+                error_type=error_type,
+                status_code=response.status_code,
+            )
         payload = response.json()
         self.last_usage = payload.get("usage") if isinstance(payload, dict) else None
         choices = payload.get("choices") if isinstance(payload, dict) else None
@@ -56,5 +68,7 @@ class OfficialVisionClient:
         message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
         content = message.get("content", "") if isinstance(message, dict) else ""
         if isinstance(content, list):
-            content = "".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
+            content = "".join(
+                str(item.get("text", "")) for item in content if isinstance(item, dict)
+            )
         return str(content or "")

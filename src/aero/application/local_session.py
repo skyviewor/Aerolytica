@@ -111,7 +111,7 @@ class LocalSession:
         ]
 
     def restore_messages(self, messages: list[dict[str, Any]]) -> None:
-        """Replace conversation context after an explicit cloud-memory restore."""
+        """Replace conversation context after an explicit context restore."""
         if self.metadata()["active_runs"]:
             raise RuntimeError("cannot_restore_active_session")
         restored: list[Message] = []
@@ -120,6 +120,7 @@ class LocalSession:
             content = str(item.get("content", ""))
             if role in {"user", "assistant"} and content:
                 restored.append(Message(role=role, content=_safe_text(content)))
+        self.agent.runtime.read_files.clear()
         self.agent.messages = restored
         self._save()
 
@@ -160,6 +161,16 @@ class LocalSession:
         }
 
     def _save(self) -> None:
+        if not self._session_meta.transcript:
+            from aero.application.conversation_history import visible_history
+
+            self._session_meta.transcript = [
+                {"role": item["role"], "content": item["content"]}
+                for item in visible_history({"messages": [
+                    {"role": message.role, "content": message.content}
+                    for message in self.agent.messages
+                ]})
+            ]
         if not self._session_meta.name and any(
             message.role == "user" and message.content.strip() for message in self.agent.messages
         ):
@@ -199,6 +210,7 @@ class LocalSession:
         if not summary:
             return False
         self.agent.messages = compacted_messages(self.agent.messages[0], summary)
+        self._session_meta.transcript.append({"role": "summary", "content": summary})
         self._save()
         after = self.session_manager.export_portable_context(self.id)
         if self.on_compaction and before and after:
@@ -368,7 +380,7 @@ class LocalSession:
             async with AsyncExitStack() as stack:
                 stack.enter_context(use_workspace(self.project_dir, workspace))
                 stack.enter_context(use_session_id(self.id))
-                stack.enter_context(use_read_files())
+                stack.enter_context(use_read_files(self.agent.runtime.read_files))
                 stack.enter_context(use_subagent_launcher(self._launch_subagent))
                 stack.enter_context(use_subagent_status_provider(self._query_subagents))
                 stack.enter_context(use_subagent_canceller(self._cancel_subagent))
@@ -376,9 +388,12 @@ class LocalSession:
                     use_secret_input_provider(self._request_secret, self._resolve_secret)
                 )
                 stack.enter_context(use_checkpoint_creator(self._create_checkpoint))
+                response_text = ""
                 try:
                     await self.compact_if_needed(prompt)
-                    response_text = ""
+                    self._save()
+                    self._session_meta.transcript.append({"role": "user", "content": prompt})
+                    self._save()
                     async for event in self.agent.run_stream(prompt):
                         if event.type == "text":
                             response_text += event.content
@@ -435,6 +450,10 @@ class LocalSession:
                                 run_id, "content_blocked", {"text": _safe_text(event.content)}
                             )
                     self._run_states[run_id] = RunState.COMPLETED
+                    if response_text.strip():
+                        self._session_meta.transcript.append(
+                            {"role": "assistant", "content": _safe_text(response_text)}
+                        )
                     self._save()
                     self._schedule_title_generation(
                         run_id,
@@ -450,10 +469,20 @@ class LocalSession:
                     )
                 except asyncio.CancelledError:
                     self._run_states[run_id] = RunState.CANCELLED
+                    if response_text.strip():
+                        self._session_meta.transcript.append(
+                            {"role": "assistant", "content": _safe_text(response_text)}
+                        )
+                    self._save()
                     self._emit(run_id, "run_cancelled", {"state": RunState.CANCELLED.value})
                     raise
                 except Exception as exc:
                     self._run_states[run_id] = RunState.FAILED
+                    if response_text.strip():
+                        self._session_meta.transcript.append(
+                            {"role": "assistant", "content": _safe_text(response_text)}
+                        )
+                    self._save()
                     self._run_errors[run_id] = _safe_text(exc)
                     self._emit(run_id, "error", {"message": _safe_text(exc)})
                     self._emit(run_id, "run_completed", {"state": RunState.FAILED.value})

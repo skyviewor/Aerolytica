@@ -46,8 +46,8 @@ def run_agent_cli(args: list[str]) -> int:
                 raise ValueError("aero agent list 不接受其他参数")
             return asyncio.run(_list_agents())
         if action == "run":
-            selector, cloud_memory = _run_args(args[1:])
-            return asyncio.run(_run_service(selector, cloud_memory=cloud_memory))
+            selector = _run_args(args[1:])
+            return asyncio.run(_run_service(selector))
         if action == "status":
             selector = _selector_arg(args[1:], "status")
             return asyncio.run(_show_status(selector))
@@ -108,24 +108,10 @@ def _selector_arg(args: list[str], command: str) -> str | None:
     raise ValueError(f"用法：aero agent {command} [智能体名称或智能体 ID]")
 
 
-def _run_args(args: list[str]) -> tuple[str | None, bool]:
-    selector = None
-    cloud_memory = False
-    index = 0
-    while index < len(args):
-        if args[index] == "--cloud-memory" and not cloud_memory:
-            cloud_memory = True
-            index += 1
-        elif not args[index].startswith("-") and args[index].strip():
-            if selector is not None:
-                raise ValueError("智能体名称或 ID 只能指定一次")
-            selector = args[index].strip()
-            index += 1
-        else:
-            raise ValueError(
-                "用法：aero agent run [智能体名称或智能体 ID] [--cloud-memory]"
-            )
-    return selector, cloud_memory
+def _run_args(args: list[str]) -> str | None:
+    if len(args) > 1 or any(item.startswith("-") or not item.strip() for item in args):
+        raise ValueError("用法：aero agent run [智能体名称或智能体 ID]")
+    return args[0].strip() if args else None
 
 
 def _snapshot_args(args: list[str]) -> tuple[str | None, bool, Path | None]:
@@ -375,7 +361,7 @@ async def _set_context_sync(selector: str, enabled: bool) -> int:
         await client.close()
 
 
-async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> int:
+async def _run_service(selector: str | None) -> int:
     """Run the fenced resident worker against the workspace's bound project."""
     config = _load_config()
     client = RemoteAgentClient(agent_selector=selector)
@@ -422,7 +408,6 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
         account_identity=lambda: client.session.data.user_id,
         state_dir=Path.home() / ".aero" / "agent-runtime",
     )
-    memory_info = runtime.enable_memory() if cloud_memory else None
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -435,8 +420,6 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
     await runtime.start()
     print(f"远程智能体已启动：{client.agent_name or client.agent_id}")
     print("已绑定云端项目：" + str(project_id))
-    if memory_info:
-        print("加密云记忆已开启；请立即保存恢复密钥：" + memory_info["recovery_key"])
     print("正在等待云端指令，按 Ctrl+C 停止。")
     try:
         stop_waiter = asyncio.create_task(stop_event.wait())
@@ -454,9 +437,6 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
         finally:
             stop_waiter.cancel()
     finally:
-        if memory_info:
-            with suppress(Exception):
-                await runtime.export_memory()
         await runtime.stop()
         await session.close()
         await http.aclose()
@@ -464,7 +444,7 @@ async def _run_service(selector: str | None, *, cloud_memory: bool = False) -> i
         process_lock.release()
 
 
-async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = False) -> int:
+async def _run_legacy_service(selector: str | None) -> int:
     config = _load_config()
     agent = AgentLoop(config)
     client = RemoteAgentClient(agent_selector=selector)
@@ -479,7 +459,6 @@ async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = Fals
         agent,
         memory_manager,
         memory_session_id,
-        cloud_memory=cloud_memory,
     )
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -494,7 +473,6 @@ async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = Fals
 
     print(f"远程 Agent 已启动：{client.agent_name or client.agent_id}")
     print(f"本地记忆：已开启{f'（已从{memory_source}恢复）' if memory_source else ''}")
-    print(f"云端记忆：{'已开启' if cloud_memory else '未开启'}")
     print("正在等待云端指令，按 Ctrl+C 停止。")
 
     async def handle_command(command: dict[str, Any]) -> None:
@@ -505,7 +483,6 @@ async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = Fals
             memory_manager,
             memory_session_id,
             project_dir,
-            cloud_memory=cloud_memory,
         )
 
     try:
@@ -522,7 +499,6 @@ async def _run_legacy_service(selector: str | None, *, cloud_memory: bool = Fals
                 memory_manager,
                 memory_session_id,
                 project_dir,
-                cloud_memory=cloud_memory,
             )
         try:
             await client.close()
@@ -540,20 +516,9 @@ async def _restore_agent_memory(
     agent: AgentLoop,
     manager: SessionManager,
     session_id: str,
-    *,
-    cloud_memory: bool,
 ) -> str:
     loaded = manager.load(session_id)
     source = "本地记忆" if loaded else ""
-    if loaded is None and cloud_memory:
-        try:
-            encrypted = await client.download_memory(session_id)
-            if encrypted:
-                loaded = manager.load_snapshot(encrypted)
-                manager.save(session_id, loaded[0], loaded[1])
-                source = "云端备份"
-        except Exception as exc:
-            print(f"警告：云端记忆恢复失败，将使用新的本地上下文：{exc}")
     if loaded is not None:
         messages, _ = loaded
         if messages:
@@ -568,8 +533,6 @@ async def _save_agent_memory(
     manager: SessionManager,
     session_id: str,
     project_dir: Path,
-    *,
-    cloud_memory: bool,
 ) -> None:
     meta = SessionMeta(
         id=session_id,
@@ -581,15 +544,6 @@ async def _save_agent_memory(
         project_dir=str(project_dir),
     )
     manager.save(session_id, agent.messages, meta)
-    if not cloud_memory:
-        return
-    encrypted = manager.snapshot(session_id)
-    if encrypted is None:
-        return
-    try:
-        await client.upload_memory(session_id, encrypted)
-    except Exception as exc:
-        print(f"警告：本地记忆已保存，但云端同步失败：{exc}")
 
 
 async def _execute_command(
@@ -655,7 +609,7 @@ def _print_agent_usage() -> None:
         """远程 Agent 命令：
   aero agent register --name ocean [--description \"备注\"]  注册并保存 Agent 凭据
   aero agent list                              列出本地 Agent 及在线状态
-  aero agent run [Agent 名称或 Agent ID] [--cloud-memory]  前台常驻并等待云端指令
+  aero agent run [Agent 名称或 Agent ID]  前台常驻并等待云端指令
   aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出可读审计快照
   aero agent takeover [名称或 ID]  在空目录接管已离线智能体及云端项目
   aero agent clone [名称或 ID]     在空目录克隆智能体和云端项目

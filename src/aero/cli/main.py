@@ -2652,6 +2652,7 @@ class AeroApp(App):
             lang = self.config.language
             chat.remove_children()
             if self.agent:
+                self.agent.runtime.read_files.clear()
                 self.agent.messages = [self.agent.messages[0]]
                 self.agent.tracker = TokenTracker()
             self._last_reply_text = ""
@@ -2664,9 +2665,6 @@ class AeroApp(App):
             self._official_vision_override = ""
             if self.config.llm.provider == "official":
                 self.config.llm.model = "default"
-                self.config.vision.mode = "official"
-                self.config.vision.provider = "official"
-                self.config.vision.model = "default"
                 self._sync_agent_llm_config()
             set_session_id(None)
             chat.mount(
@@ -2948,8 +2946,9 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
             return
 
+        local_turn_id = ""
         if not from_cloud and self._chat_presence is not None:
-            self._chat_presence.queue_local_message("user", text)
+            local_turn_id = self._chat_presence.queue_local_message("user", text)
 
         self.sub_title = t("app.thinking", self.config.language)
         state = AgentRunState(
@@ -2959,7 +2958,9 @@ class AeroApp(App):
             base_messages=copy.deepcopy(self.agent.messages),
         )
         self._main_run_state = state
-        self._agent_worker = self._run_agent(text, state, from_cloud=from_cloud)
+        self._agent_worker = self._run_agent(
+            text, state, from_cloud=from_cloud, local_turn_id=local_turn_id
+        )
         self._start_activity()
 
     async def _handle_local_llm_setup(self, text: str, setup: dict) -> None:
@@ -3624,14 +3625,9 @@ class AeroApp(App):
             self.config.llm.model = "default"
             self.config.llm.base_url = relay_llm_url()
             self.config.llm.supports_vision = False
-            self.config.vision.mode = "official"
-            self.config.vision.provider = "official"
-            self.config.vision.model = "default"
-            self.config.vision.api_key = ""
             self._official_text_override = ""
             self._official_vision_override = ""
             save_user_secrets(secrets)
-            save_vision_profile("official", provider="official", model="default", base_url=relay_llm_url())
             save_llm_profile("official", "", "default", relay_llm_url())
             if self.persist_config:
                 _save_config(self.config)
@@ -3842,7 +3838,9 @@ class AeroApp(App):
         self.query_one("#user-input", TextArea).focus()
 
     def _handle_vision_command(self, text: str) -> None:
-        if self.config.llm.provider == "official":
+        from aero.core.official_account import load_official_session
+
+        if load_official_session().is_logged_in:
             parts = text.split(maxsplit=1)
             if len(parts) == 1:
                 self.run_worker(self._open_official_vision_picker(), exclusive=True)
@@ -3897,10 +3895,13 @@ class AeroApp(App):
                 self.config.language,
                 hint="视觉模型来自当前账户的官方视觉模型池。",
             ),
-            callback=self._apply_selected_vision_model,
+            callback=lambda selected: self._set_official_vision_model(selected)
+            if selected is not None else None,
         )
 
     def _set_official_vision_model(self, value: str) -> None:
+        from aero.core.official_account import relay_llm_url
+
         value = value.strip()
         if value not in {"default", "auto"}:
             cached = self._official_models().preferences
@@ -3913,13 +3914,18 @@ class AeroApp(App):
         self.config.vision.provider = "official"
         self.config.vision.model = value
         self.config.vision.api_key = ""
+        save_vision_profile(
+            "official", provider="official", model=value, base_url=relay_llm_url(),
+        )
         self._refresh_model_info()
         self._set_footer_status(f"官方视觉模型已切换为 {value}。")
 
     def _apply_selected_vision_model(self, selected: str | None) -> None:
         if selected == _REUSE_PRIMARY_VISION_OPTION:
             self._reuse_primary_vision_model()
-        elif selected is not None and self.config.llm.provider == "official":
+        elif selected is not None and (
+            self.config.llm.provider == "official" or self.config.vision.mode == "official"
+        ):
             self._set_official_vision_model(selected)
         elif selected is not None:
             self._set_vision_model(selected)
@@ -5305,6 +5311,7 @@ class AeroApp(App):
             transcript = []
         else:
             messages, meta = loaded
+            self.agent.runtime.read_files.clear()
             self.agent.messages = messages
             self.agent.tracker = TokenTracker.from_dict(meta.tracker)
             transcript = meta.transcript
@@ -5352,15 +5359,18 @@ class AeroApp(App):
         import uuid
 
         messages, meta = self._get_session_mgr().load_snapshot(snapshot)
+        self.agent.runtime.read_files.clear()
         self.agent.messages = messages
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
             self._official_vision_override = meta.official_vision_model or ""
             self.config.llm.model = self._official_text_override or "default"
-            self.config.vision.mode = "official"
-            self.config.vision.provider = "official"
-            self.config.vision.model = self._official_vision_override or "default"
+            if (self._official_vision_override
+                    and self.config.vision.mode in {"unconfigured", "official"}):
+                self.config.vision.mode = "official"
+                self.config.vision.provider = "official"
+                self.config.vision.model = self._official_vision_override
             self._sync_agent_llm_config()
         self._session_id = uuid.uuid4().hex[:12]
         set_session_id(self._session_id)
@@ -5407,6 +5417,7 @@ class AeroApp(App):
         if self.agent is None:
             self._init_agent()
         elif self.agent.messages:
+            self.agent.runtime.read_files.clear()
             self.agent.messages = [self.agent.messages[0]]
             self.agent.tracker = TokenTracker()
         self._session_id = None
@@ -5414,9 +5425,6 @@ class AeroApp(App):
         self._official_vision_override = ""
         if self.config.llm.provider == "official":
             self.config.llm.model = "default"
-            self.config.vision.mode = "official"
-            self.config.vision.provider = "official"
-            self.config.vision.model = "default"
             self._sync_agent_llm_config()
         set_session_id(None)
         self._pending_session_title = title
@@ -5629,8 +5637,6 @@ class AeroApp(App):
             self._official_vision_override = ""
             if self.config.llm.provider == "official":
                 self.config.llm.model = "default"
-                self.config.vision.model = "default"
-                self.config.vision.mode = "official"
                 self._sync_agent_llm_config()
             set_session_id(None)
         message = t("app.session_deleted", self.config.language).format(id=session_id)
@@ -5662,15 +5668,18 @@ class AeroApp(App):
         messages, meta = result
         if self.agent is None:
             self._init_agent()
+        self.agent.runtime.read_files.clear()
         self.agent.messages = messages
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
             self._official_vision_override = meta.official_vision_model or ""
             self.config.llm.model = self._official_text_override or "default"
-            self.config.vision.mode = "official"
-            self.config.vision.provider = "official"
-            self.config.vision.model = self._official_vision_override or "default"
+            if (self._official_vision_override
+                    and self.config.vision.mode in {"unconfigured", "official"}):
+                self.config.vision.mode = "official"
+                self.config.vision.provider = "official"
+                self.config.vision.model = self._official_vision_override
             self._sync_agent_llm_config()
         self.config.mode = meta.mode or self.config.mode
         self.agent.config.mode = self.config.mode
@@ -6481,7 +6490,10 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
 
     @work(exclusive=False)
-    async def _run_agent(self, text: str, state: AgentRunState, *, from_cloud: bool = False) -> None:
+    async def _run_agent(
+        self, text: str, state: AgentRunState, *, from_cloud: bool = False,
+        local_turn_id: str = "",
+    ) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
         lang = self.config.language
         debug_log("tui.agent_worker_started", text_length=len(text))
@@ -6537,6 +6549,7 @@ class AeroApp(App):
 
         _tick_thinking()
 
+        local_turn_status = "failed"
         try:
             response_text = ""
             content_blocked = False
@@ -6649,6 +6662,13 @@ class AeroApp(App):
                 self._auto_save_session()
                 self._maybe_scroll_to_end()
                 debug_log("tui.agent_worker_background_completed", task_id=task.id)
+                if local_turn_id and self._chat_presence is not None:
+                    if response_text.strip():
+                        self._chat_presence.queue_local_message(
+                            "assistant", _sanitize_user_facing_text(response_text),
+                            local_turn_id=local_turn_id,
+                        )
+                    local_turn_status = "completed"
                 return
 
             if not response_text and not content_blocked:
@@ -6663,14 +6683,18 @@ class AeroApp(App):
                 self._last_reply_text = sanitized_response
                 self._chat_log.append(f"Aero:\n{sanitized_response}")
                 if not from_cloud and self._chat_presence is not None:
-                    self._chat_presence.queue_local_message("assistant", sanitized_response)
+                    self._chat_presence.queue_local_message(
+                        "assistant", sanitized_response, local_turn_id=local_turn_id
+                    )
                 self._collapse_status(done=True)
                 chat.mount(Static("─", classes="divider"))
                 await self._render_inline_images(sanitized_response)
             self._maybe_scroll_to_end()
             debug_log("tui.agent_worker_completed", response_length=len(response_text))
+            local_turn_status = "failed" if content_blocked else "completed"
 
         except (WorkerCancelled, asyncio.CancelledError):
+            local_turn_status = "canceled"
             thinking_active = False
             self._streaming_text = False
             debug_log("tui.agent_worker_cancelled")
@@ -6725,6 +6749,8 @@ class AeroApp(App):
             self._chat_log.append(f"Aero:\n错误: {e}")
 
         finally:
+            if local_turn_id and self._chat_presence is not None:
+                self._chat_presence.finish_local_turn(local_turn_id, local_turn_status)
             if state.background_task is not None:
                 self._subagent_workers.pop(state.background_task.id, None)
                 self._render_footer_status()
@@ -9071,7 +9097,7 @@ Aero — 气象科研 AI Agent IDE
   aero runtime clean   删除 Aero 私有运行时（不影响项目和用户 Conda）
   aero agent register --name ocean [--description "备注"]  注册远程 Agent
   aero agent list       列出本地 Agent 及在线状态
-  aero agent run [智能体名称或智能体 ID] [--cloud-memory]  前台常驻并等待云端指令
+  aero agent run [智能体名称或智能体 ID]  前台常驻并等待云端指令
   aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出审计快照
   aero agent takeover 智能体名称或 ID  在空目录接管离线智能体
   aero agent clone 智能体名称或 ID     在空目录克隆智能体

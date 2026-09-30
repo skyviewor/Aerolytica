@@ -55,10 +55,6 @@ class AgentStartBody(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
 
 
-class MemoryImportBody(BaseModel):
-    recovery_key: str = Field(min_length=16, max_length=512)
-
-
 class CloudServices:
     def __init__(self, web: Any):
         self.web = web
@@ -338,19 +334,5 @@ def cloud_router(require_auth) -> APIRouter:
         return await cloud.agent_json(
             "POST", f"/{agent_id}/commands/{command_id}/cancel", json={}
         )
-
-    @router.post("/agents/{agent_id}/memory/enable")
-    async def enable_agent_memory(agent_id: str, cloud=Depends(service)):
-        return cloud.hosted_agent(agent_id).enable_memory()
-
-    @router.post("/agents/{agent_id}/memory/export")
-    async def export_agent_memory(agent_id: str, cloud=Depends(service)):
-        return await cloud.hosted_agent(agent_id).export_memory()
-
-    @router.post("/agents/{agent_id}/memory/import")
-    async def import_agent_memory(
-        agent_id: str, body: MemoryImportBody, cloud=Depends(service)
-    ):
-        return await cloud.hosted_agent(agent_id).import_memory(body.recovery_key)
 
     return router

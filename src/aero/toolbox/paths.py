@@ -40,8 +40,8 @@ def resolve_project_path(path: str | Path) -> Path:
     """Resolve relative paths from the active writable workspace."""
     value = Path(path)
     if value.is_absolute():
-        return value
-    return find_workspace_dir() / value
+        return value.expanduser().resolve()
+    return (find_workspace_dir() / value.expanduser()).resolve()
 
 
 def short_path(path: str | Path) -> str:

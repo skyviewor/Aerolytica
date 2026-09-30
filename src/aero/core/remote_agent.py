@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import fcntl
-import hashlib
 import os
 import re
 import uuid
@@ -305,45 +303,6 @@ class RemoteAgentClient:
 
     async def set_status(self, status: str) -> dict[str, Any]:
         return await self.send_event("status", status=status)
-
-    async def download_memory(self, memory_key: str) -> bytes | None:
-        """Download an optional opaque encrypted memory snapshot."""
-        response = await self._agent_request(
-            "GET",
-            f"/v1/agents/{self.agent_id}/memory",
-            params={"memory_key": memory_key},
-        )
-        if response.status_code == 404:
-            return None
-        if response.status_code >= 400:
-            raise RemoteAgentError(_error(response, "下载云端 Agent 记忆失败。"))
-        encoded = str(response.json().get("snapshot") or "")
-        try:
-            encrypted = base64.b64decode(encoded, validate=True)
-        except ValueError as exc:
-            raise RemoteAgentError("云端 Agent 记忆格式无效。") from exc
-        checksum = str(response.json().get("checksum") or "")
-        if hashlib.sha256(encrypted).hexdigest() != checksum:
-            raise RemoteAgentError("云端 Agent 记忆校验失败。")
-        return encrypted
-
-    async def upload_memory(
-        self, memory_key: str, encrypted_snapshot: bytes
-    ) -> dict[str, Any]:
-        """Upload an encrypted local snapshot; Relay never receives plaintext."""
-        payload = {
-            "snapshot": base64.b64encode(encrypted_snapshot).decode("ascii"),
-            "checksum": hashlib.sha256(encrypted_snapshot).hexdigest(),
-        }
-        response = await self._agent_request(
-            "PUT",
-            f"/v1/agents/{self.agent_id}/memory",
-            params={"memory_key": memory_key},
-            json=payload,
-        )
-        if response.status_code >= 400:
-            raise RemoteAgentError(_error(response, "上传云端 Agent 记忆失败。"))
-        return response.json()
 
     async def send_progress(self, content: str, *, command_id: str) -> dict[str, Any]:
         return await self.send_event(

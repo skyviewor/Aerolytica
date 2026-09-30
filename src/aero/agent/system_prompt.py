@@ -69,6 +69,31 @@ def build_system_prompt(
             "Use the MCP tools managed by the official Relay for current information. "
             "Never use client-configured external web-search services in official mode."
         )
+    prompt += (
+        "\n\n## 搜索预算与核实\n"
+        "简单事实问题默认最多两次独立查询：首次检索加一次必要核实。"
+        "权威证据足够时立即停止。明确要求调研、综述、多项比较时使用配置的调研预算。"
+        "不要重复查询、自动重试未知结果或换工具绕过预算；预算耗尽后说明未核实部分。"
+        "最近命名、最近达到台风/飓风等级、最近登陆等口径影响答案时，先澄清口径。"
+        if lang == "zh" else
+        "\n\n## Search budget\n"
+        "Simple facts need one search and at most one necessary verification. "
+        "Stop when authoritative evidence answers the question. Research uses its configured budget. "
+        "Never repeat queries, retry unknown results or bypass the budget with another tool. "
+        "Explain unresolved facts. Clarify whether latest typhoon/hurricane means most recently "
+        "named, reached that strength, or made landfall if this changes the answer."
+    )
+    from aero.core.config import resolved_vision_config
+
+    vision = resolved_vision_config(config)
+    if vision is not None and vision.mode == "official":
+        prompt += (
+            "\n有效视觉能力已配置为官方 Relay；调用 analyze_image，"
+            "无需要求用户另配视觉 API Key。实际模型由 Relay 视觉队列决定。"
+            if lang == "zh" else
+            "\nVision is configured through the official Relay. Use analyze_image; "
+            "do not ask for another vision API key. Relay chooses the effective visual model."
+        )
     return prompt
 
 

@@ -1,5 +1,7 @@
 """Tests for the MCP channel managed by the official Relay."""
 
+import json
+
 import httpx
 import pytest
 
@@ -42,6 +44,10 @@ async def test_prepare_and_call_use_relay_owned_mcp_with_jwt():
                 },
                 request=request,
             )
+        body = json.loads(request.content)
+        assert body["category"] == "web_search"
+        assert body["turn_id"] == "turn-test"
+        assert body["call_id"] == "call-test"
         return httpx.Response(
             200,
             json={"name": "web_search", "content": "最新搜索结果", "is_error": False},
@@ -57,7 +63,9 @@ async def test_prepare_and_call_use_relay_owned_mcp_with_jwt():
     )
 
     tools = await client.list_tools()
-    result = await client.call("web_search", {"query": "今天台风"})
+    result = await client.call(
+        "web_search", {"query": "今天台风"}, turn_id="turn-test", call_id="call-test"
+    )
 
     assert tools[0]["function"]["name"] == "web_search"
     assert result["content"] == "最新搜索结果"

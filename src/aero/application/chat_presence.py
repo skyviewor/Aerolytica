@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from aero.application.chat_images import ImagePublisher, describe_images
+from aero.application.conversation_history import sync_error_reason, visible_history
 from aero.core.official_account import (
     OfficialAccountError,
     OfficialAccountSession,
@@ -109,6 +110,17 @@ class ChatPresence:
                     continue
                 self._blocked_session_id = ""
                 if not self.agent_id:
+                    self._select_message_queue(current)
+                    context = self.export_context() or {}
+                    has_user_message = any(
+                        item.get("type") == "user_message" for item in self._pending_messages
+                    ) or any(
+                        item.get("role") == "user" for item in context.get("messages", [])
+                    )
+                    if not has_user_message:
+                        # Opening an empty TUI session must not create a cloud conversation.
+                        await asyncio.sleep(1)
+                        continue
                     response = await self.session.request("POST", "/v1/agents/chats", json={
                         "session_id": current, "title": self.title(),
                     })
@@ -203,6 +215,28 @@ class ChatPresence:
     async def _sync_context(self, *, manual_request_id: str = "") -> None:
         if not self.context_sync_enabled and not manual_request_id:
             return
+        if manual_request_id:
+            await self._flush_messages()
+            if self._pending_messages or not self.is_idle():
+                return
+            payload = self.export_context()
+            if not payload:
+                await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
+                return
+            response = await self._http.post(
+                f"/v1/agents/{self.agent_id}/history",
+                json={"manual_request_id": manual_request_id,
+                      "messages": visible_history(payload)},
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=120,
+            )
+            if response.status_code >= 400:
+                await self._fail_manual_sync(
+                    manual_request_id, sync_error_reason(
+                        response, "聊天记录同步失败，请确认 Relay 和客户端均已更新"
+                    )
+                )
+                return
         while self._pending_compactions:
             event = self._pending_compactions[0]
             response = await self._http.post(
@@ -212,10 +246,11 @@ class ChatPresence:
                 headers={"Authorization": f"Bearer {self.token}"},
             )
             if response.status_code == 409:
-                self.on_sync_error("压缩归档与云端上下文前缀不一致；请先清理云端当前上下文，再重新同步。")
+                reason = sync_error_reason(response, "压缩归档同步被拒绝，请稍后重试")
+                self.on_sync_error(reason)
                 self._sync_blocked_version = self._context_version
                 if manual_request_id:
-                    await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
+                    await self._fail_manual_sync(manual_request_id, reason)
                 return
             response.raise_for_status()
             result = response.json()
@@ -240,10 +275,11 @@ class ChatPresence:
             headers={"Authorization": f"Bearer {self.token}"},
         )
         if response.status_code == 409:
-            self.on_sync_error("云端上下文与本地前缀不一致。请在网页智能体详情清理当前上下文，再重新开启自动同步。")
+            reason = sync_error_reason(response, "上下文同步被拒绝，请稍后重试")
+            self.on_sync_error(reason)
             self._sync_blocked_version = self._context_version
             if manual_request_id:
-                await self._fail_manual_sync(manual_request_id, "云端上下文与本地记录不一致")
+                await self._fail_manual_sync(manual_request_id, reason)
             return
         response.raise_for_status()
         result = response.json()
@@ -324,10 +360,12 @@ class ChatPresence:
         self._messages_path.parent.mkdir(parents=True, exist_ok=True)
         private_write(self._messages_path, json.dumps(self._pending_messages, ensure_ascii=False))
 
-    def queue_local_message(self, role: str, content: str) -> None:
+    def queue_local_message(
+        self, role: str, content: str, *, local_turn_id: str = ""
+    ) -> str:
         if (role not in {"user", "assistant", "summary"} or not content.strip()
                 or not self.session.data.is_logged_in or not self.session.data.user_id):
-            return
+            return ""
         current = self.session_id()
         appended = False
         try:
@@ -338,6 +376,11 @@ class ChatPresence:
                 "client_event_id": uuid.uuid4().hex,
             })
             appended = True
+            event = self._pending_messages[-1]
+            if role == "user":
+                local_turn_id = event["client_event_id"]
+            if local_turn_id:
+                event["local_turn_id"] = local_turn_id
             if role == "assistant":
                 event = self._pending_messages[-1]
                 event["images"] = self._images_for(content, event["client_event_id"])
@@ -346,8 +389,22 @@ class ChatPresence:
             if appended:
                 self._pending_messages.pop()
             self.on_sync_error("客户端会话消息未能保存到同步队列，请检查本地文件权限。")
-            return
+            return ""
         if self.agent_id and self._active_session_id == current:
+            asyncio.create_task(self._flush_messages())
+        return local_turn_id
+
+    def finish_local_turn(self, local_turn_id: str, status: str) -> None:
+        if not local_turn_id:
+            return
+        event = {"type": "local_turn_status", "local_turn_id": local_turn_id,
+                 "status": status, "client_event_id": uuid.uuid4().hex}
+        self._pending_messages.append(event)
+        try:
+            self._save_messages()
+        except OSError:
+            self.on_sync_error("客户端处理状态未能保存，请检查本地文件权限。")
+        if self.agent_id:
             asyncio.create_task(self._flush_messages())
 
     async def _flush_messages(self) -> None:

@@ -75,20 +75,26 @@ class OfficialMcpClient:
         """Load Relay-managed tools and let the model decide whether to call them."""
         response = await self._request("GET", "/mcp/tools")
         if response.status_code >= 400:
-            raise OfficialMcpError(
-                _relay_error(response, "无法获取 Aerolytica 官方 MCP 工具。")
-            )
+            raise OfficialMcpError(_relay_error(response, "无法获取 Aerolytica 官方 MCP 工具。"))
         payload = response.json()
         tools = payload.get("tools") if isinstance(payload, dict) else None
         if not isinstance(tools, list):
             raise OfficialMcpError("Aerolytica 官方 MCP 返回了无效的工具列表。")
         return [tool for tool in tools if isinstance(tool, dict)]
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(
+        self, name: str, arguments: dict[str, Any], *, turn_id: str = "", call_id: str = ""
+    ) -> dict[str, Any]:
         response = await self._request(
             "POST",
             "/mcp/call",
-            json={"name": name, "arguments": arguments},
+            json={
+                "category": "web_search",
+                "name": name,
+                "arguments": arguments,
+                "turn_id": turn_id,
+                "call_id": call_id,
+            },
         )
         if response.status_code >= 400:
             raise OfficialMcpError(

@@ -629,7 +629,9 @@ def _tool_progress_message(tool_name: str, stage: str, args: dict | None = None)
 
 
 def _tool_result_has_error_status(result: object) -> bool:
-    return isinstance(result, dict) and result.get("status") == "error"
+    return isinstance(result, dict) and (
+        result.get("is_error") or result.get("status") in {"error", "failed", "unknown", "blocked"}
+    )
 
 
 def _tool_error_progress_message(
@@ -1033,6 +1035,10 @@ class AgentLoop:
         )
         self.llm = LLMClient(llm_cfg)
         self.runtime = Runtime()
+        from aero.agent.search_budget import SearchBudget
+
+        self.search_budget = SearchBudget()
+        self.runtime.search_budget = self.search_budget
         self.registry = get_registry()
         self.skill_selector = SkillSelector()
 
@@ -1073,6 +1079,10 @@ class AgentLoop:
             experiment_context=_active_experiment_context(),
             memo_context=_project_memo_context(),
         )
+        system += (
+            f"\nThis turn allows at most {self.search_budget.limit} distinct web searches. "
+            "The client enforces this limit; use existing evidence when exhausted."
+        )
         self.messages[0] = Message(role="system", content=system)
 
     def _refresh_system_prompt_for_turn(self, user_message: str) -> None:
@@ -1090,12 +1100,40 @@ class AgentLoop:
             experiment_context=_active_experiment_context(),
             memo_context=_project_memo_context(),
         )
+        system += (
+            f"\nThis turn allows at most {self.search_budget.limit} distinct web searches. "
+            "The client enforces this limit; use existing evidence when exhausted."
+        )
         self.messages[0] = Message(role="system", content=system)
         if selected:
             debug_log(
                 "agent.skills_selected",
                 skills=[item.skill.name for item in selected],
             )
+    def _effective_vision_identity(self) -> tuple[str, str]:
+        from aero.core.config import resolved_vision_config
+
+        vision = resolved_vision_config(self.config) or self.config.vision
+        return vision.provider, vision.model
+
+    def _start_search_turn(self, prompt: str) -> None:
+        from aero.agent.search_budget import RESEARCH, SearchBudget
+
+        if len(self.messages) <= 1:
+            self.runtime.read_files.clear()
+        limit = (
+            self.config.search_research_budget
+            if RESEARCH.search(prompt) else self.config.search_simple_budget
+        )
+        self.search_budget = SearchBudget(limit)
+        self.runtime.search_budget = self.search_budget
+
+    def _remaining_tools(self, tools: list[dict]) -> list[dict]:
+        from aero.agent.search_budget import SEARCH_TOOLS
+
+        return [tool for tool in tools if self.search_budget.remaining or
+                tool.get("function", {}).get("name") not in SEARCH_TOOLS]
+
     def _allowed_tools(self) -> list[dict]:
         from aero.data.modes import filter_tool_functions
         tools = filter_tool_functions(self.registry.list_functions(), self.config.mode)
@@ -1186,6 +1224,7 @@ class AgentLoop:
         self._ref_urls.clear()
         self._direct_response = None
         self._current_user_message = user_message
+        self._start_search_turn(user_message)
         self._reset_turn_vision_guard()
         self._drop_incomplete_tool_call_tail()
         self.messages = _sanitize_tool_message_sequence(self.messages)
@@ -1237,6 +1276,7 @@ class AgentLoop:
         self._ref_urls.clear()
         self._direct_response = None
         self._current_user_message = user_message
+        self._start_search_turn(user_message)
         self._reset_turn_vision_guard()
         self._drop_incomplete_tool_call_tail()
         self.messages = _sanitize_tool_message_sequence(self.messages)
@@ -1251,7 +1291,9 @@ class AgentLoop:
             tool_calls: list[ToolCall] = []
             text_sanitizer = _StreamingTextSanitizer()
 
-            async for event in self.llm.chat_with_tools_stream(self.messages, tools):
+            async for event in self.llm.chat_with_tools_stream(
+                self.messages, self._remaining_tools(tools)
+            ):
                 if event.type == "text":
                     content = text_sanitizer.push(event.content)
                     if content:
@@ -1385,26 +1427,17 @@ class AgentLoop:
         )
 
     async def _call_official_mcp(self, tool_call: ToolCall) -> str:
-        if self._official_mcp is None:
-            return json.dumps(
-                {"error": "Aerolytica 官方 MCP 客户端尚未初始化。"},
-                ensure_ascii=False,
+        arguments = self._parse_tool_args(tool_call)
+        async def execute():
+            if self._official_mcp is None:
+                return {"status": "failed", "is_error": True, "content": "官方搜索客户端未初始化。"}
+            return await self._official_mcp.call(
+                tool_call.name, arguments, turn_id=self.llm.relay_turn_id, call_id=tool_call.id,
             )
-        try:
-            result = await self._official_mcp.call(
-                tool_call.name,
-                self._parse_tool_args(tool_call),
-            )
-        except Exception as exc:
-            debug_log(
-                "agent.official_mcp_call_failed",
-                tool_name=tool_call.name,
-                error=repr(exc),
-            )
-            return json.dumps({"error": str(exc)}, ensure_ascii=False)
-        content = result.get("content")
-        if isinstance(content, str):
-            return content
+        result = await self.search_budget.execute(arguments, tool_call.id, execute)
+        for url in _collect_ref_urls(result):
+            if url not in self._ref_urls:
+                self._ref_urls.append(url)
         return json.dumps(result, ensure_ascii=False, default=str)
 
     async def _handle_tool_calls(
@@ -1503,8 +1536,8 @@ class AgentLoop:
         if vision_usage:
             self.tracker.add_vision(
                 vision_usage,
-                self.config.vision.model,
-                provider=self.config.vision.provider,
+                self._effective_vision_identity()[1],
+                provider=self._effective_vision_identity()[0],
             )
             reset_vision_usage()
 
@@ -1547,8 +1580,8 @@ class AgentLoop:
             if vision_usage:
                 self.tracker.add_vision(
                     vision_usage,
-                    self.config.vision.model,
-                    provider=self.config.vision.provider,
+                    self._effective_vision_identity()[1],
+                    provider=self._effective_vision_identity()[0],
                 )
                 reset_vision_usage()
 
@@ -1567,7 +1600,9 @@ class AgentLoop:
             response = ""
             pending_calls = []
             text_sanitizer = _StreamingTextSanitizer()
-            async for event in self.llm.chat_with_tools_stream(self.messages, tools):
+            async for event in self.llm.chat_with_tools_stream(
+                self.messages, self._remaining_tools(tools)
+            ):
                 if event.type == "text":
                     content = text_sanitizer.push(event.content)
                     if content:
@@ -1640,13 +1675,18 @@ class AgentLoop:
                         content="正在通过 Aerolytica 官方 MCP 搜索网页...",
                     )
                     result = await self._call_official_mcp(tc)
-                    failed = result.lstrip().startswith('{"error"')
+                    payload = json.loads(result)
+                    failed = _tool_result_has_error_status(payload)
                     yield StreamEvent(
                         type="status",
                         content=(
-                            "Aerolytica 官方 MCP 搜索失败"
+                            "本轮搜索预算已用完"
+                            if payload.get("status") == "blocked"
+                            else "复用本轮搜索结果"
+                            if payload.get("search_reused")
+                            else "Aerolytica 官方网页搜索未成功"
                             if failed
-                            else "Aerolytica 官方 MCP 搜索完成"
+                            else "Aerolytica 官方网页搜索完成"
                         ),
                     )
                     self.messages.append(

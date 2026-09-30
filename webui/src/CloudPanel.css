@@ -65,7 +65,4 @@
 .cloud-agent-reply { display: flex; gap: 8px; margin-top: 12px; }.cloud-agent-reply input { flex: 1; }
 .cloud-approval { margin-top: 12px; padding: 10px; border: 1px solid var(--amber); border-radius: 7px; color: var(--amber); font-size: 11px; }
 .cloud-approval .cloud-actions { margin-top: 8px; }
-.cloud-memory { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-.cloud-memory strong { font-size: 12px; }.cloud-recovery-key { display: grid; gap: 6px; margin: 12px 0 0; }
-.cloud-recovery-key code { display: block; padding: 9px; border-radius: 6px; background: var(--panel-raised); color: var(--amber); overflow-wrap: anywhere; user-select: all; }
 @media (max-width: 560px) { .cloud-header { padding: 18px; }.cloud-tabs { padding: 0 10px; }.cloud-tabs button { flex: 1; padding: 12px 4px; }.cloud-body { padding: 16px; }.cloud-card { padding: 15px; }.cloud-grid { grid-template-columns: 1fr; }.cloud-inline-form { flex-wrap: wrap; }.cloud-inline-form label { flex-basis: 100%; } }
