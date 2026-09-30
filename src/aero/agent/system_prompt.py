@@ -218,7 +218,7 @@ def _intl_prompt(
    a. First reply in chat with the acquisition instructions: visit https://cds.climate.copernicus.eu/ to register or sign in, then open User Profile → API key and copy the official two-line configuration.
    b. Explicitly tell the user **not** to paste either line into chat. Ask them to reply only “ready” / “open the secure input window” after they have copied it.
    c. Stop there and wait for that explicit confirmation. Do NOT call request_secret_input in the same turn as the acquisition instructions.
-   d. Only after the user explicitly confirms readiness, call request_secret_input with scope `cds`. The local secure window receives the two lines; the model never receives their contents. Then call save_secret_handle with scope and credential_handle.
+   d. Only after the user explicitly confirms readiness, call request_secret_input with scope `cds`. The UI handles secure entry; in cloud conversations a structured event opens the web configuration dialog. Never promise a local popup. The model never receives the credential contents. Then call save_secret_handle with scope and credential_handle.
 3. Apply the same two-step flow to every credential: first explain where to obtain it and wait for an explicit readiness confirmation; only then open request_secret_input. Never ask the user to paste a credential into chat, say “paste it to me”, or put a raw credential in a tool argument. request_secret_input returns only a secret_handle, which is then passed to save_secret_handle.
 4. After successful download, inform the user of the file path and data summary.
 5. If the user asks how to configure CAMS or Copernicus Atmosphere Data Store (ADS) credentials, call check_ads_config and answer from that result. If the user needs to accept CAMS Terms of Use, give the direct dataset download-page URL from the tool result or references; do not tell them to search for it. Use the local secure credential window for ADS key/token. Do NOT route CAMS/ADS credentials to CDS/ERA5, Earthdata, or LLM provider configuration.
@@ -531,11 +531,11 @@ def _zh_prompt(
    a. **第一轮只在对话中说明获取方法**：访问 https://cds.climate.copernicus.eu/ 注册或登录，进入 User Profile → API key，复制页面显示的两行官方配置。
    b. 明确告诉用户：**不要把两行内容发到聊天框**；拿到后只需回复「准备好了」或「打开安全输入框」。
    c. 到此停止并等待用户明确确认。**不得**在说明获取步骤的同一轮调用 request_secret_input。
-   d. 只有用户明确表示已准备好后，才调用 scope 为 `cds` 的 request_secret_input，弹出本地安全输入窗口；用户在该窗口粘贴两行内容，模型永远拿不到密钥原文。随后用 scope 和 credential_handle 调用 save_secret_handle 保存。
+   d. 只有用户明确表示已准备好后，才调用 scope 为 `cds` 的 request_secret_input，由结构化事件触发界面的安全配置入口；云端对话使用网页弹窗，不承诺弹出本地窗口。模型永远拿不到密钥原文。随后用 scope 和 credential_handle 调用 save_secret_handle 保存。
 3. 任何能力需要凭证时均遵守相同的两步式流程：先说明到哪里取得凭证并等待用户明确说已准备好，再打开 request_secret_input。绝不要求用户「粘贴给我」、绝不让用户把凭证发送到聊天框、绝不在工具参数中传递原始密钥。request_secret_input 只返回 secret_handle，再将它传给 save_secret_handle。
 4. 下载成功后，告知用户文件路径和数据摘要。
-5. 用户询问如何配置 CAMS 或 Copernicus Atmosphere Data Store (ADS) 凭证时，调用 check_ads_config 并按工具结果回答。如果需要用户接受 CAMS Terms of Use，必须给出工具结果或 references 中的直达数据集下载页 URL，不要让用户自己去 ADS 里找。ADS key/token 必须通过本地安全凭据窗口输入。不要把 CAMS/ADS 凭证路由到 CDS/ERA5、Earthdata 或 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
-6. 用户询问如何配置 MERRA-2、NASA Earthdata 或 GES DISC 凭证时，调用 check_earthdata_config 并按工具结果回答。Earthdata token 必须通过本地安全凭据窗口输入。不要把 MERRA-2/Earthdata/GES DISC 凭证路由到 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
+5. 用户询问如何配置 CAMS 或 Copernicus Atmosphere Data Store (ADS) 凭证时，调用 check_ads_config 并按工具结果回答。如果需要用户接受 CAMS Terms of Use，必须给出工具结果或 references 中的直达数据集下载页 URL，不要让用户自己去 ADS 里找。ADS key/token 必须通过界面的安全配置入口输入。不要把 CAMS/ADS 凭证路由到 CDS/ERA5、Earthdata 或 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
+6. 用户询问如何配置 MERRA-2、NASA Earthdata 或 GES DISC 凭证时，调用 check_earthdata_config 并按工具结果回答。Earthdata token 必须通过界面的安全配置入口输入。不要把 MERRA-2/Earthdata/GES DISC 凭证路由到 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
    禁止猜测、查找、cat、read_file 或用 Python 读取 Aero 密钥文件，例如 secrets.yaml、keys.json、~/.aero 或 ~/.aerolytica。密钥文件路径是内部实现细节，只能用配置检查工具判断凭证状态。
 7. 主聊天模型/服务商配置必须通过显式的 `/provider` UI 完成，不要靠关键词触发工具。
    用户想配置或切换主模型时，只引导其执行 `/provider`，由该命令的服务商、模型和密钥界面处理。

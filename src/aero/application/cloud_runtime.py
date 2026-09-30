@@ -20,8 +20,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from aero.application.chat_images import ImagePublisher, describe_images, workspace_roots
+from aero.application.remote_secret import SecretKey, associated_data
 from aero.core.daemon import private_write
 from aero.core.official_account import OfficialLoginRequiredError
+from aero.toolbox.secret_input import get_credential_spec
 
 if TYPE_CHECKING:
     from aero.application.local_session import LocalSession
@@ -42,7 +44,10 @@ class RelayRuntimeTransport:
     """Small explicit adapter; injected HTTP client remains caller-owned."""
 
     def __init__(
-        self, http: httpx.AsyncClient, agent_id: str, token: str,
+        self,
+        http: httpx.AsyncClient,
+        agent_id: str,
+        token: str,
         account_access_token: Callable[[], Awaitable[str]] | None = None,
     ):
         self.http = http
@@ -60,8 +65,9 @@ class RelayRuntimeTransport:
             except OfficialLoginRequiredError as exc:
                 raise AccountRevokedError("客户端登录已失效，请重新登录。") from exc
         if self.lease_token is not None:
-            headers.update({"X-Agent-Device-Id": self.device_id,
-                            "X-Agent-Lease-Token": str(self.lease_token)})
+            headers.update(
+                {"X-Agent-Device-Id": self.device_id, "X-Agent-Lease-Token": str(self.lease_token)}
+            )
         response = await self.http.request(
             method, f"/v1/agents/{self.agent_id}/{path}", headers=headers, **kwargs
         )
@@ -71,8 +77,11 @@ class RelayRuntimeTransport:
         if (
             response.status_code in {410, 423}
             or (response.status_code == 403 and not image_path)
-            or (response.status_code == 409
-                and path not in {"context", "context/compact", "history"} and not image_path)
+            or (
+                response.status_code == 409
+                and path not in {"context", "context/compact", "history"}
+                and not image_path
+            )
         ):
             raise LeaseLost(f"runtime_rejected_{response.status_code}")
         response.raise_for_status()
@@ -88,9 +97,15 @@ class CloudAgentRuntime:
     """
 
     def __init__(
-        self, session: LocalSession, transport: RelayRuntimeTransport, *,
-        device_id: str, project_id: str, account_id: str,
-        account_identity: Callable[[], str], state_dir: Path,
+        self,
+        session: LocalSession,
+        transport: RelayRuntimeTransport,
+        *,
+        device_id: str,
+        project_id: str,
+        account_id: str,
+        account_identity: Callable[[], str],
+        state_dir: Path,
     ):
         self.session = session
         self.transport = transport
@@ -103,7 +118,8 @@ class CloudAgentRuntime:
         self._journal_path = state_dir / f"{key}.json"
         self._context_events_path = state_dir / f"{key}.context-events.json"
         self.images = ImagePublisher(
-            self._image_request, lambda: workspace_roots(session.project_dir),
+            self._image_request,
+            lambda: workspace_roots(session.project_dir),
             state_dir / f"{key}.images.json",
         )
         self._conversation_events_path = state_dir / f"{key}.messages.json"
@@ -158,16 +174,16 @@ class CloudAgentRuntime:
 
     def _queue_foreground_messages(self, run_id: str, status: str | None = None) -> None:
         state = self.session.run_status(run_id).get("state")
-        status = status or {"completed": "completed", "cancelled": "canceled"}.get(
-            state, "failed"
-        )
+        status = status or {"completed": "completed", "cancelled": "canceled"}.get(state, "failed")
         turn_id = hashlib.sha256(f"{run_id}:0".encode()).hexdigest()
         from aero.application.conversation_history import visible_history
 
         saved = self.session.session_manager.export_portable_context(self.session.id)
-        messages = (visible_history(saved) if saved else self.session.messages_view())
-        start = next((i for i in range(len(messages) - 1, -1, -1)
-                      if messages[i]["role"] == "user"), len(messages))
+        messages = visible_history(saved) if saved else self.session.messages_view()
+        start = next(
+            (i for i in range(len(messages) - 1, -1, -1) if messages[i]["role"] == "user"),
+            len(messages),
+        )
         for index, message in enumerate(messages[start:]):
             if index == 0 or state != "completed":
                 continue  # The user message was queued when execution started.
@@ -177,27 +193,44 @@ class CloudAgentRuntime:
             event_id = hashlib.sha256(f"{run_id}:{index}".encode()).hexdigest()
             role = "user_message" if message["role"] == "user" else "message"
             attachments = self.images.describe(content, event_id) if role == "message" else []
-            self._conversation_events.append({"type": role, "content": content,
-                                              "client_event_id": event_id, "images": attachments,
-                                              "local_turn_id": turn_id})
-        self._conversation_events.append({
-            "type": "local_turn_status", "local_turn_id": turn_id,
-            "status": status, "client_event_id": f"end-{run_id}",
-        })
+            self._conversation_events.append(
+                {
+                    "type": role,
+                    "content": content,
+                    "client_event_id": event_id,
+                    "images": attachments,
+                    "local_turn_id": turn_id,
+                }
+            )
+        self._conversation_events.append(
+            {
+                "type": "local_turn_status",
+                "local_turn_id": turn_id,
+                "status": status,
+                "client_event_id": f"end-{run_id}",
+            }
+        )
         private_write(self._conversation_events_path, json.dumps(self._conversation_events))
 
     async def _queue_compaction(self, before: dict, after: dict) -> None:
-        self._pending_compactions.append({"event_id": uuid.uuid4().hex,
-                                          "before": before, "after": after})
-        private_write(self._context_events_path,
-                      json.dumps(self._pending_compactions, ensure_ascii=False))
+        self._pending_compactions.append(
+            {"event_id": uuid.uuid4().hex, "before": before, "after": after}
+        )
+        private_write(
+            self._context_events_path, json.dumps(self._pending_compactions, ensure_ascii=False)
+        )
 
     def status(self) -> dict[str, Any]:
-        return {"agent_id": self.transport.agent_id, "session_id": self.session.id,
-                "project_id": self.project_id, "state": self.state,
-                "active_run_id": self.active_run_id, "command_id": self.command_id,
-                "context_sync_enabled": self.context_sync_enabled,
-                "context_sync_error": self.context_sync_error}
+        return {
+            "agent_id": self.transport.agent_id,
+            "session_id": self.session.id,
+            "project_id": self.project_id,
+            "state": self.state,
+            "active_run_id": self.active_run_id,
+            "command_id": self.command_id,
+            "context_sync_enabled": self.context_sync_enabled,
+            "context_sync_error": self.context_sync_error,
+        }
 
     async def start(self) -> dict[str, Any]:
         if self._task and not self._task.done():
@@ -227,10 +260,15 @@ class CloudAgentRuntime:
         self.transport.device_id = self.device_id
         self.transport.lease_token = None
         started = time.monotonic()
-        result = await self.transport.request("POST", "runtime/acquire", json={
-            "device_id": self.device_id, "project_id": self.project_id,
-            "session_id": self.session.id,
-        })
+        result = await self.transport.request(
+            "POST",
+            "runtime/acquire",
+            json={
+                "device_id": self.device_id,
+                "project_id": self.project_id,
+                "session_id": self.session.id,
+            },
+        )
         if result["session_id"] != self.session.id:
             raise LeaseLost("session_binding_mismatch")
         self.transport.lease_token = int(result["lease_token"])
@@ -258,7 +296,11 @@ class CloudAgentRuntime:
 
         if not self.context_sync_enabled and not manual_request_id:
             return
-        if self.session.metadata().get("active_runs") or self._foreground_execution or self.command_id:
+        if (
+            self.session.metadata().get("active_runs")
+            or self._foreground_execution
+            or self.command_id
+        ):
             return
         if manual_request_id:
             if self._foreground_execution or self.command_id:
@@ -267,41 +309,63 @@ class CloudAgentRuntime:
                 await self._flush_conversation_events()
             except (httpx.HTTPError, LeaseLost):
                 return
-            if (self.session.metadata().get("active_runs") or self._foreground_execution
-                    or self.command_id):
+            if (
+                self.session.metadata().get("active_runs")
+                or self._foreground_execution
+                or self.command_id
+            ):
                 return
             payload = self.session.session_manager.export_portable_context(self.session.id)
             if payload is None:
                 await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
                 return
             try:
-                await self.transport.request("POST", "history", json={
-                    "manual_request_id": manual_request_id,
-                    "messages": visible_history(payload),
-                }, timeout=120)
+                await self.transport.request(
+                    "POST",
+                    "history",
+                    json={
+                        "manual_request_id": manual_request_id,
+                        "messages": visible_history(payload),
+                    },
+                    timeout=120,
+                )
             except (httpx.HTTPError, LeaseLost) as exc:
                 await self._fail_manual_sync(
-                    manual_request_id, sync_error_reason(
+                    manual_request_id,
+                    sync_error_reason(
                         exc.response, "聊天记录同步失败，请确认 Relay 和客户端均已更新"
-                    ) if isinstance(exc, httpx.HTTPStatusError) else "聊天记录上传失败，请稍后重试"
+                    )
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else "聊天记录上传失败，请稍后重试",
                 )
                 return
         try:
             while self._pending_compactions:
-                result = await self.transport.request("POST", "context/compact", json={
-                    **self._pending_compactions[0], "expected_version": self.context_version,
-                    "manual_request_id": manual_request_id,
-                })
+                result = await self.transport.request(
+                    "POST",
+                    "context/compact",
+                    json={
+                        **self._pending_compactions[0],
+                        "expected_version": self.context_version,
+                        "manual_request_id": manual_request_id,
+                    },
+                )
                 if not result.get("sync_enabled", True) and not manual_request_id:
                     self.context_sync_enabled = False
                     return
                 self.context_version = int(result["version"])
                 self._pending_compactions.pop(0)
-                private_write(self._context_events_path,
-                              json.dumps(self._pending_compactions, ensure_ascii=False))
+                private_write(
+                    self._context_events_path,
+                    json.dumps(self._pending_compactions, ensure_ascii=False),
+                )
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文轮转失败：{type(exc).__name__}"
-            if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+            if (
+                manual_request_id
+                and isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code < 500
+            ):
                 await self._fail_manual_sync(
                     manual_request_id, sync_error_reason(exc.response, "上下文归档同步失败")
                 )
@@ -311,25 +375,42 @@ class CloudAgentRuntime:
             if manual_request_id:
                 await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
             return
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
         try:
-            result = await self.transport.request("PUT", "context", json={
-                "context": payload, "expected_version": self.context_version,
-                "manual_request_id": manual_request_id, "reconcile": True,
-            })
+            result = await self.transport.request(
+                "PUT",
+                "context",
+                json={
+                    "context": payload,
+                    "expected_version": self.context_version,
+                    "manual_request_id": manual_request_id,
+                    "reconcile": True,
+                },
+            )
             self.context_version = int(result["version"])
             merged = result.get("context")
             current = self.session.session_manager.export_portable_context(self.session.id)
-            if (merged is not None and merged != payload and current == payload
-                    and not self.session.metadata().get("active_runs")
-                    and not self._foreground_execution and not self.command_id):
+            if (
+                merged is not None
+                and merged != payload
+                and current == payload
+                and not self.session.metadata().get("active_runs")
+                and not self._foreground_execution
+                and not self.command_id
+            ):
                 self.session.restore_portable_context(merged)
             if result.get("applied", True):
                 self._context_hash = digest
             self.context_sync_error = ""
         except (httpx.HTTPError, LeaseLost) as exc:
             self.context_sync_error = f"云端上下文同步失败：{type(exc).__name__}"
-            if manual_request_id and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+            if (
+                manual_request_id
+                and isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code < 500
+            ):
                 await self._fail_manual_sync(
                     manual_request_id, sync_error_reason(exc.response, "上下文同步失败")
                 )
@@ -337,7 +418,8 @@ class CloudAgentRuntime:
     async def _fail_manual_sync(self, request_id: str, reason: str) -> None:
         try:
             await self.transport.request(
-                "POST", f"context/manual-sync/{request_id}/fail",
+                "POST",
+                f"context/manual-sync/{request_id}/fail",
                 json={"reason": reason},
             )
         except (httpx.HTTPError, LeaseLost):
@@ -349,8 +431,12 @@ class CloudAgentRuntime:
             self._assert_lease()
             started = time.monotonic()
             metadata = self.session.metadata()
-            title = metadata.get("name") if metadata.get("title_source") in {"auto", "manual"} else ""
-            result = await self.transport.request("POST", "runtime/heartbeat", json={"title": title})
+            title = (
+                metadata.get("name") if metadata.get("title_source") in {"auto", "manual"} else ""
+            )
+            result = await self.transport.request(
+                "POST", "runtime/heartbeat", json={"title": title}
+            )
             if bool(result.get("context_sync_enabled")) and not self.context_sync_enabled:
                 self._context_hash = ""
                 self.context_version = int(result.get("context_version") or 0)
@@ -381,21 +467,27 @@ class CloudAgentRuntime:
         if self.command_id and run_id == self.active_run_id:
             yield
             return
-        result = await self.transport.request("POST", "runtime/project/acquire",
-                                              json={"execution_id": run_id})
+        result = await self.transport.request(
+            "POST", "runtime/project/acquire", json={"execution_id": run_id}
+        )
         self._foreground_execution = run_id
         terminal_status = None
         try:
             async for event in self.session.events(run_id):
                 if event.type == "run_started":
                     turn_id = hashlib.sha256(f"{run_id}:0".encode()).hexdigest()
-                    self._conversation_events.append({
-                        "type": "user_message", "content": event.data["prompt"],
-                        "client_event_id": turn_id, "local_turn_id": turn_id,
-                    })
+                    self._conversation_events.append(
+                        {
+                            "type": "user_message",
+                            "content": event.data["prompt"],
+                            "client_event_id": turn_id,
+                            "local_turn_id": turn_id,
+                        }
+                    )
                     with suppress(OSError):
-                        private_write(self._conversation_events_path,
-                                      json.dumps(self._conversation_events))
+                        private_write(
+                            self._conversation_events_path, json.dumps(self._conversation_events)
+                        )
                     break
             yield
         except asyncio.CancelledError:
@@ -409,19 +501,30 @@ class CloudAgentRuntime:
                 self._queue_foreground_messages(run_id, terminal_status)
             self._foreground_execution = None
             with suppress(httpx.HTTPError, LeaseLost):
-                await self.transport.request("POST", "runtime/project/release", json={
-                    "execution_id": run_id,
-                    "project_lease_token": result["project_lease_token"],
-                })
+                await self.transport.request(
+                    "POST",
+                    "runtime/project/release",
+                    json={
+                        "execution_id": run_id,
+                        "project_lease_token": result["project_lease_token"],
+                    },
+                )
 
     async def _approval(self, command_id: str, run_id: str, event: Any) -> None:
         # Only operation identifiers are cloud-visible, not tool arguments/secrets.
         request_id = f"{run_id}:{event.id}"[:64]
-        await self.transport.request("POST", f"commands/{command_id}/approvals", json={
-            "request_id": request_id,
-            "payload": {"tool": str(event.data.get("tool", "operation"))[:120],
-                        "message": "Local operation requires approval", "run_id": run_id},
-        })
+        await self.transport.request(
+            "POST",
+            f"commands/{command_id}/approvals",
+            json={
+                "request_id": request_id,
+                "payload": {
+                    "tool": str(event.data.get("tool", "operation"))[:120],
+                    "message": "Local operation requires approval",
+                    "run_id": run_id,
+                },
+            },
+        )
         self.state = "waiting_confirmation"
         while not self._stop.is_set():
             self._assert_lease()
@@ -429,8 +532,9 @@ class CloudAgentRuntime:
             if result.get("cancel_requested"):
                 await self.session.cancel(run_id)
                 return
-            approval = next((a for a in result.get("approvals", [])
-                             if a.get("request_id") == request_id), {})
+            approval = next(
+                (a for a in result.get("approvals", []) if a.get("request_id") == request_id), {}
+            )
             if approval.get("status") in {"approved", "denied", "canceled"}:
                 choice = "allow" if approval["status"] == "approved" else "deny"
                 # LocalSession confirmation future may be installed after the event.
@@ -444,13 +548,107 @@ class CloudAgentRuntime:
                 raise RuntimeError("confirmation_not_pending")
             await asyncio.sleep(1)
 
+    async def _secret(self, command_id: str, run_id: str, event: Any) -> None:
+        """Pause this run while a separately encrypted, authenticated inbox is serviced."""
+        # A setup hint is not an actual pending input request. Only the provider
+        # creates a request ID/future; the model still needs to call that tool.
+        if not event.data.get("request_id") or not event.data.get("scope"):
+            return
+        local_id = str(event.data["request_id"])
+        scope = str(event.data["scope"])
+        spec = get_credential_spec(scope)
+        if spec is None:
+            await self.session.cancel(run_id)
+            return
+        self.state = "waiting_secret"
+        description = {
+            "scope": scope,
+            "title": spec.title,
+            "instructions": spec.instructions,
+            "multiline": spec.multiline,
+        }
+        while not self._stop.is_set():
+            request_id = uuid.uuid4().hex
+            key = SecretKey()  # Never persisted; each format retry gets a new key and ID.
+            path = f"commands/{command_id}/secrets/{request_id}"
+            deadline = time.monotonic() + 900
+
+            async def send(method: str, endpoint: str, **kwargs: Any) -> dict:
+                while time.monotonic() < deadline and not self._stop.is_set():
+                    self._assert_lease()
+                    try:
+                        return await self.transport.request(method, endpoint, **kwargs)
+                    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                        if (
+                            isinstance(exc, httpx.HTTPStatusError)
+                            and exc.response.status_code < 500
+                        ):
+                            raise
+                        await asyncio.sleep(1)
+                raise TimeoutError("secret_request_expired")
+
+            try:
+                await send(
+                    "POST",
+                    f"commands/{command_id}/secrets",
+                    json={
+                        "request_id": request_id,
+                        "public_key": key.public_key,
+                        "description": description,
+                    },
+                )
+                while time.monotonic() < deadline and not self._stop.is_set():
+                    result = await send("POST", f"{path}/claim")
+                    status = result["request"]["status"]
+                    if result.get("cancel_requested") or status in {"canceled", "expired"}:
+                        await self.session.cancel(run_id)
+                        return
+                    envelope = result.get("envelope")
+                    if envelope:
+                        secret = None
+                        try:
+                            secret = key.decrypt(
+                                envelope,
+                                associated_data(self.transport.agent_id, command_id, request_id),
+                            )
+                        except Exception:
+                            pass  # Never expose plaintext or crypto errors to events/logs.
+                        await send("POST", f"{path}/ack")
+                        saved = secret is not None and self.session.submit_remote_secret(
+                            local_id, scope, secret
+                        )
+                        secret = None
+                        envelope = None
+                        await send(
+                            "POST",
+                            f"{path}/result",
+                            json={"status": "success" if saved else "failed"},
+                        )
+                        if saved:
+                            self.state = "running"
+                            return
+                        break  # Invalid input: new inbox, original pending future stays alive.
+                    await asyncio.sleep(1)
+                else:
+                    await send("POST", f"{path}/result", json={"status": "canceled"})
+                    await self.session.cancel(run_id)
+                    return
+            except TimeoutError:
+                await self.session.cancel(run_id)
+                return
+
     async def _execute(self, command: dict[str, Any]) -> None:
         command_id = str(command["command_id"])
         if command_id in self._journal:
             # Even 'completed' could have lost its remote acknowledgment: no replay.
-            await self.transport.request("POST", f"commands/{command_id}/status", json={
-                "status": "interrupted", "error": "local_command_already_attempted",
-            })
+            await self.transport.request(
+                "POST",
+                f"commands/{command_id}/status",
+                json={
+                    "status": "interrupted",
+                    "error": "local_command_already_attempted",
+                },
+            )
             return
         if command.get("session_id", self.session.id) != self.session.id:
             raise LeaseLost("command_session_mismatch")
@@ -466,20 +664,25 @@ class CloudAgentRuntime:
                 if event.type == "confirmation_required":
                     await self._approval(command_id, self.active_run_id, event)
                 elif event.type in {"text", "assistant_delta"}:
-                    response_parts.append(getattr(event, "content", None)
-                                          or event.data.get("text", ""))
+                    response_parts.append(
+                        getattr(event, "content", None) or event.data.get("text", "")
+                    )
                 elif event.type in {"status", "tool_progress"}:
                     content = getattr(event, "content", None) or event.data.get("text", "")
                     if not content:
                         continue
-                    await self.transport.request("POST", "events", json={
-                        "type": "progress", "content": str(content)[:20_000],
-                        "in_reply_to": command_id,
-                        "client_event_id": f"progress-{uuid.uuid4().hex}",
-                    })
+                    await self.transport.request(
+                        "POST",
+                        "events",
+                        json={
+                            "type": "progress",
+                            "content": str(content)[:20_000],
+                            "in_reply_to": command_id,
+                            "client_event_id": f"progress-{uuid.uuid4().hex}",
+                        },
+                    )
                 elif event.type == "secret_required":
-                    # Secrets may only be entered via authenticated local UI.
-                    self.state = "waiting_secret"
+                    await self._secret(command_id, self.active_run_id, event)
             state = self.session.run_status(self.active_run_id).get("state", "failed")
             final = {"completed": "completed", "cancelled": "canceled"}.get(state, "failed")
             self._record(command_id, final)
@@ -490,22 +693,32 @@ class CloudAgentRuntime:
                     attachments = self.images.describe(content, event_id)
                 except OSError:
                     attachments = describe_images(content, event_id)
-                await self.transport.request("POST", "events", json={
-                    "type": "message",
-                    "content": content,
-                    "images": attachments,
-                    "in_reply_to": command_id,
-                    "client_event_id": event_id,
-                })
+                await self.transport.request(
+                    "POST",
+                    "events",
+                    json={
+                        "type": "message",
+                        "content": content,
+                        "images": attachments,
+                        "in_reply_to": command_id,
+                        "client_event_id": event_id,
+                    },
+                )
             elif final == "failed":
-                await self.transport.request("POST", "events", json={
-                    "type": "error", "content": "本机智能体执行失败。",
-                    "in_reply_to": command_id,
-                    "client_event_id": f"error-{uuid.uuid4().hex}",
-                })
+                await self.transport.request(
+                    "POST",
+                    "events",
+                    json={
+                        "type": "error",
+                        "content": "本机智能体执行失败。",
+                        "in_reply_to": command_id,
+                        "client_event_id": f"error-{uuid.uuid4().hex}",
+                    },
+                )
             else:
-                await self.transport.request("POST", f"commands/{command_id}/status",
-                                              json={"status": final})
+                await self.transport.request(
+                    "POST", f"commands/{command_id}/status", json={"status": final}
+                )
         except BaseException:
             self._record(command_id, "interrupted")
             if self.active_run_id:
@@ -542,9 +755,15 @@ class CloudAgentRuntime:
                 try:
                     self.state = "connecting"
                     await self._acquire()
-                    tasks = [asyncio.create_task(fn()) for fn in
-                             (self._heartbeats, self._watch_identity,
-                              self._poll, self._sync_images)]
+                    tasks = [
+                        asyncio.create_task(fn())
+                        for fn in (
+                            self._heartbeats,
+                            self._watch_identity,
+                            self._poll,
+                            self._sync_images,
+                        )
+                    ]
                     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:
                         task.result()

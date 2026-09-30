@@ -38,7 +38,7 @@ from aero.data.plans import use_session_id
 from aero.data.pricing import context_window_for
 from aero.toolbox.file_access import use_read_files
 from aero.toolbox.paths import use_workspace
-from aero.toolbox.secret_input import use_secret_input_provider
+from aero.toolbox.secret_input import get_credential_spec, use_secret_input_provider
 
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_.-]{6,}\b", re.IGNORECASE)
 _EVENT_BUFFER_SIZE = 2_000
@@ -86,7 +86,7 @@ class LocalSession:
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
         self._title_pending: dict[str, bool] = {}
         self._pending_secrets: dict[str, asyncio.Future[str]] = {}
-        self._secret_values: dict[str, str] = {}
+        self._secret_values: dict[str, str | dict] = {}
         self._session_meta = SessionMeta(
             id=self.id,
             project_dir=str(self.project_dir),
@@ -168,10 +168,14 @@ class LocalSession:
 
             self._session_meta.transcript = [
                 {"role": item["role"], "content": item["content"]}
-                for item in visible_history({"messages": [
-                    {"role": message.role, "content": message.content}
-                    for message in self.agent.messages
-                ]})
+                for item in visible_history(
+                    {
+                        "messages": [
+                            {"role": message.role, "content": message.content}
+                            for message in self.agent.messages
+                        ]
+                    }
+                )
             ]
         if not self._session_meta.name and any(
             message.role == "user" and message.content.strip() for message in self.agent.messages
@@ -193,17 +197,22 @@ class LocalSession:
         estimated_chars = len(upcoming_prompt)
         for message in self.agent.messages:
             estimated_chars += len(message.role) + len(message.content or "")
-            estimated_chars += sum(len(call.name) + len(json.dumps(call.arguments, ensure_ascii=False))
-                                   for call in message.tool_calls or [])
+            estimated_chars += sum(
+                len(call.name) + len(json.dumps(call.arguments, ensure_ascii=False))
+                for call in message.tool_calls or []
+            )
         estimated = estimated_chars // 3
-        if estimated < limit * .8:
+        if estimated < limit * 0.8:
             return False
         self._save()
         before = self.session_manager.export_portable_context(self.id)
         prompt = summary_prompt_for(self.agent.messages)
-        config = LLMConfig(provider=self.config.llm.provider, model=self.config.llm.model,
-                           api_key=self.config.llm.active_api_key(),
-                           base_url=self.config.llm.base_url)
+        config = LLMConfig(
+            provider=self.config.llm.provider,
+            model=self.config.llm.model,
+            api_key=self.config.llm.active_api_key(),
+            base_url=self.config.llm.base_url,
+        )
         client = LLMClient(config)
         try:
             summary = (await client.chat([Message(role="user", content=prompt)])).strip()
@@ -507,9 +516,7 @@ class LocalSession:
         ):
             return
         self._title_pending[run_id] = True
-        task = asyncio.create_task(
-            self._generate_title(run_id, relay_turn_id=relay_turn_id)
-        )
+        task = asyncio.create_task(self._generate_title(run_id, relay_turn_id=relay_turn_id))
         self._title_tasks[run_id] = task
 
     async def _generate_title(
@@ -610,6 +617,10 @@ class LocalSession:
         )
         try:
             handle = await future
+            for run_id, state in self._run_states.items():
+                if state == RunState.WAITING_SECRET:
+                    self._run_states[run_id] = RunState.RUNNING
+                    self._emit(run_id, "run_state", {"state": RunState.RUNNING.value})
             return {"status": "ready", "secret_handle": handle}
         finally:
             self._pending_secrets.pop(request_id, None)
@@ -622,7 +633,27 @@ class LocalSession:
         self._secret_values[handle] = secret
         future.set_result(handle)
 
-    def _resolve_secret(self, handle: str) -> str | None:
+    def submit_remote_secret(self, request_id: str, scope: str, secret: str) -> bool:
+        """Save locally before resuming; deliver only a one-use success result to the tool."""
+        future = self._pending_secrets.get(request_id)
+        if future is None or future.done():
+            raise RuntimeError("secret_not_pending")
+        spec = get_credential_spec(scope)
+        if spec is None:
+            return False
+        try:
+            result = spec.consumer(secret)
+        except Exception:
+            # Consumers may include submitted text in exceptions. Never forward it.
+            return False
+        if result.get("status") != "success":
+            return False
+        handle = secrets.token_urlsafe(18)
+        self._secret_values[handle] = {"scope": scope, "result": result}
+        future.set_result(handle)
+        return True
+
+    def _resolve_secret(self, handle: str) -> str | dict | None:
         return self._secret_values.pop(handle, None)
 
     def _emit_for_active_run(self, event_type: str, data: dict[str, Any]) -> None:

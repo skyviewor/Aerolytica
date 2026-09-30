@@ -31,14 +31,14 @@ from aero.toolbox.secret_input import (
     register_credential_spec,
     request_secret_input_from_context,
     save_secret_from_context,
-    take_secret_from_context,
 )
 
 
 @register_tool(
     name="request_secret_input",
     description=(
-        "打开本地安全凭据输入窗口。密钥原文不会发送给模型；成功后只返回一次性 "
+        "请求安全配置凭据。云端由结构化事件显示网页配置入口，不承诺弹出本地窗口。"
+        "密钥原文不会发送给模型；成功后只返回一次性 "
         "secret_handle。拿到 handle 后，调用对应配置工具并传 credential_handle 保存。"
     ),
     parameters={
@@ -58,7 +58,7 @@ async def request_secret_input(
     """Request a secret through the client UI and return only a handle."""
     return await request_secret_input_from_context(
         SecretInputRequest(scope, title, instructions, multiline)
-)
+    )
 
 
 def _web_search_reuse_sources(config: AeroConfig, provider: str) -> list[str]:
@@ -87,11 +87,7 @@ def _web_search_reuse_candidate(config: AeroConfig, provider: str) -> str:
         if normalize_provider_id(saved_provider) == provider and profile.api_key:
             return profile.api_key
     vision = resolved_vision_config(config)
-    if (
-        vision is not None
-        and normalize_provider_id(vision.provider) == provider
-        and vision.api_key
-    ):
+    if vision is not None and normalize_provider_id(vision.provider) == provider and vision.api_key:
         return vision.api_key
     return ""
 
@@ -120,7 +116,10 @@ def _save_web_search_credential(value: str) -> dict:
         "provider": provider,
         "api_key_configured": True,
         "mcp_verified": False,
-        "message": "网页搜索服务 API Key 已保存在用户级凭据中；尚未启用，请执行 /websearch on 进行连通性测试。",
+        "message": (
+            "网页搜索服务 API Key 已保存在用户级凭据中；尚未启用，"
+            "请执行 /websearch on 进行连通性测试。"
+        ),
     }
 
 
@@ -158,8 +157,7 @@ def check_web_search_config() -> dict:
         provider = "bailian"
         name = "阿里云百炼"
     bailian_url = (
-        "https://bailian.console.aliyun.com/cn-beijing/"
-        "?apiKey=1&tab=globalset#/efm/api_key"
+        "https://bailian.console.aliyun.com/cn-beijing/?apiKey=1&tab=globalset#/efm/api_key"
     )
     zhipu_url = "https://open.bigmodel.cn/apikey/platform"
     bailian_pricing_url = "https://help.aliyun.com/zh/model-studio/web-search-mcp"
@@ -184,13 +182,13 @@ def check_web_search_config() -> dict:
             "请把“明确授权复用现有百炼 API Key”作为百炼方案的首选项，"
             "并提醒用户仍需到百炼 MCP 广场开通 WebSearch（联网搜索）MCP。"
             "只有用户明确回复同意/授权复用后，才能调用 "
-            "authorize_web_search_key_reuse(provider=\"bailian\")；不得自动复用。\n"
+            'authorize_web_search_key_reuse(provider="bailian")；不得自动复用。\n'
         )
     if zhipu_reuse_sources:
         reuse_guidance += (
             "\n检测到用户已经配置过智谱 API Key，可以复用，无需重新输入。"
             "只有用户明确回复同意/授权复用后，才能调用 "
-            "authorize_web_search_key_reuse(provider=\"zhipu\")；不得自动复用。\n"
+            'authorize_web_search_key_reuse(provider="zhipu")；不得自动复用。\n'
         )
     return {
         "provider": provider,
@@ -210,8 +208,7 @@ def check_web_search_config() -> dict:
                     else f"当前选择的网页搜索供应商：{name}；尚无网页搜索凭证。\n\n"
                 )
             )
-            +
-            "可选配置方法：\n"
+            + "可选配置方法：\n"
             "1. 阿里云百炼 WebSearch MCP\n"
             f"   - 在 API-KEY 管理页创建或复制 DashScope API Key：{bailian_url}\n"
             "   - 登录百炼后进入 MCP 广场，搜索“WebSearch”或“联网搜索”，"
@@ -229,11 +226,10 @@ def check_web_search_config() -> dict:
             "   - 如果要复用已配置的智谱 Key，同样必须由用户明确授权。\n\n"
             "如果尚未选定供应商，请先让用户选择百炼或智谱（也可执行 "
             "/websearch provider）。拿到 Key 后不要粘贴到聊天框；"
-            "只回复“准备好了”，再打开本地安全输入窗口。"
+            "只回复“准备好了”，再调用 request_secret_input，由界面显示安全配置入口。"
             "\n无论是否检测到可复用的百炼 Key，都必须在同一条回复中完整展示"
             "“阿里云百炼”和“智谱 AI”两条方案，让用户自己选择；"
-            "可复用百炼 Key 只能让百炼成为推荐方案，不能隐藏智谱方案。"
-            + reuse_guidance
+            "可复用百炼 Key 只能让百炼成为推荐方案，不能隐藏智谱方案。" + reuse_guidance
         ),
         "response_requirements": [
             "始终同时展示阿里云百炼与智谱 AI 两条完整方案",
@@ -416,7 +412,8 @@ def check_cds_config() -> dict:
             "1. 访问 https://cds.climate.copernicus.eu/ 注册账户\n"
             "2. 进入 User Profile → API key\n"
             "3. 复制页面上的两行官方配置；不要把它们发到聊天框。\n"
-            "4. 请用户只回复“准备好了”或“打开安全输入框”，再打开本地安全凭据输入框。\n"
+            "4. 请用户只回复“准备好了”或“打开安全输入框”，再调用 request_secret_input，"
+            "由界面显示安全配置入口。\n"
             "凭据不会发送给模型。"
         ),
     }
@@ -443,16 +440,16 @@ def check_cds_config() -> dict:
         },
     },
 )
-def configure_cds_key(
-    credential_string: str = "", credential_handle: str = ""
-) -> dict:
+def configure_cds_key(credential_string: str = "", credential_handle: str = "") -> dict:
     """Parse CDS credential string and save to the user secrets file.
 
     Supports formats:
     - "https://cds.climate.copernicus.eu/api:xxxx-xxxx-xxxx-xxxx"
     - "url: https://cds.climate.copernicus.eu/api\nkey: xxxx-xxxx-xxxx-xxxx"
     """
-    text = take_secret_from_context(credential_handle) if credential_handle else credential_string
+    if credential_handle:
+        return save_secret_from_context("cds", credential_handle)
+    text = credential_string
     return _save_cds_credential(text)
 
 
@@ -517,6 +514,7 @@ register_credential_spec(
         scope="cds",
         title="输入 CDS API 凭证",
         instructions=(
+            "访问 https://cds.climate.copernicus.eu/ ，登录后进入 User Profile → API key。\n"
             "请粘贴 CDS 官方页面上的两行配置：\n"
             "url: https://cds.climate.copernicus.eu/api\n"
             "key: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -574,9 +572,7 @@ def check_ads_config() -> dict:
         "properties": {
             "credential_string": {
                 "type": "string",
-                "description": (
-                    "兼容旧调用；新流程不要传入原始密钥。"
-                ),
+                "description": ("兼容旧调用；新流程不要传入原始密钥。"),
             },
             "credential_handle": {
                 "type": "string",
@@ -587,7 +583,9 @@ def check_ads_config() -> dict:
 )
 def configure_ads_key(credential_string: str = "", credential_handle: str = "") -> dict:
     """Parse and save ADS API credentials."""
-    text = take_secret_from_context(credential_handle) if credential_handle else credential_string
+    if credential_handle:
+        return save_secret_from_context("ads", credential_handle)
+    text = credential_string
     return _save_ads_credential(text)
 
 
@@ -727,7 +725,9 @@ def check_earthdata_config() -> dict:
 )
 def configure_earthdata_token(token: str = "", credential_handle: str = "") -> dict:
     """Save a NASA Earthdata token in the user secrets file."""
-    text = take_secret_from_context(credential_handle) if credential_handle else token
+    if credential_handle:
+        return save_secret_from_context("earthdata", credential_handle)
+    text = token
     return _save_earthdata_token(text)
 
 
@@ -866,9 +866,7 @@ def configure_llm_provider(
 ) -> dict:
     """Save or switch OpenAI-compatible LLM credentials."""
     config_path = find_config_path()
-    config = (
-        AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
-    )
+    config = AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
 
     provider_was_explicit = bool(provider and provider.strip())
     raw_provider = (provider or "").strip()
@@ -961,9 +959,7 @@ def configure_llm_provider(
 def clear_llm_config(reset_provider: bool = False) -> dict:
     """Clear saved LLM API key from the user secrets file."""
     config_path = find_config_path()
-    config = (
-        AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
-    )
+    config = AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
 
     had_key = bool(config.llm.active_api_key())
     previous_provider = config.llm.provider
@@ -1038,8 +1034,7 @@ def clear_cds_config() -> dict:
 @register_tool(
     name="clear_ads_config",
     description=(
-        "清除用户级密钥文件中已保存的 ADS API 凭证。"
-        "用户要求清除/删除 CAMS 或 ADS 凭证时调用。"
+        "清除用户级密钥文件中已保存的 ADS API 凭证。用户要求清除/删除 CAMS 或 ADS 凭证时调用。"
     ),
     parameters={"type": "object", "properties": {}},
 )

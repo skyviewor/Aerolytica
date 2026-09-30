@@ -75,16 +75,18 @@ def save_secret_from_context(scope: str, handle: str) -> dict:
     if not secret:
         return {
             "status": "error",
-            "message": "未收到有效的安全凭据句柄，请重新打开本地输入窗口。",
+            "message": "未收到有效的安全凭据句柄，请重新打开安全配置窗口。",
         }
+    if isinstance(secret, dict):
+        return secret["result"] if secret.get("scope") == scope else {"status": "error"}
     return spec.consumer(secret)
 
 
 SecretInputProvider = Callable[[SecretInputRequest], Awaitable[dict]]
-SecretHandleResolver = Callable[[str], str | None]
+SecretHandleResolver = Callable[[str], str | dict | None]
 
-_SECRET_INPUT_PROVIDER: contextvars.ContextVar[SecretInputProvider | None] = (
-    contextvars.ContextVar("aero_secret_input_provider", default=None)
+_SECRET_INPUT_PROVIDER: contextvars.ContextVar[SecretInputProvider | None] = contextvars.ContextVar(
+    "aero_secret_input_provider", default=None
 )
 _SECRET_HANDLE_RESOLVER: contextvars.ContextVar[SecretHandleResolver | None] = (
     contextvars.ContextVar("aero_secret_handle_resolver", default=None)
@@ -92,9 +94,7 @@ _SECRET_HANDLE_RESOLVER: contextvars.ContextVar[SecretHandleResolver | None] = (
 
 
 @contextmanager
-def use_secret_input_provider(
-    provider: SecretInputProvider, resolver: SecretHandleResolver
-):
+def use_secret_input_provider(provider: SecretInputProvider, resolver: SecretHandleResolver):
     provider_token = _SECRET_INPUT_PROVIDER.set(provider)
     resolver_token = _SECRET_HANDLE_RESOLVER.set(resolver)
     try:
@@ -114,6 +114,6 @@ async def request_secret_input_from_context(request: SecretInputRequest) -> dict
     return await provider(request)
 
 
-def take_secret_from_context(handle: str) -> str | None:
+def take_secret_from_context(handle: str) -> str | dict | None:
     resolver = _SECRET_HANDLE_RESOLVER.get()
     return resolver(handle) if resolver is not None else None

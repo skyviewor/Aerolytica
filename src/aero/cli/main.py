@@ -1018,7 +1018,8 @@ class SelectScreen(ModalScreen[str | None]):
                 ],
                 id="select-list",
             )
-            yield Static(self._hint or t("select.hint", self._lang), id="select-hint")
+            if self._hint != "":
+                yield Static(self._hint or t("select.hint", self._lang), id="select-hint")
 
     def on_mount(self) -> None:
         option_list = self.query_one("#select-list", OptionList)
@@ -1032,12 +1033,12 @@ class SelectScreen(ModalScreen[str | None]):
 
     @on(OptionList.OptionSelected, "#select-list")
     def on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss("" if event.option.id == "auto" else event.option.id)
+        self.dismiss(self._option_value(event.option.id))
 
     @on(OptionList.OptionHighlighted, "#select-list")
     def on_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if self._on_highlight is not None:
-            self._on_highlight("" if event.option.id == "auto" else event.option.id)
+            self._on_highlight(self._option_value(event.option.id))
 
     def on_key(self, event: events.Key) -> None:
         if event.key in {"up", "down"}:
@@ -1058,7 +1059,7 @@ class SelectScreen(ModalScreen[str | None]):
         if highlighted is None or highlighted < 0 or highlighted >= option_list.option_count:
             return
         option = option_list.get_option_at_index(highlighted)
-        value = "" if option.id == "auto" else str(option.id)
+        value = self._option_value(option.id)
         if not value or not self._on_delete(value):
             return
         option_list.remove_option_at_index(highlighted)
@@ -1072,6 +1073,13 @@ class SelectScreen(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def _option_value(self, option_id: str | None) -> str:
+        """Return the original value, distinguishing literal auto from empty defaults."""
+        return next(
+            (value for value, _ in self._options if (value or "auto") == option_id),
+            str(option_id or ""),
+        )
 
     def _option_prompt(self, value: str, label: Any) -> Any:
         selected = "●" if (value or "auto") == (self._current or "auto") else " "
@@ -2316,13 +2324,16 @@ class AeroApp(App):
         if effort in effort_labels:
             text += f" [dim]·[/dim] 思考强度 [bold warning]{effort_labels[effort]}[/bold warning]"
         vision_config = resolved_vision_config(self.config)
-        if vision_config is not None and not self._vision_matches_primary(vision_config):
+        if (
+            BYOK_UI_ENABLED
+            and vision_config is not None
+            and not self._vision_matches_primary(vision_config)
+        ):
             vision_model = _display_vision_model_name(vision_config.model)
             vision_provider = _display_vision_provider_name(vision_config.provider)
-            text += (
-                f" [dim]&[/dim] {escape(vision_model)} "
-                f"[dim]{escape(vision_provider)}[/dim]"
-            )
+            text += f" [dim]·[/dim] 视觉 {escape(vision_model)}"
+            if vision_config.provider != "official":
+                text += f" [dim]{escape(vision_provider)}[/dim]"
         if self.agent is not None and self.agent.tracker.total_tokens > 0:
             text += _usage_meta_text(
                 self.agent.tracker,
@@ -3534,7 +3545,7 @@ class AeroApp(App):
                 _official_model_options(models),
                 current,
                 self.config.language,
-                hint="参考倍率：相对 V4.1 Flash，主来源峰价，输入/输出各 1000 token，缓存 0；实际扣点按用量计算。",
+                hint="",
             ),
             callback=self._apply_selected_model,
         )
@@ -7753,31 +7764,22 @@ def _official_model_options(
         prompt.add_row("default", f"跟随后台默认（当前：{default_model}）")
         options.append(("default", prompt))
     for model in models:
-        prompt = Table.grid(expand=True, padding=0)
-        prompt.add_column(width=22, no_wrap=True)
-        prompt.add_column(width=22, no_wrap=True)
-        prompt.add_column(width=18, no_wrap=True)
+        prompt = Table.grid(expand=True, padding=(0, 1))
+        prompt.add_column(width=26, no_wrap=True)
         prompt.add_column(ratio=1, no_wrap=True)
-        prompt.add_column(width=4, justify="right", no_wrap=True)
-        capabilities = "、".join(model.capabilities)
-        description = " · ".join(
-            value
-            for value in (
-                model.description,
-                f"能力：{capabilities}" if capabilities else "",
-            )
-            if value
-        )
-        multiplier_text = (
-            "参考倍率 随模型" if model.id == "auto"
-            else f"参考倍率 {model.price_multiplier}" if model.price_multiplier else "参考倍率 —"
-        )
+        prompt.add_column(width=10, no_wrap=True)
+        prompt.add_column(width=16, no_wrap=True)
+        labels = []
+        if "text" in model.capabilities:
+            labels.append("[bold cyan] 文本 [/bold cyan]")
+        if "vision" in model.capabilities:
+            labels.append("[bold green] 视觉 [/bold green]")
+        multiplier_text = "-" if model.id == "auto" else model.price_multiplier or "—"
         prompt.add_row(
-            model.id,
+            "自动" if model.id == "auto" else model.id,
             model.display_name,
             multiplier_text,
-            description,
-            "推荐" if model.recommended else "",
+            " ".join(labels) or "—",
         )
         options.append((model.id, prompt))
     return options
@@ -7841,6 +7843,8 @@ def _display_provider_name(provider: str) -> str:
 
 
 def _display_vision_model_name(model: str) -> str:
+    if model in {"auto", "default"}:
+        return "自动"
     from aero.data.vision_models import VISION_MODELS
 
     for vid, label in VISION_MODELS:
