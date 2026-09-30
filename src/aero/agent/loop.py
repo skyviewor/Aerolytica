@@ -1988,6 +1988,11 @@ class AgentLoop:
         return tc.arguments
 
     async def _ask_confirmation_simple(self, tool_name: str, args: dict) -> str:
+        from aero.application.request_origin import current_origin
+        from aero.toolbox.approval_input import request_approval_from_context
+
+        if current_origin() == "web":
+            return await request_approval_from_context({"tool": tool_name, "args": args})
         print(f"\n⚠️  危险操作: {tool_name}")
         args_summary = json.dumps(args, ensure_ascii=False, default=str)
         if len(args_summary) > 200:
@@ -1995,8 +2000,14 @@ class AgentLoop:
         print(f"   参数: {args_summary}")
         print("   此操作不可撤销，是否允许？")
         print("   [y] 允许  [a] 一直允许  [n] 拒绝")
+        return await self._read_terminal_confirmation()
 
     async def _ask_confirmation_simple_batch(self, tool_name: str, all_args: list[dict]) -> str:
+        from aero.application.request_origin import current_origin
+        from aero.toolbox.approval_input import request_approval_from_context
+
+        if current_origin() == "web":
+            return await request_approval_from_context({"tool": tool_name, "calls": all_args})
         print(f"\n⚠️  危险操作: {tool_name}（共 {len(all_args)} 次调用）")
         for i, args in enumerate(all_args, 1):
             summary = json.dumps(args, ensure_ascii=False, default=str)
@@ -2006,6 +2017,9 @@ class AgentLoop:
         print("   此操作不可撤销，是否允许所有？")
         print("   [y] 允许全部  [a] 一直允许  [n] 拒绝全部")
 
+        return await self._read_terminal_confirmation()
+
+    async def _read_terminal_confirmation(self) -> str:
         loop = asyncio.get_running_loop()
         while True:
             answer = await loop.run_in_executor(None, input, "   选择: ")

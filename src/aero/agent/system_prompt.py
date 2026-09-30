@@ -28,9 +28,7 @@ def build_system_prompt(
 ) -> str:
     lang = language or getattr(config, "language", "zh")
     excluded_tools = (
-        {"search_web", "check_web_search_status"}
-        if config.llm.provider == "official"
-        else set()
+        {"search_web", "check_web_search_status"} if config.llm.provider == "official" else set()
     )
     tools_prompt = _build_tools_section(config.mode, excluded_tools=excluded_tools)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -75,8 +73,8 @@ def build_system_prompt(
         "权威证据足够时立即停止。明确要求调研、综述、多项比较时使用配置的调研预算。"
         "不要重复查询、自动重试未知结果或换工具绕过预算；预算耗尽后说明未核实部分。"
         "最近命名、最近达到台风/飓风等级、最近登陆等口径影响答案时，先澄清口径。"
-        if lang == "zh" else
-        "\n\n## Search budget\n"
+        if lang == "zh"
+        else "\n\n## Search budget\n"
         "Simple facts need one search and at most one necessary verification. "
         "Stop when authoritative evidence answers the question. Research uses its configured budget. "
         "Never repeat queries, retry unknown results or bypass the budget with another tool. "
@@ -90,11 +88,23 @@ def build_system_prompt(
         prompt += (
             "\n有效视觉能力已配置为官方 Relay；调用 analyze_image，"
             "无需要求用户另配视觉 API Key。实际模型由 Relay 视觉队列决定。"
-            if lang == "zh" else
-            "\nVision is configured through the official Relay. Use analyze_image; "
+            if lang == "zh"
+            else "\nVision is configured through the official Relay. Use analyze_image; "
             "do not ask for another vision API key. Relay chooses the effective visual model."
         )
-    return prompt
+    from aero.application.request_origin import current_origin, origin_instruction
+
+    if current_origin() == "web":
+        prompt = prompt.replace(
+            "再说明获取步骤并等待用户明确说“准备好了”；随后", "说明获取步骤并立即"
+        )
+        prompt = prompt.replace(
+            "Use the local secure credential window", "Use the inline secure form"
+        )
+        prompt = prompt.replace(
+            "via the local secure credential window", "via the inline secure form"
+        )
+    return origin_instruction() + "\n\n" + prompt
 
 
 def _intl_prompt(
@@ -214,12 +224,7 @@ def _intl_prompt(
    - CDO/NCO/eccodes/netcdf-c/GDAL commands must be managed by Aero's unified `aero-agent` conda environment. Before running these commands, call ensure_runtime_tools for the exact commands needed unless the same turn already verified them inside `aero-agent`. Do NOT rely on `which` finding a command in base conda or another user environment. After ensure_runtime_tools succeeds, retry the original CLI command. Missing CLI tools alone are not a reason to jump to Python; install the CLI first, then use Python only as an explicit fallback when CLI is unsuitable or fails.
    - Any Python program run through run_shell — including `python`, `python3`, `pip`, `pip3`, and `python -m pip` — MUST execute from Aero's unified `aero-agent` conda environment. Do not use base conda, system Python, pixi's Python, or absolute Python paths to bypass this. If `aero-agent` does not exist or its Python is not first on PATH, fix/create the environment before running Python.
 1. When the user requests meteorological data or asks what data Aero supports, query the unified dataset catalogue first. Use the returned dataset id, metadata, and `download_tool` as the source of truth, then call that download capability. Do not rely on a memorized static list. Literature PDFs remain handled by download_literature_pdf. Do not write a downloader script first. For ERA5, do not pre-check CDS config.
-2. If download_era5 returns a CDS API key not configured error, use a two-step credential flow:
-   a. First reply in chat with the acquisition instructions: visit https://cds.climate.copernicus.eu/ to register or sign in, then open User Profile → API key and copy the official two-line configuration.
-   b. Explicitly tell the user **not** to paste either line into chat. Ask them to reply only “ready” / “open the secure input window” after they have copied it.
-   c. Stop there and wait for that explicit confirmation. Do NOT call request_secret_input in the same turn as the acquisition instructions.
-   d. Only after the user explicitly confirms readiness, call request_secret_input with scope `cds`. The UI handles secure entry; in cloud conversations a structured event opens the web configuration dialog. Never promise a local popup. The model never receives the credential contents. Then call save_secret_handle with scope and credential_handle.
-3. Apply the same two-step flow to every credential: first explain where to obtain it and wait for an explicit readiness confirmation; only then open request_secret_input. Never ask the user to paste a credential into chat, say “paste it to me”, or put a raw credential in a tool argument. request_secret_input returns only a secret_handle, which is then passed to save_secret_handle.
+{_credential_flow("en")}
 4. After successful download, inform the user of the file path and data summary.
 5. If the user asks how to configure CAMS or Copernicus Atmosphere Data Store (ADS) credentials, call check_ads_config and answer from that result. If the user needs to accept CAMS Terms of Use, give the direct dataset download-page URL from the tool result or references; do not tell them to search for it. Use the local secure credential window for ADS key/token. Do NOT route CAMS/ADS credentials to CDS/ERA5, Earthdata, or LLM provider configuration.
 6. If the user asks how to configure MERRA-2, NASA Earthdata, or GES DISC credentials, call check_earthdata_config and answer from that result. Earthdata tokens must be entered via the local secure credential window. Do NOT route MERRA-2/Earthdata/GES DISC credentials to LLM provider configuration.
@@ -527,12 +532,7 @@ def _zh_prompt(
    - CDO/NCO/eccodes/netcdf-c/GDAL 这类命令必须由 Aero 统一的 `aero-agent` conda 环境管理。运行这些命令前，先为本次需要的具体命令调用 ensure_runtime_tools，除非当前轮已经确认它们来自 `aero-agent`。不要因为 `which` 在 base conda 或用户其他环境里找到了同名命令就直接使用。成功后重试原 CLI 命令。缺少 CLI 本身不是改写 Python 脚本的理由；先安装并尝试 CLI，只有 CLI 不适合或失败时才用 Python 兜底。
    - 所有通过 run_shell 执行的 Python 程序——包括 `python`、`python3`、`pip`、`pip3` 和 `python -m pip`——都必须来自 Aero 统一的 `aero-agent` conda 环境。不要用 base conda、系统 Python、pixi 的 Python 或绝对路径绕过。如果 `aero-agent` 不存在或它的 Python 不在 PATH 最前面，先修复/创建环境再运行 Python。
 1. 用户请求气象数据或询问「支持哪些数据」时，必须先查询统一数据集目录。以查询返回的数据集 ID、元数据和 download_tool 为唯一事实来源，再调用对应下载能力；不要依赖系统提示中的静态名单。文献 PDF 仍由 download_literature_pdf 处理。不要先写下载脚本。ERA5 不要提前检查 CDS 配置。
-2. 如果 download_era5 返回 CDS API key 未配置的错误，必须采用两步式凭证流程：
-   a. **第一轮只在对话中说明获取方法**：访问 https://cds.climate.copernicus.eu/ 注册或登录，进入 User Profile → API key，复制页面显示的两行官方配置。
-   b. 明确告诉用户：**不要把两行内容发到聊天框**；拿到后只需回复「准备好了」或「打开安全输入框」。
-   c. 到此停止并等待用户明确确认。**不得**在说明获取步骤的同一轮调用 request_secret_input。
-   d. 只有用户明确表示已准备好后，才调用 scope 为 `cds` 的 request_secret_input，由结构化事件触发界面的安全配置入口；云端对话使用网页弹窗，不承诺弹出本地窗口。模型永远拿不到密钥原文。随后用 scope 和 credential_handle 调用 save_secret_handle 保存。
-3. 任何能力需要凭证时均遵守相同的两步式流程：先说明到哪里取得凭证并等待用户明确说已准备好，再打开 request_secret_input。绝不要求用户「粘贴给我」、绝不让用户把凭证发送到聊天框、绝不在工具参数中传递原始密钥。request_secret_input 只返回 secret_handle，再将它传给 save_secret_handle。
+{_credential_flow("zh")}
 4. 下载成功后，告知用户文件路径和数据摘要。
 5. 用户询问如何配置 CAMS 或 Copernicus Atmosphere Data Store (ADS) 凭证时，调用 check_ads_config 并按工具结果回答。如果需要用户接受 CAMS Terms of Use，必须给出工具结果或 references 中的直达数据集下载页 URL，不要让用户自己去 ADS 里找。ADS key/token 必须通过界面的安全配置入口输入。不要把 CAMS/ADS 凭证路由到 CDS/ERA5、Earthdata 或 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
 6. 用户询问如何配置 MERRA-2、NASA Earthdata 或 GES DISC 凭证时，调用 check_earthdata_config 并按工具结果回答。Earthdata token 必须通过界面的安全配置入口输入。不要把 MERRA-2/Earthdata/GES DISC 凭证路由到 LLM/DeepSeek/Kimi/OpenAI/百炼配置。
@@ -979,3 +979,56 @@ Research memos are user-approved findings for later summaries and paper writing.
 - Never expose internal tool names in user-facing replies.
 
 {context}"""
+
+
+def _credential_flow(language: str) -> str:
+    from aero.application.request_origin import current_origin
+
+    if current_origin() == "web":
+        return """2. 首次发现缺少必要凭据时，同一轮说明获取方法并调用 request_secret_input。
+网页直接在当前对话内显示注册的安全表单，无需用户回复准备好了；不要指引终端或本地窗口。
+CDS 获取方法：https://cds.climate.copernicus.eu/ → User Profile → API key，复制官方两行配置。
+3. 任何凭据都不能发送到聊天、普通表单或模型；只返回一次性句柄，用 save_secret_handle 保存后继续原任务。
+普通必要信息使用 request_user_input；权限审批仍使用独立批准/拒绝协议。"""
+    if language == "zh":
+        return (
+            '2. 如果 download_era5 返回 CDS API key 未配置的错误，必须采用两步式凭证流程：\n'
+            '   a. **第一轮只在对话中说明获取方法**：访问 https://cds.climate.coperni'
+            'cus.eu/ 注册或登录，进入 User Profile → API key，复制页面显示的两行官方配置。\n'
+            '   b. 明确告诉用户：**不要把两行内容发到聊天框**；拿到后只需回复「准备好了」或「打开安全输入框」。\n'
+            '   c. 到此停止并等待用户明确确认。**不得**在说明获取步骤的同一轮调用 request_secret_'
+            'input。\n   d. 只有用户明确表示已准备好后，才调用 scope 为 `cds` 的 request_'
+            'secret_input，由结构化事件触发界面的安全配置入口；云端对话使用网页弹窗，不承诺弹出本地窗口。模型永'
+            '远拿不到密钥原文。随后用 scope 和 credential_handle 调用 save_secret_h'
+            'andle 保存。\n3. 任何能力需要凭证时均遵守相同的两步式流程：先说明到哪里取得凭证并等待用户明确说已准备'
+            '好，再打开 request_secret_input。绝不要求用户「粘贴给我」、绝不让用户把凭证发送到聊天框、'
+            '绝不在工具参数中传递原始密钥。request_secret_input 只返回 secret_handle，再'
+            '将它传给 save_secret_handle。'
+        )
+    return (
+        '2. If download_era5 returns a CDS API key not configure'
+        'd error, use a two-step credential flow:\n   a. First re'
+        'ply in chat with the acquisition instructions: visit ht'
+        'tps://cds.climate.copernicus.eu/ to register or sign in'
+        ', then open User Profile → API key and copy the officia'
+        'l two-line configuration.\n   b. Explicitly tell the use'
+        'r **not** to paste either line into chat. Ask them to r'
+        'eply only “ready” / “open the secure input window” afte'
+        'r they have copied it.\n   c. Stop there and wait for th'
+        'at explicit confirmation. Do NOT call request_secret_in'
+        'put in the same turn as the acquisition instructions.\n '
+        '  d. Only after the user explicitly confirms readiness,'
+        ' call request_secret_input with scope `cds`. The UI han'
+        'dles secure entry; in cloud conversations a structured '
+        'event opens the web configuration dialog. Never promise'
+        ' a local popup. The model never receives the credential'
+        ' contents. Then call save_secret_handle with scope and '
+        'credential_handle.\n3. Apply the same two-step flow to e'
+        'very credential: first explain where to obtain it and w'
+        'ait for an explicit readiness confirmation; only then o'
+        'pen request_secret_input. Never ask the user to paste a'
+        ' credential into chat, say “paste it to me”, or put a r'
+        'aw credential in a tool argument. request_secret_input '
+        'returns only a secret_handle, which is then passed to s'
+        'ave_secret_handle.'
+    )

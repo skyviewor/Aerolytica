@@ -548,6 +548,21 @@ class CloudAgentRuntime:
                 raise RuntimeError("confirmation_not_pending")
             await asyncio.sleep(1)
 
+    async def _input(self, command_id: str, run_id: str, event: Any) -> None:
+        from aero.application.remote_input import request_remote_input
+
+        async def send(endpoint, **kwargs):
+            self._assert_lease()
+            return await self.transport.request(
+                "POST", f"commands/{command_id}/{endpoint}", **kwargs
+            )
+
+        result = await request_remote_input(send, event.data["description"])
+        if result["status"] in {"canceled", "expired", "unavailable"}:
+            await self.session.cancel(run_id)
+        else:
+            self.session.submit_user_input(event.data["request_id"], result)
+
     async def _secret(self, command_id: str, run_id: str, event: Any) -> None:
         """Pause this run while a separately encrypted, authenticated inbox is serviced."""
         # A setup hint is not an actual pending input request. Only the provider
@@ -657,7 +672,9 @@ class CloudAgentRuntime:
         self.command_id = command_id
         self.state = "running"
         try:
-            self.active_run_id = self.session.start_run(str(command.get("content", "")))
+            self.active_run_id = self.session.start_run(
+                str(command.get("content", "")), origin="web"
+            )
             response_parts: list[str] = []
             async for event in self.session.events(self.active_run_id):
                 self._assert_lease()
@@ -681,6 +698,8 @@ class CloudAgentRuntime:
                             "client_event_id": f"progress-{uuid.uuid4().hex}",
                         },
                     )
+                elif event.type == "input_required":
+                    await self._input(command_id, self.active_run_id, event)
                 elif event.type == "secret_required":
                     await self._secret(command_id, self.active_run_id, event)
             state = self.session.run_status(self.active_run_id).get("state", "failed")

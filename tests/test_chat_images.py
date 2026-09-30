@@ -138,7 +138,7 @@ async def test_resident_reply_uses_current_local_session_events(tmp_path):
         yield RunEvent(2, "session", "run", "run_completed", {"state": "completed"})
 
     session = SimpleNamespace(id="session", project_dir=tmp_path,
-                              start_run=lambda _: "run", events=events,
+                              start_run=lambda _, origin: "run" if origin == "web" else None, events=events,
                               run_status=lambda _: {"state": "completed"})
     transport = SimpleNamespace(agent_id="agent", request=AsyncMock(return_value={}))
     runtime = CloudAgentRuntime(session, transport, device_id="device", project_id="project",

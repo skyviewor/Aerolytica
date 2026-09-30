@@ -485,7 +485,8 @@ async def test_bailian_chat_always_uses_openai_compatible_api_without_native_sea
 
     assert mock_post.call_args.args[0] == config.endpoint
     body = mock_post.call_args.kwargs["json"]
-    assert body["messages"][0]["content"] == "最新台风"
+    assert "origin=client" in body["messages"][0]["content"]
+    assert body["messages"][1]["content"] == "最新台风"
     assert "enable_search" not in body
     assert "search_options" not in body
     assert "input" not in body

@@ -199,7 +199,8 @@ async def test_execute_continues_same_run_and_tool_after_safe_configuration(tmp_
     session.cancel = AsyncMock()
     starts, executed_tools, replies = [], [], []
 
-    def start_run(content):
+    def start_run(content, *, origin):
+        assert origin == "web"
         starts.append(content)
         return "original-run"
 
@@ -288,3 +289,68 @@ async def test_setup_hint_does_not_pause_or_register_secret_request(tmp_path):
         ),
     )
     transport.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_foreground_web_command_uses_inbox_and_never_terminal_dialog():
+    from aero.application.chat_presence import ChatPresence
+    from aero.cli.main import AeroApp
+
+    saved = []
+    scope = "test_foreground_web"
+    register_credential_spec(
+        CredentialSpec(
+            scope,
+            "CDS",
+            "Registered instructions",
+            True,
+            lambda value: saved.append(value) or {"status": "success"},
+        )
+    )
+    presence = ChatPresence.__new__(ChatPresence)
+    presence.agent_id, presence.token, presence._running = "agent", "agt_token", True
+    presence._active_command_id = "web-command"
+    registered, called = {}, []
+
+    async def post(url, **kwargs):
+        called.append(url)
+        if url.endswith("/secrets"):
+            registered.update(kwargs["json"])
+        if url.endswith("/claim"):
+            payload = {
+                "request": {"status": "submitted"},
+                "envelope": encrypt(
+                    registered["public_key"],
+                    "simulated-web-secret",
+                    associated_data("agent", "web-command", registered["request_id"]),
+                ),
+            }
+        else:
+            payload = {}
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    presence._http = SimpleNamespace(post=post)
+    app = SimpleNamespace(_chat_presence=presence, _secret_handles={}, push_screen_wait=AsyncMock())
+    result = await AeroApp._request_cloud_secret_input(
+        app, SecretInputRequest(scope, "Model title", "Model instructions", True)
+    )
+    assert result["status"] == "submitted"
+    assert saved == ["simulated-web-secret"]
+    assert registered["description"]["instructions"] == "Registered instructions"
+    assert any(url.endswith("/ack") for url in called)
+    assert any(url.endswith("/result") for url in called)
+    app.push_screen_wait.assert_not_awaited()
+    assert "simulated-web-secret" not in repr(app._secret_handles) + repr(result)
+    with use_secret_input_provider(AsyncMock(), app._secret_handles.pop):
+        assert save_secret_from_context(scope, result["secret_handle"]) == {"status": "success"}
+    assert len(saved) == 1
+
+
+@pytest.mark.asyncio
+async def test_web_credential_unavailable_never_falls_back_to_terminal():
+    from aero.cli.main import AeroApp
+
+    app = SimpleNamespace(_chat_presence=None, push_screen_wait=AsyncMock())
+    result = await AeroApp._request_cloud_secret_input(app, SecretInputRequest("cds", "", "", True))
+    assert result["status"] == "unavailable"
+    app.push_screen_wait.assert_not_awaited()

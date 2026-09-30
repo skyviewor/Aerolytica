@@ -249,6 +249,7 @@ __all__ = [
     "query_sub_agents",
     "query_download",
     "request_secret_input",
+    "request_user_input",
     "save_secret_handle",
     "read_file",
     "read_pdf",
@@ -285,3 +286,5 @@ __all__ = [
     "_RUNTIME_TOOL_PACKAGES",
     "_runtime_tools_ready",
 ]
+
+from aero.toolbox.user_input import request_user_input  # noqa: F401

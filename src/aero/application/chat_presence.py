@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -13,17 +14,23 @@ import httpx
 
 from aero.application.chat_images import ImagePublisher, describe_images
 from aero.application.conversation_history import sync_error_reason, visible_history
+from aero.application.remote_secret import SecretKey, associated_data
 from aero.core.official_account import (
     OfficialAccountError,
     OfficialAccountSession,
     OfficialLoginRequiredError,
 )
+from aero.toolbox.secret_input import SecretInputRequest, get_credential_spec
 
 
 class ChatPresence:
     def __init__(
-        self, *, session_id: Callable[[], str], title: Callable[[], str],
-        on_title: Callable[[str], None], on_command: Callable[[str], Awaitable[str]],
+        self,
+        *,
+        session_id: Callable[[], str],
+        title: Callable[[], str],
+        on_title: Callable[[str], None],
+        on_command: Callable[[str], Awaitable[str]],
         on_login_required: Callable[[], Awaitable[None]],
         on_quota_full: Callable[[], None],
         on_sync_error: Callable[[str], None] | None = None,
@@ -66,6 +73,7 @@ class ChatPresence:
         self._blocked_session_id = ""
         self._http = httpx.AsyncClient(base_url=self.session.base_url, timeout=35)
         self._command_task: asyncio.Task | None = None
+        self._active_command_id: str | None = None
 
     async def close(self) -> None:
         self._running = False
@@ -114,16 +122,19 @@ class ChatPresence:
                     context = self.export_context() or {}
                     has_user_message = any(
                         item.get("type") == "user_message" for item in self._pending_messages
-                    ) or any(
-                        item.get("role") == "user" for item in context.get("messages", [])
-                    )
+                    ) or any(item.get("role") == "user" for item in context.get("messages", []))
                     if not has_user_message:
                         # Opening an empty TUI session must not create a cloud conversation.
                         await asyncio.sleep(1)
                         continue
-                    response = await self.session.request("POST", "/v1/agents/chats", json={
-                        "session_id": current, "title": self.title(),
-                    })
+                    response = await self.session.request(
+                        "POST",
+                        "/v1/agents/chats",
+                        json={
+                            "session_id": current,
+                            "title": self.title(),
+                        },
+                    )
                     if response.status_code == 409:
                         detail = str(response.json().get("detail") or "")
                         if "并发" not in detail:
@@ -136,7 +147,9 @@ class ChatPresence:
                     self._context_version = int(data.get("context_version") or 0)
                     self._context_hash = ""
                     session_key = hashlib.sha256(current.encode()).hexdigest()
-                    self._pending_path = Path.home() / ".aero" / "context-events" / f"{session_key}.json"
+                    self._pending_path = (
+                        Path.home() / ".aero" / "context-events" / f"{session_key}.json"
+                    )
                     self._load_pending()
                     self._select_message_queue(current)
                     self.context_sync_enabled = bool(data.get("context_sync_enabled"))
@@ -146,7 +159,8 @@ class ChatPresence:
                     continue
                 self._active_session_id = current
                 heartbeat = await self.session.request(
-                    "POST", f"/v1/agents/{self.agent_id}/chat-heartbeat",
+                    "POST",
+                    f"/v1/agents/{self.agent_id}/chat-heartbeat",
                     json={"title": self.title()},
                 )
                 if heartbeat.status_code == 404:
@@ -164,15 +178,20 @@ class ChatPresence:
                 data = heartbeat.json()
                 was_enabled = self.context_sync_enabled
                 self.context_sync_enabled = bool(data.get("context_sync_enabled"))
-                if (self._sync_blocked_version is not None
-                        and int(data.get("context_version") or 0) != self._sync_blocked_version):
+                if (
+                    self._sync_blocked_version is not None
+                    and int(data.get("context_version") or 0) != self._sync_blocked_version
+                ):
                     self._sync_blocked_version = None
                 if not was_enabled and self.context_sync_enabled:
                     self._context_version = int(data.get("context_version") or 0)
                 if self.context_sync_enabled and not was_enabled:
                     self._context_hash = ""
                     await self._restore_context()
-                if data.get("title_source") == "manual" and data.get("display_name") != self.title():
+                if (
+                    data.get("title_source") == "manual"
+                    and data.get("display_name") != self.title()
+                ):
                     self.on_title(data["display_name"])
                 manual_request_id = str(data.get("manual_sync_request_id") or "")
                 if self.is_idle() and (manual_request_id or self._sync_blocked_version is None):
@@ -227,24 +246,25 @@ class ChatPresence:
                 return
             response = await self._http.post(
                 f"/v1/agents/{self.agent_id}/history",
-                json={"manual_request_id": manual_request_id,
-                      "messages": visible_history(payload)},
+                json={"manual_request_id": manual_request_id, "messages": visible_history(payload)},
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=120,
             )
             if response.status_code >= 400:
                 await self._fail_manual_sync(
-                    manual_request_id, sync_error_reason(
-                        response, "聊天记录同步失败，请确认 Relay 和客户端均已更新"
-                    )
+                    manual_request_id,
+                    sync_error_reason(response, "聊天记录同步失败，请确认 Relay 和客户端均已更新"),
                 )
                 return
         while self._pending_compactions:
             event = self._pending_compactions[0]
             response = await self._http.post(
                 f"/v1/agents/{self.agent_id}/context/compact",
-                json={**event, "expected_version": self._context_version,
-                      "manual_request_id": manual_request_id},
+                json={
+                    **event,
+                    "expected_version": self._context_version,
+                    "manual_request_id": manual_request_id,
+                },
                 headers={"Authorization": f"Bearer {self.token}"},
             )
             if response.status_code == 409:
@@ -267,11 +287,17 @@ class ChatPresence:
             if manual_request_id:
                 await self._fail_manual_sync(manual_request_id, "本地尚无可同步的会话")
             return
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
         response = await self._http.put(
             f"/v1/agents/{self.agent_id}/context",
-            json={"context": payload, "expected_version": self._context_version,
-                  "manual_request_id": manual_request_id, "reconcile": True},
+            json={
+                "context": payload,
+                "expected_version": self._context_version,
+                "manual_request_id": manual_request_id,
+                "reconcile": True,
+            },
             headers={"Authorization": f"Bearer {self.token}"},
         )
         if response.status_code == 409:
@@ -307,7 +333,8 @@ class ChatPresence:
         if not self.agent_id:
             return False
         response = await self.session.request(
-            "PATCH", f"/v1/agents/{self.agent_id}/context-sync",
+            "PATCH",
+            f"/v1/agents/{self.agent_id}/context-sync",
             json={"enabled": enabled},
         )
         response.raise_for_status()
@@ -323,10 +350,13 @@ class ChatPresence:
         if self._pending_path != target:
             self._pending_path = target
             self._load_pending()
-        self._pending_compactions.append({
-            "event_id": uuid.uuid4().hex,
-            "before": before, "after": after,
-        })
+        self._pending_compactions.append(
+            {
+                "event_id": uuid.uuid4().hex,
+                "before": before,
+                "after": after,
+            }
+        )
         self._save_pending()
 
     def _load_pending(self) -> None:
@@ -341,6 +371,7 @@ class ChatPresence:
         if self._pending_path is None:
             return
         from aero.core.daemon import private_write
+
         self._pending_path.parent.mkdir(parents=True, exist_ok=True)
         private_write(self._pending_path, json.dumps(self._pending_compactions, ensure_ascii=False))
 
@@ -365,24 +396,31 @@ class ChatPresence:
         if self._messages_path is None:
             return
         from aero.core.daemon import private_write
+
         self._messages_path.parent.mkdir(parents=True, exist_ok=True)
         private_write(self._messages_path, json.dumps(self._pending_messages, ensure_ascii=False))
 
-    def queue_local_message(
-        self, role: str, content: str, *, local_turn_id: str = ""
-    ) -> str:
-        if (role not in {"user", "assistant", "summary"} or not content.strip()
-                or not self.session.data.is_logged_in or not self.session.data.user_id):
+    def queue_local_message(self, role: str, content: str, *, local_turn_id: str = "") -> str:
+        if (
+            role not in {"user", "assistant", "summary"}
+            or not content.strip()
+            or not self.session.data.is_logged_in
+            or not self.session.data.user_id
+        ):
             return ""
         current = self.session_id()
         appended = False
         try:
             self._select_message_queue(current)
-            self._pending_messages.append({
-                "type": {"user": "user_message", "assistant": "message", "summary": "summary"}[role],
-                "content": content,
-                "client_event_id": uuid.uuid4().hex,
-            })
+            self._pending_messages.append(
+                {
+                    "type": {"user": "user_message", "assistant": "message", "summary": "summary"}[
+                        role
+                    ],
+                    "content": content,
+                    "client_event_id": uuid.uuid4().hex,
+                }
+            )
             appended = True
             event = self._pending_messages[-1]
             if role == "user":
@@ -405,8 +443,12 @@ class ChatPresence:
     def finish_local_turn(self, local_turn_id: str, status: str) -> None:
         if not local_turn_id:
             return
-        event = {"type": "local_turn_status", "local_turn_id": local_turn_id,
-                 "status": status, "client_event_id": uuid.uuid4().hex}
+        event = {
+            "type": "local_turn_status",
+            "local_turn_id": local_turn_id,
+            "status": status,
+            "client_event_id": uuid.uuid4().hex,
+        }
         self._pending_messages.append(event)
         try:
             self._save_messages()
@@ -434,7 +476,9 @@ class ChatPresence:
                 if response.status_code >= 400:
                     if response.status_code not in {401, 410} and not self._message_error_reported:
                         self._message_error_reported = True
-                        self.on_sync_error("客户端会话消息未能同步到网页，请检查 Relay 版本或连接。")
+                        self.on_sync_error(
+                            "客户端会话消息未能同步到网页，请检查 Relay 版本或连接。"
+                        )
                     return
                 self._message_error_reported = False
                 if path != self._messages_path or not self._pending_messages:
@@ -489,33 +533,192 @@ class ChatPresence:
 
     async def _execute_command(self, command: dict) -> None:
         command_id = command["command_id"]
+        self._active_command_id = command_id
         headers = {"Authorization": f"Bearer {self.token}"}
         renewer: asyncio.Task | None = None
         try:
             await self._http.post(
                 f"/v1/agents/{self.agent_id}/commands/{command_id}/status",
-                json={"status": "running"}, headers=headers,
+                json={"status": "running"},
+                headers=headers,
             )
             renewer = asyncio.create_task(self._renew_command(command_id, headers))
             answer = await self.on_command(str(command.get("content") or ""))
             event_id = uuid.uuid4().hex
             response = await self._http.post(
                 f"/v1/agents/{self.agent_id}/events",
-                json={"type": "message", "content": answer or "已执行。",
-                      "in_reply_to": command_id, "client_event_id": event_id,
-                      "images": self._images_for(answer or "", event_id)},
+                json={
+                    "type": "message",
+                    "content": answer or "已执行。",
+                    "in_reply_to": command_id,
+                    "client_event_id": event_id,
+                    "images": self._images_for(answer or "", event_id),
+                },
                 headers=headers,
             )
             response.raise_for_status()
         except Exception:
             await self._http.post(
                 f"/v1/agents/{self.agent_id}/commands/{command_id}/status",
-                json={"status": "failed"}, headers=headers,
+                json={"status": "failed"},
+                headers=headers,
             )
         finally:
+            self._active_command_id = None
             if renewer is not None:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
+
+    async def request_user_input(self, description: dict) -> dict:
+        from aero.application.remote_input import request_remote_input
+
+        command_id, agent_id, token = self._active_command_id, self.agent_id, self.token
+        if not command_id or not agent_id or not token:
+            return {"status": "unavailable"}
+
+        async def send(endpoint, **kwargs):
+            if (
+                not self._running
+                or self._active_command_id != command_id
+                or self.agent_id != agent_id
+                or self.token != token
+            ):
+                raise RuntimeError("input_request_invalidated")
+            response = await self._http.post(
+                f"/v1/agents/{agent_id}/commands/{command_id}/{endpoint}",
+                headers={"Authorization": f"Bearer {token}"},
+                **kwargs,
+            )
+            response.raise_for_status()
+            return response.json()
+
+        return await request_remote_input(send, description)
+
+    async def request_approval(self, payload: dict) -> str:
+        command_id = self._active_command_id
+        if not command_id:
+            return "deny"
+        request_id = uuid.uuid4().hex
+        headers = {"Authorization": f"Bearer {self.token}"}
+        base = f"/v1/agents/{self.agent_id}/commands/{command_id}/approvals"
+        response = await self._http.post(
+            base, headers=headers, json={"request_id": request_id, "payload": payload}
+        )
+        response.raise_for_status()
+        while self._running and self._active_command_id == command_id:
+            response = await self._http.get(base, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            if result.get("cancel_requested") or result.get("status") in {
+                "canceled",
+                "interrupted",
+                "failed",
+            }:
+                raise asyncio.CancelledError()
+            for row in result.get("approvals", []):
+                if row.get("request_id") == request_id and row.get("status") in {
+                    "approved",
+                    "denied",
+                    "canceled",
+                }:
+                    return "allow" if row["status"] == "approved" else "deny"
+            await asyncio.sleep(1)
+        return "deny"
+
+    async def request_secret_input(self, request: SecretInputRequest) -> dict:
+        """Web-origin TUI runs use the encrypted inbox, never a terminal popup."""
+        command_id = self._active_command_id
+        agent_id, token = self.agent_id, self.token
+        spec = get_credential_spec(request.scope)
+        if not command_id or not agent_id or spec is None:
+            return {"status": "unavailable", "message": "网页安全配置请求不可用，请重试任务。"}
+        description = {
+            "scope": spec.scope,
+            "title": spec.title,
+            "instructions": spec.instructions,
+            "multiline": spec.multiline,
+        }
+        while self._running:
+            request_id = uuid.uuid4().hex
+            key = SecretKey()
+            deadline = time.monotonic() + 900
+            path = f"commands/{command_id}/secrets/{request_id}"
+
+            async def send(endpoint: str, **kwargs) -> dict:
+                while self._running and time.monotonic() < deadline:
+                    if (
+                        self.agent_id != agent_id
+                        or self.token != token
+                        or self._active_command_id != command_id
+                    ):
+                        raise RuntimeError("credential_agent_changed")
+                    try:
+                        response = await self._http.post(
+                            f"/v1/agents/{agent_id}/{endpoint}",
+                            headers={"Authorization": f"Bearer {token}"},
+                            **kwargs,
+                        )
+                        response.raise_for_status()
+                        return response.json()
+                    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                        if (
+                            isinstance(exc, httpx.HTTPStatusError)
+                            and exc.response.status_code < 500
+                        ):
+                            raise
+                        await asyncio.sleep(1)
+                raise TimeoutError("credential_request_expired")
+
+            try:
+                await send(
+                    f"commands/{command_id}/secrets",
+                    json={
+                        "request_id": request_id,
+                        "public_key": key.public_key,
+                        "description": description,
+                    },
+                )
+                while self._running and time.monotonic() < deadline:
+                    result = await send(f"{path}/claim")
+                    status = result["request"]["status"]
+                    if result.get("cancel_requested") or status in {"canceled", "expired"}:
+                        return {"status": "cancelled", "scope": spec.scope}
+                    envelope = result.get("envelope")
+                    if not envelope:
+                        await asyncio.sleep(1)
+                        continue
+                    saved = None
+                    secret = None
+                    try:
+                        secret = key.decrypt(
+                            envelope, associated_data(agent_id, command_id, request_id)
+                        )
+                    except Exception:
+                        pass
+                    await send(f"{path}/ack")
+                    if secret is not None:
+                        try:
+                            saved = spec.consumer(secret)
+                        except Exception:
+                            pass  # Never expose submitted text through exceptions.
+                    secret = None
+                    envelope = None
+                    success = isinstance(saved, dict) and saved.get("status") == "success"
+                    await send(
+                        f"{path}/result", json={"status": "success" if success else "failed"}
+                    )
+                    if success:
+                        return {"status": "saved", "scope": spec.scope, "result": saved}
+                    break  # Keep original model/tool call waiting; new request allows re-entry.
+                else:
+                    return {"status": "cancelled", "scope": spec.scope}
+            except (httpx.HTTPError, RuntimeError, TimeoutError):
+                return {
+                    "status": "unavailable",
+                    "scope": spec.scope,
+                    "message": "网页安全配置连接已中断或请求已失效，请重新发起配置。",
+                }
+        return {"status": "cancelled", "scope": spec.scope}
 
     def _images_for(self, content: str, event_id: str) -> list[dict]:
         publisher = getattr(self, "_image_publisher", None)
@@ -530,8 +733,10 @@ class ChatPresence:
         if not self.agent_id:
             raise RuntimeError("chat_offline")
         response = await self._http.request(
-            method, f"/v1/agents/{self.agent_id}/{path}",
-            headers={"Authorization": f"Bearer {self.token}"}, **kwargs,
+            method,
+            f"/v1/agents/{self.agent_id}/{path}",
+            headers={"Authorization": f"Bearer {self.token}"},
+            **kwargs,
         )
         response.raise_for_status()
         return response.json()
@@ -551,6 +756,7 @@ class ChatPresence:
             await asyncio.sleep(30)
             response = await self._http.post(
                 f"/v1/agents/{self.agent_id}/commands/{command_id}/status",
-                json={"status": "running"}, headers=headers,
+                json={"status": "running"},
+                headers=headers,
             )
             response.raise_for_status()

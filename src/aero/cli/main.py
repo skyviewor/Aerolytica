@@ -42,11 +42,14 @@ from textual.screen import ModalScreen
 from textual.scrollbar import ScrollBarRender
 from textual.widgets import (
     Button,
+    Checkbox,
     Input,
     ListItem,
     ListView,
     Markdown,
     OptionList,
+    Select,
+    SelectionList,
     Static,
     TextArea,
 )
@@ -77,6 +80,7 @@ from aero.agent.subagent import (
     use_subagent_launcher,
     use_subagent_status_provider,
 )
+from aero.application.request_origin import current_origin, use_request_origin
 from aero.application.session_titles import (
     has_successful_first_exchange,
 )
@@ -122,12 +126,14 @@ from aero.data.pricing import TokenTracker, context_window_for, format_cost, for
 from aero.i18n import is_supported_language, language_label, language_options, t
 from aero.paper_export import PaperExportError, export_paper
 from aero.paper_versions import PaperVersionManager
+from aero.toolbox.approval_input import use_approval_provider
 from aero.toolbox.paths import use_workspace
 from aero.toolbox.secret_input import (
     SecretInputRequest,
     get_credential_spec,
     use_secret_input_provider,
 )
+from aero.toolbox.user_input import use_user_input_provider
 
 DEEPSEEK_MODEL_ALIASES = {
     "flash": "deepseek-v4-flash",
@@ -737,6 +743,99 @@ class SecretInputScreen(ModalScreen[str | None]):
             self.action_submit()
         else:
             self.action_cancel()
+
+
+class UserInputScreen(ModalScreen[dict | None]):
+    """Local parameter form with validation before dismissing."""
+
+    CSS = """
+    UserInputScreen { align: center middle; }
+    #user-form {
+        width: 80%; max-width: 100; height: auto; max-height: 85%;
+        padding: 1 2; background: $surface;
+    }
+    #user-form TextArea { height: 6; }
+    #user-form SelectionList { height: auto; max-height: 8; }
+    #user-form-error { color: $error; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "取消", priority=True),
+        Binding("tab", "focus_next", show=False, priority=True),
+        Binding("shift+tab", "focus_previous", show=False, priority=True),
+    ]
+
+    def __init__(self, description: dict):
+        super().__init__()
+        self.description = description
+
+    def compose(self) -> ComposeResult:
+        from textual.containers import VerticalScroll
+
+        with VerticalScroll(id="user-form"):
+            yield Static(self.description["title"])
+            yield Static(self.description.get("instructions", ""))
+            for index, field in enumerate(self.description["fields"]):
+                yield Static(field.get("label", field["name"]))
+                if field.get("description"):
+                    yield Static(field["description"])
+                widget_id = f"user-field-{index}"
+                kind = field["type"]
+                if kind == "multiline":
+                    yield TextArea(id=widget_id)
+                elif kind == "boolean":
+                    yield Checkbox("是", id=widget_id)
+                elif kind == "single_choice":
+                    yield Select(
+                        [(option, option) for option in field["options"]], id=widget_id
+                    )
+                elif kind == "multiple_choice":
+                    yield SelectionList(
+                        *[(option, option) for option in field["options"]], id=widget_id
+                    )
+                else:
+                    yield Input(id=widget_id, type="number" if kind == "number" else "text")
+            yield Static("", id="user-form-error")
+            with Horizontal():
+                yield Button("提交", id="user-form-submit", variant="primary")
+                yield Button("取消任务", id="user-form-cancel")
+
+    def action_focus_next(self) -> None:
+        self.focus_next()
+
+    def action_focus_previous(self) -> None:
+        self.focus_previous()
+
+    @on(Button.Pressed, "#user-form-submit")
+    def submit(self) -> None:
+        from aero.toolbox.user_input import validate_values
+
+        values = {}
+        try:
+            for index, field in enumerate(self.description["fields"]):
+                widget = self.query_one(f"#user-field-{index}")
+                if field["type"] == "multiline":
+                    value = widget.text
+                elif field["type"] == "multiple_choice":
+                    value = list(widget.selected)
+                else:
+                    value = widget.value
+                if field["type"] == "single_choice" and value is Select.BLANK:
+                    value = None
+                if field["type"] == "number" and value:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        raise ValueError(f"{field.get('label', field['name'])}需要填写数字") from None
+                values[field["name"]] = value
+            self.dismiss(validate_values(self.description, values))
+        except ValueError as exc:
+            self.query_one("#user-form-error", Static).update(str(exc))
+        except TypeError:
+            self.query_one("#user-form-error", Static).update("请检查字段类型。")
+
+    @on(Button.Pressed, "#user-form-cancel")
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class OfficialLoginScreen(ModalScreen[dict[str, str] | None]):
@@ -1788,7 +1887,7 @@ class AeroApp(App):
         self._chat_log: list[str] = []
         self._pending_llm_setup: dict | None = None
         self._pending_credential_scope: str | None = None
-        self._secret_handles: dict[str, str] = {}
+        self._secret_handles: dict[str, str | dict] = {}
         self._filtered_commands: list[tuple[str, str]] = []
         self._cmd_list: ListView | None = None
         self._model_info: Static | None = None
@@ -2606,14 +2705,15 @@ class AeroApp(App):
         self._set_footer_status(f"云端已重命名当前智能体：{title}")
 
     async def _run_cloud_chat_command(self, content: str) -> str:
-        while self._agent_worker is not None and self._agent_worker.is_running:
-            await asyncio.sleep(0.2)
-        self._last_reply_text = ""
-        await self._process(content, from_cloud=True)
-        worker = self._agent_worker
-        if worker is not None:
-            await worker.wait()
-        return self._last_reply_text or "指令已处理。"
+        with use_request_origin("web"):
+            while self._agent_worker is not None and self._agent_worker.is_running:
+                await asyncio.sleep(0.2)
+            self._last_reply_text = ""
+            await self._process(content, from_cloud=True)
+            worker = self._agent_worker
+            if worker is not None:
+                await worker.wait()
+            return self._last_reply_text or "指令已处理。"
 
     def _save_session_on_exit(self) -> None:
         if self._session_saved_on_exit:
@@ -6624,12 +6724,16 @@ class AeroApp(App):
                 return state.background_task is not None
 
             with (
+                use_request_origin("web" if from_cloud else "client"),
+                use_user_input_provider(self._request_user_input),
+                use_approval_provider(self._request_approval),
                 use_workspace(self._project_dir, workspace),
                 use_subagent_launcher(self._launch_sub_agent_from_tool),
                 use_subagent_status_provider(self._query_sub_agents_from_tool),
                 use_subagent_canceller(self._cancel_sub_agent_from_tool),
                 use_secret_input_provider(
-                    self._request_secret_input, self._take_secret_handle
+                    self._request_cloud_secret_input if from_cloud else self._request_secret_input,
+                    self._take_secret_handle,
                 ),
                 use_checkpoint_creator(
                     lambda name: self._create_checkpoint(name=name, kind="agent")
@@ -7026,6 +7130,42 @@ class AeroApp(App):
         finally:
             self.screen.remove_class("confirming")
 
+    async def _request_approval(self, payload: dict) -> str:
+        if current_origin() == "web":
+            if self._chat_presence is None:
+                return "deny"
+            return await self._chat_presence.request_approval(payload)
+        return await self._show_confirm_dialog(json.dumps(payload, ensure_ascii=False))
+
+    async def _request_user_input(self, description: dict) -> dict:
+        if current_origin() == "web":
+            if self._chat_presence is None:
+                return {"status": "unavailable"}
+            result = await self._chat_presence.request_user_input(description)
+        else:
+            values = await self.push_screen_wait(UserInputScreen(description))
+            result = (
+                {"status": "submitted", "values": values}
+                if values is not None else {"status": "canceled"}
+            )
+        if result["status"] != "submitted":
+            raise asyncio.CancelledError()
+        return result
+
+    async def _request_cloud_secret_input(self, request: SecretInputRequest) -> dict:
+        """Web-origin tasks always wait for web entry, regardless of a visible TUI."""
+        if self._chat_presence is None:
+            return {"status": "unavailable", "message": "网页安全配置连接不可用。"}
+        result = await self._chat_presence.request_secret_input(request)
+        if result.get("status") in {"canceled", "cancelled", "expired"}:
+            raise asyncio.CancelledError()
+        if result.get("status") != "saved":
+            return result
+        handle = secrets.token_urlsafe(24)
+        self._secret_handles[handle] = {"scope": result["scope"], "result": result["result"]}
+        return {"status": "submitted", "scope": result["scope"], "secret_handle": handle,
+                "message": "凭据已在当前 Agent 电脑保存；请通过句柄取得保存结果并继续任务。"}
+
     async def _request_secret_input(self, request: SecretInputRequest) -> dict:
         value = await self.push_screen_wait(SecretInputScreen(request))
         if value is None:
@@ -7039,12 +7179,12 @@ class AeroApp(App):
             "message": "已收到本地凭据；请用 secret_handle 调用对应保存工具。",
         }
 
-    def _take_secret_handle(self, handle: str) -> str | None:
+    def _take_secret_handle(self, handle: str) -> str | dict | None:
         return self._secret_handles.pop(handle, None)
 
     async def _handle_confirm(self, content: str) -> None:
         tool_name = str(json.loads(content).get("tool", ""))
-        choice = await self._show_confirm_dialog(content)
+        choice = await self._request_approval(json.loads(content))
         debug_log("tui.confirm_dialog_closed", choice=choice)
         choice = _normalize_confirm_choice(choice)
         if choice in {"approve", "allow", "always"}:

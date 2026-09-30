@@ -474,6 +474,9 @@ class LLMClient:
         tools: list[dict] | None = None,
         stream: bool = False,
     ) -> dict:
+        from aero.application.request_origin import messages_for_origin
+
+        messages = messages_for_origin(messages)
         body = {
             "model": self.config.model,
             "messages": [self._format_msg(m) for m in messages],

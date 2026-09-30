@@ -39,6 +39,7 @@ from aero.data.pricing import context_window_for
 from aero.toolbox.file_access import use_read_files
 from aero.toolbox.paths import use_workspace
 from aero.toolbox.secret_input import get_credential_spec, use_secret_input_provider
+from aero.toolbox.user_input import use_user_input_provider, validate_values
 
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_.-]{6,}\b", re.IGNORECASE)
 _EVENT_BUFFER_SIZE = 2_000
@@ -85,6 +86,7 @@ class LocalSession:
         self._run_errors: dict[str, str] = {}
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
         self._title_pending: dict[str, bool] = {}
+        self._pending_inputs: dict[str, tuple[dict, asyncio.Future]] = {}
         self._pending_secrets: dict[str, asyncio.Future[str]] = {}
         self._secret_values: dict[str, str | dict] = {}
         self._session_meta = SessionMeta(
@@ -313,7 +315,7 @@ class LocalSession:
             "last_event_id": self._event_counters.get(run_id, 0),
         }
 
-    def start_run(self, prompt: str) -> str:
+    def start_run(self, prompt: str, *, origin: str = "client") -> str:
         if any(
             state
             in {
@@ -331,7 +333,10 @@ class LocalSession:
         self._emit(
             run_id, "run_started", {"state": RunState.QUEUED.value, "prompt": _safe_text(prompt)}
         )
-        task = asyncio.create_task(self._run(run_id, prompt))
+        from aero.application.request_origin import use_request_origin
+
+        with use_request_origin(origin):
+            task = asyncio.create_task(self._run(run_id, prompt))
         self._run_tasks[run_id] = task
         return run_id
 
@@ -402,6 +407,7 @@ class LocalSession:
                 stack.enter_context(
                     use_secret_input_provider(self._request_secret, self._resolve_secret)
                 )
+                stack.enter_context(use_user_input_provider(self._request_user_input))
                 stack.enter_context(use_checkpoint_creator(self._create_checkpoint))
                 response_text = ""
                 try:
@@ -600,6 +606,29 @@ class LocalSession:
         self.agent.cancel()
         task.cancel()
         self._emit(run_id, "run_state", {"state": RunState.CANCELLING.value})
+
+    async def _request_user_input(self, description: dict) -> dict:
+        request_id = secrets.token_urlsafe(12)
+        future = asyncio.get_running_loop().create_future()
+        self._pending_inputs[request_id] = (description, future)
+        self._emit_for_active_run(
+            "input_required", {"request_id": request_id, "description": description}
+        )
+        try:
+            return await future
+        finally:
+            self._pending_inputs.pop(request_id, None)
+
+    def submit_user_input(self, request_id: str, result: dict) -> None:
+        description, future = self._pending_inputs[request_id]
+        if result.get("status") == "submitted":
+            validate_values(description, result["values"])
+        if not future.done():
+            future.set_result(result)
+        for run_id, state in self._run_states.items():
+            if state == RunState.WAITING_SECRET:
+                self._run_states[run_id] = RunState.RUNNING
+                self._emit(run_id, "run_state", {"state": RunState.RUNNING.value})
 
     async def _request_secret(self, request: Any) -> dict[str, Any]:
         request_id = secrets.token_urlsafe(12)

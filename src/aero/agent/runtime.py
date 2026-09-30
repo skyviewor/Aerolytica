@@ -94,7 +94,40 @@ class Runtime:
 
                 result = await self.search_budget.execute(args, "", search)
                 return ExecutionResult(success=True, result=result)
-            return await self._execute(tool_func, args)
+            result = await self._execute(tool_func, args)
+            from aero.application.request_origin import current_origin
+            from aero.toolbox.secret_input import (
+                SecretInputRequest,
+                get_credential_spec,
+                request_secret_input_from_context,
+                save_secret_from_context,
+            )
+
+            payload = result.result if isinstance(result.result, dict) else {}
+            scope = payload.get("setup_required")
+            spec = get_credential_spec(scope) if isinstance(scope, str) else None
+            # Known missing-credential tools return before attempting any external action.
+            # Resume that same tool once after saving, without rerunning the user task.
+            if current_origin() == "web" and result.success and spec is not None:
+                response = await request_secret_input_from_context(
+                    SecretInputRequest(scope, spec.title, spec.instructions, spec.multiline)
+                )
+                handle = response.get("secret_handle")
+                if not handle:
+                    if response.get("status") in {"canceled", "cancelled", "expired"}:
+                        raise asyncio.CancelledError()
+                    return ExecutionResult(
+                        success=True,
+                        result={
+                            "status": "error",
+                            "message": "网页安全输入入口不可用，原任务未重新提交。",
+                        },
+                    )
+                saved = save_secret_from_context(scope, handle)
+                if saved.get("status") in {"success", "saved", "ready"}:
+                    return await self._execute(tool_func, args)
+                return ExecutionResult(success=True, result=saved)
+            return result
 
     async def _execute(self, tool_func, args: dict) -> ExecutionResult:
         try:
