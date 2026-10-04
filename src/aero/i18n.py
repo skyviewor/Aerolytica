@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from aero.version import get_version
+
 _ZH = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
     "app.ready": "就绪 ↑/↓ 滚动 PageUp/PageDown 翻页 /copy 复制回复 /quit 退出 /clear 清屏",
     "app.thinking": "思考中",
     "app.interrupted": "已中断当前对话",
@@ -17,7 +19,8 @@ _ZH = {
     "app.no_agent_running": "当前没有正在运行的对话",
     "preview.none": "[dim]当前没有可预览的图片。[/dim]",
     "preview.list_title": "[bold cyan]可预览图片[/bold cyan]",
-    "preview.not_found": "[warning]没有找到可预览的图片。用法: /preview、/preview 1 或 /preview data/foo.png[/warning]",
+    "preview.not_found": "[warning]没有找到可预览的图片。用法: /preview、/preview 1 或"
+    " /preview data/foo.png[/warning]",
     "preview.open_failed": "[error]打开图片失败: {error}[/error]",
     "preview.opened": "[dim]已打开图片: {path}[/dim]",
     "app.model_switched": "模型已切换为 {provider}/{model}",
@@ -37,23 +40,19 @@ _ZH = {
     "app.language_en": "English",
     "app.language_select_title": "选择语言 / Select Language",
     "app.theme_select_title": "选择主题",
-
     "app.footer": "Enter 发送   Shift+Enter/^j 换行   ^q 退出   ^s 保存日志   ^y 复制回复",
-
     "app.input_placeholder": (
-        "输入消息 Enter 发送 /copy 复制回复，"
-        "↑/↓ 滚动，/quit 退出 /clear 清屏"
+        "输入消息 Enter 发送 /copy 复制回复，↑/↓ 滚动，/quit 退出 /clear 清屏"
     ),
     "app.startup_tip": "[dim]输入问题开始对话，/model 切换模型，/variants 调整强度[/dim]",
     "app.model_line": "模型: {provider}/{model}",
     "app.effort_line": "    强度: {effort}",
     "app.vision_line": "    视觉：{model} {provider}",
-
     "label.user": "你",
     "label.agent": "Aero",
     "label.unknown": "未知",
-
-    "error.usage_set": "[error]用法: /set max_tool_rounds 20 或 /set model flash 或 /set variants high[/error]",
+    "error.usage_set": "[error]用法: /set max_tool_rounds 20 或 /set mod"
+    "el flash 或 /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]用法: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds 必须是整数[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds 必须 >= 1[/error]",
@@ -62,16 +61,13 @@ _ZH = {
     "error.theme_unknown": "[error]未知主题。可选: {options}[/error]",
     "error.agent_init": "[error]Agent 未初始化: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} 不在「一直允许」列表中[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds 已设置为 {value}[/dim]",
     "info.always_allow_none": "[dim]当前没有「一直允许」的工具[/dim]",
     "info.always_allow_list": "[dim]一直允许的工具: {tools}[/dim]",
     "info.always_allow_hint": "[dim]用法: /revoke <tool_name> 撤销[/dim]",
     "info.always_allow_revoked": "[dim]已撤销 {tool} 的「一直允许」[/dim]",
-
     "select.hint": "↑/↓ 选择    Enter 确认",
     "select.session_hint": "↑/↓ 选择    Enter 加载    Backspace/Delete 删除",
-
     "confirm.title": "⚠️  危险操作确认",
     "confirm.allow": "允许",
     "confirm.always": "一直允许",
@@ -110,7 +106,6 @@ _ZH = {
     "confirm.batch_delete_title": "批量删除文件",
     "confirm.delete_file_title": "删除文件",
     "confirm.irreversible_short": "此操作不可撤销。",
-
     "bind.quit": "退出",
     "bind.save_log": "保存日志",
     "bind.copy_reply": "复制回复",
@@ -118,12 +113,10 @@ _ZH = {
     "bind.focus_prev": "左移",
     "bind.focus_next": "右移",
     "bind.close": "关闭",
-
     "log.panel_title": "[bold cyan]处理进度[/bold cyan]",
     "log.panel_title_plain": "处理进度",
     "log.collapsed_done": "[dim]处理进度已收起：{total} 条，任务已完成[/dim]",
     "log.collapsed_last": "[dim]处理进度已收起：{total} 条，最后：{last_line}[/dim]",
-
     "help.title": "[bold cyan]Aero 帮助[/bold cyan]",
     "help.shortcuts": "[bold]快捷键[/bold]",
     "help.shortcuts.updn": "  ↑/↓              滚动上/下",
@@ -140,19 +133,23 @@ _ZH = {
     "help.slash_new": "  /new [标题]         创建新会话；传标题则直接使用，否则首轮后自动命名",
     "help.slash_language": "  /language          选择语言, Agent 以设定语言回复",
     "help.slash_model": "  /model             查看/切换模型，如 /model flash 或 /model pro",
-    "help.slash_preview": "  /preview           打开最近图片；/preview list 查看图片列表；/preview 1 打开指定图片",
+    "help.slash_preview": "  /preview           打开最近图片；/preview list 查看图"
+    "片列表；/preview 1 打开指定图片",
     "help.slash_provider": "  /provider          查看/切换模型服务商，如 /provider kimi",
     "help.slash_theme": "  /theme             查看/切换界面主题，如 /theme dark 或 /theme dracula",
-    "help.slash_variants": "  /variants          查看/设置推理强度: low / medium / high / max / auto",
+    "help.slash_variants": "  /variants          查看/设置推理强度: low / medium "
+    "/ high / max / auto",
     "help.slash_vision": "  /vision            查看/切换视觉模型",
     "help.slash_bill": "  /bill              查看当前会话各项费用、金额与占比",
     "help.slash_mode": "  /mode              查看/切换运行模式: plan / execute / qa",
-    "help.slash_session": "  /session           打开历史会话选择器；Enter 加载，Backspace/Delete 删除",
+    "help.slash_session": "  /session           打开历史会话选择器；Enter 加载，Backs"
+    "pace/Delete 删除",
     "help.slash_session_rename": "  /session rename 标题  修改当前会话标题",
     "help.slash_checkpoint": "  /checkpoint [名称]  保存当前会话、文件和数据清单",
     "help.slash_checkpoint_delete": "  /checkpoint delete ID  确认后永久删除一个检查点",
     "help.slash_checkpoint_rename": "  /checkpoint rename ID 新名称  修改检查点名称",
-    "help.slash_checkpoints": "  /checkpoints        查看当前实验或主流程检查点；加 all 显示恢复保护记录",
+    "help.slash_checkpoints": "  /checkpoints        查看当前实验或主流程检查点；加 all 显示恢"
+    "复保护记录",
     "help.slash_checkpoints_clear": "  /checkpoints clear  确认后清理全部检查点",
     "help.slash_restore": "  /restore <ID>       预览差异并确认恢复",
     "help.slash_paper": "  /paper             管理一份 Markdown 论文正文的版本、差异和恢复",
@@ -165,9 +162,10 @@ _ZH = {
     "help.slash_set": "  /set max_tool_rounds N  设置最大工具调用轮次 (默认 999)",
     "help.slash_revoke": "  /revoke            查看「一直允许」的工具列表",
     "help.slash_revoke_item": "  /revoke <tool>     撤销某工具的「一直允许」",
-    "help.footer": "[dim]直接输入问题即可对话。底栏会显示上下文、缓存命中和费用；退出时会自动保存会话。[/dim]",
+    "help.footer": "[dim]直接输入问题即可对话。底栏会显示上下文、"
+    "缓存命中和费用；退出时会自动保存会话。["
+    "/dim]",
     "help.modal_hint": "Esc 关闭",
-
     "cmd.clear": "清除对话上下文",
     "cmd.copy": "复制上次回复到剪贴板",
     "cmd.help": "显示帮助信息",
@@ -219,8 +217,9 @@ _ZH = {
 }
 
 _EN = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "Ready  ↑/↓ scroll  PageUp/PageDown page  /copy copy reply  /quit exit  /clear clear",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "Ready  ↑/↓ scroll  PageUp/PageDown page  /cop"
+    "y copy reply  /quit exit  /clear clear",
     "app.thinking": "Thinking",
     "app.interrupted": "Interrupted current conversation",
     "app.interrupted.short": "Interrupted.",
@@ -233,7 +232,9 @@ _EN = {
     "app.no_agent_running": "No conversation currently running",
     "preview.none": "[dim]No images available to preview.[/dim]",
     "preview.list_title": "[bold cyan]Previewable images[/bold cyan]",
-    "preview.not_found": "[warning]No previewable image found. Usage: /preview, /preview 1, or /preview data/foo.png[/warning]",
+    "preview.not_found": "[warning]No previewable image found. Usage: /"
+    "preview, /preview 1, or /preview data/foo.png"
+    "[/warning]",
     "preview.open_failed": "[error]Failed to open image: {error}[/error]",
     "preview.opened": "[dim]Opened image: {path}[/dim]",
     "app.model_switched": "Model switched to {provider}/{model}",
@@ -253,41 +254,36 @@ _EN = {
     "app.language_en": "English",
     "app.language_select_title": "选择语言 / Select Language",
     "app.theme_select_title": "Select Theme",
-
     "app.footer": "Enter send  Shift+Enter/^j newline  ^q quit  ^s save log  ^y copy reply",
-
     "app.input_placeholder": (
-        "Type to chat  Enter send  /copy copy reply  "
-        "↑/↓ scroll  /quit exit  /clear clear"
+        "Type to chat  Enter send  /copy copy reply  ↑/↓ scroll  /quit exit  /clear clear"
     ),
-    "app.startup_tip": "[dim]Type a question to start, /model switch model, /variants adjust effort[/dim]",
+    "app.startup_tip": "[dim]Type a question to start, /model switch "
+    "model, /variants adjust effort[/dim]",
     "app.model_line": "Model: {provider}/{model}",
     "app.effort_line": "    Effort: {effort}",
     "app.vision_line": "    Vision: {model} {provider}",
-
     "label.user": "You",
     "label.agent": "Aero",
     "label.unknown": "Unknown",
-
-    "error.usage_set": "[error]Usage: /set max_tool_rounds 20 or /set model flash or /set variants high[/error]",
+    "error.usage_set": "[error]Usage: /set max_tool_rounds 20 or /set"
+    " model flash or /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]Usage: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds must be an integer[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds must be >= 1[/error]",
     "error.model_empty": "[error]Model name cannot be empty[/error]",
-    "error.effort_options": "[error]Reasoning effort options: low / medium / high / max / auto[/error]",
+    "error.effort_options": "[error]Reasoning effort options: low / medium"
+    " / high / max / auto[/error]",
     "error.theme_unknown": "[error]Unknown theme. Options: {options}[/error]",
     "error.agent_init": "[error]Agent not initialized: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} is not in the always-allow list[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds set to {value}[/dim]",
     "info.always_allow_none": "[dim]No always-allowed tools[/dim]",
     "info.always_allow_list": "[dim]Always-allowed tools: {tools}[/dim]",
     "info.always_allow_hint": "[dim]Usage: /revoke <tool_name> to revoke[/dim]",
     "info.always_allow_revoked": "[dim]Revoked always-allow for {tool}[/dim]",
-
     "select.hint": "↑/↓ select    Enter confirm",
     "select.session_hint": "↑/↓ select    Enter load    Backspace/Delete delete",
-
     "confirm.title": "⚠️  Dangerous operation",
     "confirm.allow": "Allow",
     "confirm.always": "Always",
@@ -326,7 +322,6 @@ _EN = {
     "confirm.batch_delete_title": "Batch delete files",
     "confirm.delete_file_title": "Delete file",
     "confirm.irreversible_short": "This operation is irreversible.",
-
     "bind.quit": "Quit",
     "bind.save_log": "Save Log",
     "bind.copy_reply": "Copy Reply",
@@ -334,12 +329,10 @@ _EN = {
     "bind.focus_prev": "Prev",
     "bind.focus_next": "Next",
     "bind.close": "Close",
-
     "log.panel_title": "[bold cyan]Progress[/bold cyan]",
     "log.panel_title_plain": "Progress",
     "log.collapsed_done": "[dim]Progress hidden: {total} entries, task completed[/dim]",
     "log.collapsed_last": "[dim]Progress hidden: {total} entries, last: {last_line}[/dim]",
-
     "help.title": "[bold cyan]Aero Help[/bold cyan]",
     "help.shortcuts": "[bold]Shortcuts[/bold]",
     "help.shortcuts.updn": "  ↑/↓              scroll up/down",
@@ -353,37 +346,52 @@ _EN = {
     "help.slash_clear": "  /clear             Clear conversation context",
     "help.slash_help": "  /help              Show this help",
     "help.slash_copy": "  /copy              Copy last reply to clipboard",
-    "help.slash_new": "  /new [TITLE]        Start a new session; title is optional and otherwise auto-generated",
+    "help.slash_new": "  /new [TITLE]        Start a new session; ti"
+    "tle is optional and otherwise auto-generated",
     "help.slash_language": "  /language          Select language, Agent replies in chosen language",
     "help.slash_model": "  /model             View/switch model, e.g. /model flash or /model pro",
-    "help.slash_preview": "  /preview           Open latest image; /preview list lists images; /preview 1 opens one",
+    "help.slash_preview": "  /preview           Open latest image; /prev"
+    "iew list lists images; /preview 1 opens one",
     "help.slash_provider": "  /provider          View/switch model provider, e.g. /provider kimi",
-    "help.slash_theme": "  /theme             View/switch UI theme, e.g. /theme dark or /theme dracula",
-    "help.slash_variants": "  /variants          View/set reasoning effort: low / medium / high / max / auto",
+    "help.slash_theme": "  /theme             View/switch UI theme, e."
+    "g. /theme dark or /theme dracula",
+    "help.slash_variants": "  /variants          View/set reasoning effor"
+    "t: low / medium / high / max / auto",
     "help.slash_vision": "  /vision            View/switch vision model",
     "help.slash_bill": "  /bill              Show session costs and percentage breakdown",
     "help.slash_mode": "  /mode              View/switch run mode: plan / execute / qa",
-    "help.slash_session": "  /session           Open saved sessions; Enter loads, Backspace/Delete deletes",
+    "help.slash_session": "  /session           Open saved sessions; Ent"
+    "er loads, Backspace/Delete deletes",
     "help.slash_session_rename": "  /session rename TITLE  Rename current session",
     "help.slash_checkpoint": "  /checkpoint [NAME] Save conversation, files, and data manifest",
-    "help.slash_checkpoint_delete": "  /checkpoint delete ID  Permanently delete a checkpoint after confirmation",
+    "help.slash_checkpoint_delete": "  /checkpoint delete ID  Permanently delete a"
+    " checkpoint after confirmation",
     "help.slash_checkpoint_rename": "  /checkpoint rename ID NEW_NAME  Rename a checkpoint",
-    "help.slash_checkpoints": "  /checkpoints        List checkpoints in the active experiment or main flow; add all for recovery records",
-    "help.slash_checkpoints_clear": "  /checkpoints clear  Clear every checkpoint after confirmation",
+    "help.slash_checkpoints": "  /checkpoints        List checkpoints in the"
+    " active experiment or main flow; add all for "
+    "recovery records",
+    "help.slash_checkpoints_clear": "  /checkpoints clear  Clear every checkpoint "
+    "after confirmation",
     "help.slash_restore": "  /restore <ID>       Preview changes and restore after confirmation",
-    "help.slash_paper": "  /paper             Manage versions, diffs, and restore for one Markdown paper",
-    "help.slash_experiment": "  /experiment new NAME  Create and enter an isolated experiment workspace",
-    "help.slash_experiment_delete": "  /experiment delete ID  Permanently delete an experiment after confirmation",
-    "help.slash_experiment_finish": "  /experiment finish  Summarize the active experiment and write its report",
+    "help.slash_paper": "  /paper             Manage versions, diffs, "
+    "and restore for one Markdown paper",
+    "help.slash_experiment": "  /experiment new NAME  Create and enter an i"
+    "solated experiment workspace",
+    "help.slash_experiment_delete": "  /experiment delete ID  Permanently delete a"
+    "n experiment after confirmation",
+    "help.slash_experiment_finish": "  /experiment finish  Summarize the active ex"
+    "periment and write its report",
     "help.slash_experiments": "  /experiments        List experiments; add switch ID to switch",
-    "help.slash_experiments_clear": "  /experiments clear  Clear every experiment after confirmation",
+    "help.slash_experiments_clear": "  /experiments clear  Clear every experiment "
+    "after confirmation",
     "help.slash_compact": "  /compact           Compact current context to reduce token usage",
     "help.slash_set": "  /set max_tool_rounds N  Set max tool call rounds (default 999)",
     "help.slash_revoke": "  /revoke            List always-allowed tools",
     "help.slash_revoke_item": "  /revoke <tool>     Revoke always-allow for a tool",
-    "help.footer": "[dim]Type a question to chat. The bottom bar shows context, cache hits, and cost; sessions auto-save on exit.[/dim]",
+    "help.footer": "[dim]Type a question to chat. The bottom bar "
+    "shows context, cache hits, and cost; sessions"
+    " auto-save on exit.[/dim]",
     "help.modal_hint": "Esc close",
-
     "cmd.clear": "Clear conversation context",
     "cmd.copy": "Copy last reply to clipboard",
     "cmd.help": "Show help",
@@ -435,8 +443,9 @@ _EN = {
 }
 
 _JA = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "準備完了 ↑/↓ スクロール PageUp/PageDown ページ /copy 返信をコピー /quit 終了 /clear 消去",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "準備完了 ↑/↓ スクロール PageUp/PageDown ページ /copy 返信をコ"
+    "ピー /quit 終了 /clear 消去",
     "app.thinking": "思考中",
     "app.interrupted": "現在の会話を中断しました",
     "app.interrupted.short": "中断しました。",
@@ -450,27 +459,24 @@ _JA = {
     "app.model_switched": "モデルを {provider}/{model} に切り替えました",
     "app.effort_set": "推論強度を {effort} に設定しました",
     "app.language_switched": "言語を {label} に切り替えました",
-    "app.language_current": "現在の言語: {label} ({code})。使い方: /language ja または /language en",
+    "app.language_current": "現在の言語: {label} ({code})。使い方: /language ja または"
+    " /language en",
     "app.language_bad": "言語は ja（日本語）と en（英語）のみ対応しています",
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "言語を選択 / Select Language",
-
     "app.footer": "Enter 送信   Shift+Enter/^j 改行   ^q 終了   ^s ログ保存   ^y 返信コピー",
-
     "app.input_placeholder": (
-        "メッセージを入力 Enter 送信 /copy 返信をコピー "
-        "↑/↓ スクロール /quit 終了 /clear 消去"
+        "メッセージを入力 Enter 送信 /copy 返信をコピー ↑/↓ スクロール /quit 終了 /clear 消去"
     ),
     "app.startup_tip": "[dim]質問を入力して開始、/model でモデル切替、/variants で強度調整[/dim]",
     "app.model_line": "モデル: {provider}/{model}",
     "app.effort_line": "    強度: {effort}",
-
     "label.user": "あなた",
     "label.agent": "Aero",
     "label.unknown": "不明",
-
-    "error.usage_set": "[error]使い方: /set max_tool_rounds 20 または /set model flash または /set variants high[/error]",
+    "error.usage_set": "[error]使い方: /set max_tool_rounds 20 または /set "
+    "model flash または /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]使い方: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds は整数でなければなりません[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds は 1 以上である必要があります[/error]",
@@ -478,15 +484,12 @@ _JA = {
     "error.effort_options": "[error]推論強度の選択肢: low / medium / high / max / auto[/error]",
     "error.agent_init": "[error]Agent が初期化されていません: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} は「常に許可」リストにありません[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds を {value} に設定しました[/dim]",
     "info.always_allow_none": "[dim]現在「常に許可」されているツールはありません[/dim]",
     "info.always_allow_list": "[dim]常に許可されているツール: {tools}[/dim]",
     "info.always_allow_hint": "[dim]使い方: /revoke <ツール名> で取り消し[/dim]",
     "info.always_allow_revoked": "[dim]{tool} の「常に許可」を取り消しました[/dim]",
-
     "select.hint": "↑/↓ 選択    Enter 確認",
-
     "confirm.title": "⚠️  危険な操作の確認",
     "confirm.allow": "許可",
     "confirm.always": "常に許可",
@@ -498,7 +501,6 @@ _JA = {
     "confirm.args": "引数:\n{args}\n\n",
     "confirm.irreversible": "この操作は元に戻せません。許可しますか？",
     "confirm.irreversible_exec": "この操作は元に戻せません。実行を許可しますか？",
-
     "bind.quit": "終了",
     "bind.save_log": "ログ保存",
     "bind.copy_reply": "返信コピー",
@@ -506,11 +508,9 @@ _JA = {
     "bind.focus_prev": "前へ",
     "bind.focus_next": "次へ",
     "bind.close": "閉じる",
-
     "log.panel_title": "[bold cyan]処理状況[/bold cyan]",
     "log.collapsed_done": "[dim]処理状況を折りたたみました: {total} 件、タスク完了[/dim]",
     "log.collapsed_last": "[dim]処理状況を折りたたみました: {total} 件、最後: {last_line}[/dim]",
-
     "help.title": "[bold cyan]Aero ヘルプ[/bold cyan]",
     "help.shortcuts": "[bold]ショートカット[/bold]",
     "help.shortcuts.updn": "  ↑/↓              上下スクロール",
@@ -523,14 +523,18 @@ _JA = {
     "help.slash_clear": "  /clear             会話コンテキストを消去",
     "help.slash_help": "  /help              このヘルプを表示",
     "help.slash_copy": "  /copy              最後の返信をクリップボードにコピー",
-    "help.slash_language": "  /language          言語を選択 (日本語/English), Agent は選択した言語で返信",
-    "help.slash_model": "  /model             モデルを表示/切替、例: /model flash または /model pro",
-    "help.slash_variants": "  /variants          推論強度を表示/設定: low / medium / high / max / auto",
+    "help.slash_language": "  /language          言語を選択 (日本語/English), Age"
+    "nt は選択した言語で返信",
+    "help.slash_model": "  /model             モデルを表示/切替、例: /model flas"
+    "h または /model pro",
+    "help.slash_variants": "  /variants          推論強度を表示/設定: low / medium"
+    " / high / max / auto",
     "help.slash_set": "  /set max_tool_rounds N  最大ツール呼び出し回数を設定 (デフォルト 999)",
     "help.slash_revoke": "  /revoke            「常に許可」ツール一覧を表示",
     "help.slash_revoke_item": "  /revoke <ツール>   ツールの「常に許可」を取り消し",
-    "help.footer": "[dim]質問を入力してAIと会話。データダウンロードが必要な場合は自動的に処理されます。[/dim]",
-
+    "help.footer": "[dim]質問を入力してAIと会話。データダウンロー"
+    "ドが必要な場合は自動的に処理されます。"
+    "[/dim]",
     "cmd.clear": "会話コンテキストを消去",
     "cmd.copy": "最後の返信をクリップボードにコピー",
     "cmd.help": "ヘルプを表示",
@@ -557,8 +561,9 @@ _JA = {
 }
 
 _KO = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "준비됨 ↑/↓ 스크롤 PageUp/PageDown 페이지 /copy 답변 복사 /quit 종료 /clear 지우기",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "준비됨 ↑/↓ 스크롤 PageUp/PageDown 페이지 /copy 답변 복사 /"
+    "quit 종료 /clear 지우기",
     "app.thinking": "생각 중",
     "app.interrupted": "현재 대화를 중단했습니다",
     "app.interrupted.short": "중단됨.",
@@ -577,38 +582,31 @@ _KO = {
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "언어 선택 / Select Language",
-
     "app.footer": "Enter 전송   Shift+Enter/^j 줄바꿈   ^q 종료   ^s 로그 저장   ^y 답변 복사",
-
     "app.input_placeholder": (
-        "메시지 입력 Enter 전송 /copy 답변 복사 "
-        "↑/↓ 스크롤 /quit 종료 /clear 지우기"
+        "메시지 입력 Enter 전송 /copy 답변 복사 ↑/↓ 스크롤 /quit 종료 /clear 지우기"
     ),
     "app.startup_tip": "[dim]질문을 입력하여 시작, /model 모델 전환, /variants 강도 조정[/dim]",
     "app.model_line": "모델: {provider}/{model}",
     "app.effort_line": "    강도: {effort}",
-
     "label.user": "사용자",
     "label.agent": "Aero",
     "label.unknown": "알 수 없음",
-
-    "error.usage_set": "[error]사용법: /set max_tool_rounds 20 또는 /set model flash 또는 /set variants high[/error]",
+    "error.usage_set": "[error]사용법: /set max_tool_rounds 20 또는 /set m"
+    "odel flash 또는 /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]사용법: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds는 정수여야 합니다[/error]",
-    "error.max_tool_rounds_range": "[error]max_tool_rounds\uB294 1 \uC774\uC0C1\uC774\uC5B4\uC57C \uD568[/error]",
+    "error.max_tool_rounds_range": "[error]max_tool_rounds는 1 이상이어야 함[/error]",
     "error.model_empty": "[error]모델 이름은 비워둘 수 없습니다[/error]",
     "error.effort_options": "[error]추론 강도 옵션: low / medium / high / max / auto[/error]",
     "error.agent_init": "[error]Agent가 초기화되지 않음: {error}[/error]",
     "error.revoke_not_found": "[error]{tool}이(가) '항상 허용' 목록에 없습니다[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds가 {value}(으)로 설정됨[/dim]",
     "info.always_allow_none": "[dim]현재 '항상 허용'된 도구가 없습니다[/dim]",
     "info.always_allow_list": "[dim]항상 허용된 도구: {tools}[/dim]",
     "info.always_allow_hint": "[dim]사용법: /revoke <도구명>으로 취소[/dim]",
     "info.always_allow_revoked": "[dim]{tool}의 '항상 허용'을 취소했습니다[/dim]",
-
     "select.hint": "↑/↓ 선택    Enter 확인",
-
     "confirm.title": "⚠️  위험한 작업 확인",
     "confirm.allow": "허용",
     "confirm.always": "항상 허용",
@@ -620,7 +618,6 @@ _KO = {
     "confirm.args": "인자:\n{args}\n\n",
     "confirm.irreversible": "이 작업은 되돌릴 수 없습니다. 허용하시겠습니까?",
     "confirm.irreversible_exec": "이 작업은 되돌릴 수 없습니다. 실행을 허용하시겠습니까?",
-
     "bind.quit": "종료",
     "bind.save_log": "로그 저장",
     "bind.copy_reply": "답변 복사",
@@ -628,11 +625,9 @@ _KO = {
     "bind.focus_prev": "이전",
     "bind.focus_next": "다음",
     "bind.close": "닫기",
-
     "log.panel_title": "[bold cyan]처리 진행[/bold cyan]",
     "log.collapsed_done": "[dim]처리 진행 접힘: {total}개 항목, 작업 완료[/dim]",
     "log.collapsed_last": "[dim]처리 진행 접힘: {total}개 항목, 마지막: {last_line}[/dim]",
-
     "help.title": "[bold cyan]Aero 도움말[/bold cyan]",
     "help.shortcuts": "[bold]단축키[/bold]",
     "help.shortcuts.updn": "  ↑/↓              위/아래 스크롤",
@@ -645,14 +640,16 @@ _KO = {
     "help.slash_clear": "  /clear             대화 컨텍스트 지우기",
     "help.slash_help": "  /help              이 도움말 표시",
     "help.slash_copy": "  /copy              마지막 답변을 클립보드에 복사",
-    "help.slash_language": "  /language          언어 선택 (한국어/English), Agent가 선택 언어로 답변",
+    "help.slash_language": "  /language          언어 선택 (한국어/English), Age"
+    "nt가 선택 언어로 답변",
     "help.slash_model": "  /model             모델 보기/전환, 예: /model flash 또는 /model pro",
-    "help.slash_variants": "  /variants          추론 강도 보기/설정: low / medium / high / max / auto",
+    "help.slash_variants": "  /variants          추론 강도 보기/설정: low / mediu"
+    "m / high / max / auto",
     "help.slash_set": "  /set max_tool_rounds N  최대 도구 호출 횟수 설정 (기본값 999)",
     "help.slash_revoke": "  /revoke            '항상 허용' 도구 목록 표시",
     "help.slash_revoke_item": "  /revoke <도구>     도구의 '항상 허용' 취소",
-    "help.footer": "[dim]질문을 입력하여 AI와 대화하세요. 데이터 다운로드가 필요하면 자동으로 처리됩니다.[/dim]",
-
+    "help.footer": "[dim]질문을 입력하여 AI와 대화하세요. 데이터 다운로드가 필요하면 자동으로 "
+    "처리됩니다.[/dim]",
     "cmd.clear": "대화 컨텍스트 지우기",
     "cmd.copy": "마지막 답변을 클립보드에 복사",
     "cmd.help": "도움말 표시",
@@ -679,8 +676,10 @@ _KO = {
 }
 
 _FR = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "Prêt  ↑/↓ défiler  PageUp/PageDown page  /copy copier réponse  /quit quitter  /clear effacer",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "Prêt  ↑/↓ défiler  PageUp/PageDown page  /cop"
+    "y copier réponse  /quit quitter  /clear effac"
+    "er",
     "app.thinking": "Réflexion",
     "app.interrupted": "Conversation en cours interrompue",
     "app.interrupted.short": "Interrompu.",
@@ -694,43 +693,43 @@ _FR = {
     "app.model_switched": "Modèle changé pour {provider}/{model}",
     "app.effort_set": "Effort de raisonnement défini sur {effort}",
     "app.language_switched": "Langue changée pour {label}",
-    "app.language_current": "Langue actuelle : {label} ({code}). Usage : /language fr ou /language en",
+    "app.language_current": "Langue actuelle : {label} ({code}). Usage : /"
+    "language fr ou /language en",
     "app.language_bad": "Langue prend en charge uniquement fr (français) et en (anglais)",
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "Choix de la langue / Select Language",
-
-    "app.footer": "Enter envoyer   Shift+Enter/^j nouvelle ligne   ^q quitter   ^s enregistrer   ^y copier réponse",
-
+    "app.footer": "Enter envoyer   Shift+Enter/^j nouvelle ligne"
+    "   ^q quitter   ^s enregistrer   ^y copier ré"
+    "ponse",
     "app.input_placeholder": (
         "Écrire pour discuter Enter envoyer /copy copier réponse "
         "↑/↓ défiler /quit quitter /clear effacer"
     ),
-    "app.startup_tip": "[dim]Posez une question pour commencer, /model changer modèle, /variants ajuster effort[/dim]",
+    "app.startup_tip": "[dim]Posez une question pour commencer, /mode"
+    "l changer modèle, /variants ajuster effort[/d"
+    "im]",
     "app.model_line": "Modèle : {provider}/{model}",
     "app.effort_line": "    Effort : {effort}",
-
     "label.user": "Vous",
     "label.agent": "Aero",
     "label.unknown": "Inconnu",
-
-    "error.usage_set": "[error]Usage : /set max_tool_rounds 20 ou /set model flash ou /set variants high[/error]",
+    "error.usage_set": "[error]Usage : /set max_tool_rounds 20 ou /se"
+    "t model flash ou /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]Usage : /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds doit être un entier[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds doit être >= 1[/error]",
     "error.model_empty": "[error]Le nom du modèle ne peut pas être vide[/error]",
-    "error.effort_options": "[error]Options d'effort de raisonnement : low / medium / high / max / auto[/error]",
+    "error.effort_options": "[error]Options d'effort de raisonnement : low"
+    " / medium / high / max / auto[/error]",
     "error.agent_init": "[error]Agent non initialisé : {error}[/error]",
     "error.revoke_not_found": "[error]{tool} n'est pas dans la liste « toujours autorisé »[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds défini sur {value}[/dim]",
     "info.always_allow_none": "[dim]Aucun outil « toujours autorisé »[/dim]",
     "info.always_allow_list": "[dim]Outils toujours autorisés : {tools}[/dim]",
     "info.always_allow_hint": "[dim]Usage : /revoke <nom_outil> pour révoquer[/dim]",
     "info.always_allow_revoked": "[dim]« Toujours autorisé » révoqué pour {tool}[/dim]",
-
     "select.hint": "↑/↓ sélectionner    Enter confirmer",
-
     "confirm.title": "⚠️  Opération dangereuse",
     "confirm.allow": "Autoriser",
     "confirm.always": "Toujours",
@@ -742,7 +741,6 @@ _FR = {
     "confirm.args": "Arguments :\n{args}\n\n",
     "confirm.irreversible": "Cette opération est irréversible. Autoriser ?",
     "confirm.irreversible_exec": "Cette opération est irréversible. Autoriser l'exécution ?",
-
     "bind.quit": "Quitter",
     "bind.save_log": "Sauvegarder",
     "bind.copy_reply": "Copier",
@@ -750,11 +748,10 @@ _FR = {
     "bind.focus_prev": "Préc.",
     "bind.focus_next": "Suiv.",
     "bind.close": "Fermer",
-
     "log.panel_title": "[bold cyan]Progression[/bold cyan]",
     "log.collapsed_done": "[dim]Progression repliée : {total} entrées, tâche terminée[/dim]",
-    "log.collapsed_last": "[dim]Progression repliée : {total} entrées, dernière : {last_line}[/dim]",
-
+    "log.collapsed_last": "[dim]Progression repliée : {total} entrées, d"
+    "ernière : {last_line}[/dim]",
     "help.title": "[bold cyan]Aide Aero[/bold cyan]",
     "help.shortcuts": "[bold]Raccourcis[/bold]",
     "help.shortcuts.updn": "  ↑/↓              défiler haut/bas",
@@ -767,14 +764,20 @@ _FR = {
     "help.slash_clear": "  /clear             Effacer le contexte de conversation",
     "help.slash_help": "  /help              Afficher cette aide",
     "help.slash_copy": "  /copy              Copier la dernière réponse",
-    "help.slash_language": "  /language          Choisir la langue (Français/English), l'agent répond dans la langue choisie",
+    "help.slash_language": "  /language          Choisir la langue (Franç"
+    "ais/English), l'agent répond dans la langue c"
+    "hoisie",
     "help.slash_model": "  /model             Voir/changer modèle, ex : /model flash ou /model pro",
-    "help.slash_variants": "  /variants          Voir/définir l'effort de raisonnement : low / medium / high / max / auto",
-    "help.slash_set": "  /set max_tool_rounds N  Définir le nombre max d'appels d'outils (défaut 999)",
+    "help.slash_variants": "  /variants          Voir/définir l'effort de"
+    " raisonnement : low / medium / high / max / a"
+    "uto",
+    "help.slash_set": "  /set max_tool_rounds N  Définir le nombre m"
+    "ax d'appels d'outils (défaut 999)",
     "help.slash_revoke": "  /revoke            Lister les outils « toujours autorisés »",
     "help.slash_revoke_item": "  /revoke <outil>    Révoquer « toujours autorisé » pour un outil",
-    "help.footer": "[dim]Posez des questions pour dialoguer avec l'IA. Les téléchargements de données seront gérés automatiquement.[/dim]",
-
+    "help.footer": "[dim]Posez des questions pour dialoguer avec "
+    "l'IA. Les téléchargements de données seront g"
+    "érés automatiquement.[/dim]",
     "cmd.clear": "Effacer le contexte de conversation",
     "cmd.copy": "Copier la dernière réponse",
     "cmd.help": "Afficher l'aide",
@@ -801,8 +804,10 @@ _FR = {
 }
 
 _DE = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "Bereit  ↑/↓ scrollen  PageUp/PageDown blättern  /copy Antwort kopieren  /quit beenden  /clear löschen",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "Bereit  ↑/↓ scrollen  PageUp/PageDown blätter"
+    "n  /copy Antwort kopieren  /quit beenden  /cl"
+    "ear löschen",
     "app.thinking": "Denkt nach",
     "app.interrupted": "Aktuelle Konversation unterbrochen",
     "app.interrupted.short": "Unterbrochen.",
@@ -816,43 +821,43 @@ _DE = {
     "app.model_switched": "Modell gewechselt zu {provider}/{model}",
     "app.effort_set": "Reasoning-Aufwand gesetzt auf {effort}",
     "app.language_switched": "Sprache gewechselt zu {label}",
-    "app.language_current": "Aktuelle Sprache: {label} ({code}). Verwendung: /language de oder /language en",
+    "app.language_current": "Aktuelle Sprache: {label} ({code}). Verwendun"
+    "g: /language de oder /language en",
     "app.language_bad": "Sprache unterstützt nur de (Deutsch) und en (Englisch)",
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "Sprachauswahl / Select Language",
-
-    "app.footer": "Enter senden   Shift+Enter/^j Zeilenumbruch   ^q beenden   ^s Log speichern   ^y Antwort kopieren",
-
+    "app.footer": "Enter senden   Shift+Enter/^j Zeilenumbruch  "
+    " ^q beenden   ^s Log speichern   ^y Antwort k"
+    "opieren",
     "app.input_placeholder": (
         "Nachricht eingeben Enter senden /copy Antwort kopieren "
         "↑/↓ scrollen /quit beenden /clear löschen"
     ),
-    "app.startup_tip": "[dim]Frage eingeben zum Starten, /model Modell wechseln, /variants Aufwand anpassen[/dim]",
+    "app.startup_tip": "[dim]Frage eingeben zum Starten, /model Model"
+    "l wechseln, /variants Aufwand anpassen[/dim]",
     "app.model_line": "Modell: {provider}/{model}",
     "app.effort_line": "    Aufwand: {effort}",
-
     "label.user": "Du",
     "label.agent": "Aero",
     "label.unknown": "Unbekannt",
-
-    "error.usage_set": "[error]Verwendung: /set max_tool_rounds 20 oder /set model flash oder /set variants high[/error]",
+    "error.usage_set": "[error]Verwendung: /set max_tool_rounds 20 od"
+    "er /set model flash oder /set variants high[/"
+    "error]",
     "error.usage_set_tool_rounds": "[error]Verwendung: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds muss eine Ganzzahl sein[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds muss >= 1 sein[/error]",
     "error.model_empty": "[error]Modellname darf nicht leer sein[/error]",
-    "error.effort_options": "[error]Reasoning-Aufwand Optionen: low / medium / high / max / auto[/error]",
+    "error.effort_options": "[error]Reasoning-Aufwand Optionen: low / medi"
+    "um / high / max / auto[/error]",
     "error.agent_init": "[error]Agent nicht initialisiert: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} ist nicht in der Immer-erlauben-Liste[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds gesetzt auf {value}[/dim]",
     "info.always_allow_none": "[dim]Keine immer erlaubten Werkzeuge[/dim]",
     "info.always_allow_list": "[dim]Immer erlaubte Werkzeuge: {tools}[/dim]",
     "info.always_allow_hint": "[dim]Verwendung: /revoke <werkzeug> zum Widerrufen[/dim]",
     "info.always_allow_revoked": "[dim]Immer-Erlauben für {tool} widerrufen[/dim]",
-
     "select.hint": "↑/↓ auswählen    Enter bestätigen",
-
     "confirm.title": "⚠️  Gefährliche Operation",
     "confirm.allow": "Erlauben",
     "confirm.always": "Immer",
@@ -864,7 +869,6 @@ _DE = {
     "confirm.args": "Argumente:\n{args}\n\n",
     "confirm.irreversible": "Diese Operation ist unumkehrbar. Erlauben?",
     "confirm.irreversible_exec": "Diese Operation ist unumkehrbar. Ausführung erlauben?",
-
     "bind.quit": "Beenden",
     "bind.save_log": "Log speichern",
     "bind.copy_reply": "Antwort kopieren",
@@ -872,11 +876,11 @@ _DE = {
     "bind.focus_prev": "Zurück",
     "bind.focus_next": "Weiter",
     "bind.close": "Schließen",
-
     "log.panel_title": "[bold cyan]Fortschritt[/bold cyan]",
-    "log.collapsed_done": "[dim]Fortschritt eingeklappt: {total} Einträge, Aufgabe abgeschlossen[/dim]",
-    "log.collapsed_last": "[dim]Fortschritt eingeklappt: {total} Einträge, letzter: {last_line}[/dim]",
-
+    "log.collapsed_done": "[dim]Fortschritt eingeklappt: {total} Einträg"
+    "e, Aufgabe abgeschlossen[/dim]",
+    "log.collapsed_last": "[dim]Fortschritt eingeklappt: {total} Einträg"
+    "e, letzter: {last_line}[/dim]",
     "help.title": "[bold cyan]Aero Hilfe[/bold cyan]",
     "help.shortcuts": "[bold]Tastenkürzel[/bold]",
     "help.shortcuts.updn": "  ↑/↓              auf/ab scrollen",
@@ -889,14 +893,19 @@ _DE = {
     "help.slash_clear": "  /clear             Konversationskontext löschen",
     "help.slash_help": "  /help              Diese Hilfe anzeigen",
     "help.slash_copy": "  /copy              Letzte Antwort kopieren",
-    "help.slash_language": "  /language          Sprache wählen (Deutsch/English), Agent antwortet in gewählter Sprache",
-    "help.slash_model": "  /model             Modell anzeigen/wechseln, z.B. /model flash oder /model pro",
-    "help.slash_variants": "  /variants          Reasoning-Aufwand anzeigen/setzen: low / medium / high / max / auto",
+    "help.slash_language": "  /language          Sprache wählen (Deutsch/"
+    "English), Agent antwortet in gewählter Sprach"
+    "e",
+    "help.slash_model": "  /model             Modell anzeigen/wechseln"
+    ", z.B. /model flash oder /model pro",
+    "help.slash_variants": "  /variants          Reasoning-Aufwand anzeig"
+    "en/setzen: low / medium / high / max / auto",
     "help.slash_set": "  /set max_tool_rounds N  Max. Werkzeugaufrufe setzen (Standard 999)",
     "help.slash_revoke": "  /revoke            Immer-erlaubte Werkzeuge auflisten",
     "help.slash_revoke_item": "  /revoke <werkzeug> Immer-Erlauben für ein Werkzeug widerrufen",
-    "help.footer": "[dim]Fragen eingeben, um mit KI zu chatten. Datendownloads werden automatisch verarbeitet.[/dim]",
-
+    "help.footer": "[dim]Fragen eingeben, um mit KI zu chatten. D"
+    "atendownloads werden automatisch verarbeitet."
+    "[/dim]",
     "cmd.clear": "Konversationskontext löschen",
     "cmd.copy": "Letzte Antwort kopieren",
     "cmd.help": "Hilfe anzeigen",
@@ -923,8 +932,10 @@ _DE = {
 }
 
 _ES = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "Listo  ↑/↓ desplazar  PageUp/PageDown página  /copy copiar respuesta  /quit salir  /clear limpiar",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "Listo  ↑/↓ desplazar  PageUp/PageDown página "
+    " /copy copiar respuesta  /quit salir  /clear "
+    "limpiar",
     "app.thinking": "Pensando",
     "app.interrupted": "Conversación actual interrumpida",
     "app.interrupted.short": "Interrumpido.",
@@ -943,22 +954,23 @@ _ES = {
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "Selección de idioma / Select Language",
-
-    "app.footer": "Enter enviar   Shift+Enter/^j nueva línea   ^q salir   ^s guardar log   ^y copiar respuesta",
-
+    "app.footer": "Enter enviar   Shift+Enter/^j nueva línea   ^"
+    "q salir   ^s guardar log   ^y copiar respuest"
+    "a",
     "app.input_placeholder": (
         "Escribir para chatear Enter enviar /copy copiar respuesta "
         "↑/↓ desplazar /quit salir /clear limpiar"
     ),
-    "app.startup_tip": "[dim]Escribe una pregunta para comenzar, /model cambiar modelo, /variants ajustar esfuerzo[/dim]",
+    "app.startup_tip": "[dim]Escribe una pregunta para comenzar, /mod"
+    "el cambiar modelo, /variants ajustar esfuerzo"
+    "[/dim]",
     "app.model_line": "Modelo: {provider}/{model}",
     "app.effort_line": "    Esfuerzo: {effort}",
-
     "label.user": "Tú",
     "label.agent": "Aero",
     "label.unknown": "Desconocido",
-
-    "error.usage_set": "[error]Uso: /set max_tool_rounds 20 o /set model flash o /set variants high[/error]",
+    "error.usage_set": "[error]Uso: /set max_tool_rounds 20 o /set mo"
+    "del flash o /set variants high[/error]",
     "error.usage_set_tool_rounds": "[error]Uso: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds debe ser un entero[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds debe ser >= 1[/error]",
@@ -966,15 +978,12 @@ _ES = {
     "error.effort_options": "[error]Opciones de esfuerzo: low / medium / high / max / auto[/error]",
     "error.agent_init": "[error]Agente no inicializado: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} no está en la lista de siempre permitidos[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds establecido a {value}[/dim]",
     "info.always_allow_none": "[dim]Sin herramientas siempre permitidas[/dim]",
     "info.always_allow_list": "[dim]Herramientas siempre permitidas: {tools}[/dim]",
     "info.always_allow_hint": "[dim]Uso: /revoke <herramienta> para revocar[/dim]",
     "info.always_allow_revoked": "[dim]Siempre permitir revocado para {tool}[/dim]",
-
     "select.hint": "↑/↓ seleccionar    Enter confirmar",
-
     "confirm.title": "⚠️  Operación peligrosa",
     "confirm.allow": "Permitir",
     "confirm.always": "Siempre",
@@ -986,7 +995,6 @@ _ES = {
     "confirm.args": "Argumentos:\n{args}\n\n",
     "confirm.irreversible": "Esta operación es irreversible. ¿Permitir?",
     "confirm.irreversible_exec": "Esta operación es irreversible. ¿Permitir ejecución?",
-
     "bind.quit": "Salir",
     "bind.save_log": "Guardar Log",
     "bind.copy_reply": "Copiar Respuesta",
@@ -994,11 +1002,9 @@ _ES = {
     "bind.focus_prev": "Ant.",
     "bind.focus_next": "Sig.",
     "bind.close": "Cerrar",
-
     "log.panel_title": "[bold cyan]Progreso[/bold cyan]",
     "log.collapsed_done": "[dim]Progreso colapsado: {total} entradas, tarea completada[/dim]",
     "log.collapsed_last": "[dim]Progreso colapsado: {total} entradas, última: {last_line}[/dim]",
-
     "help.title": "[bold cyan]Ayuda de Aero[/bold cyan]",
     "help.shortcuts": "[bold]Atajos[/bold]",
     "help.shortcuts.updn": "  ↑/↓              desplazar arriba/abajo",
@@ -1011,14 +1017,21 @@ _ES = {
     "help.slash_clear": "  /clear             Limpiar contexto de conversación",
     "help.slash_help": "  /help              Mostrar esta ayuda",
     "help.slash_copy": "  /copy              Copiar última respuesta al portapapeles",
-    "help.slash_language": "  /language          Seleccionar idioma (Español/English), el agente responde en el idioma elegido",
+    "help.slash_language": "  /language          Seleccionar idioma (Espa"
+    "ñol/English), el agente responde en el idioma"
+    " elegido",
     "help.slash_model": "  /model             Ver/cambiar modelo, ej: /model flash o /model pro",
-    "help.slash_variants": "  /variants          Ver/establecer esfuerzo de razonamiento: low / medium / high / max / auto",
-    "help.slash_set": "  /set max_tool_rounds N  Establecer máx. rondas de herramientas (defecto 999)",
+    "help.slash_variants": "  /variants          Ver/establecer esfuerzo "
+    "de razonamiento: low / medium / high / max / "
+    "auto",
+    "help.slash_set": "  /set max_tool_rounds N  Establecer máx. ron"
+    "das de herramientas (defecto 999)",
     "help.slash_revoke": "  /revoke            Listar herramientas siempre permitidas",
-    "help.slash_revoke_item": "  /revoke <herramienta> Revocar siempre permitir para una herramienta",
-    "help.footer": "[dim]Escribe preguntas para chatear con IA. Las descargas de datos se gestionarán automáticamente.[/dim]",
-
+    "help.slash_revoke_item": "  /revoke <herramienta> Revocar siempre permi"
+    "tir para una herramienta",
+    "help.footer": "[dim]Escribe preguntas para chatear con IA. L"
+    "as descargas de datos se gestionarán automáti"
+    "camente.[/dim]",
     "cmd.clear": "Limpiar contexto de conversación",
     "cmd.copy": "Copiar última respuesta al portapapeles",
     "cmd.help": "Mostrar ayuda",
@@ -1045,8 +1058,10 @@ _ES = {
 }
 
 _RU = {
-    "app.title": "[bold cyan]Aerolytica[/bold cyan] v0.1.0",
-    "app.ready": "Готово  ↑/↓ прокрутка  PageUp/PageDown страница  /copy копировать ответ  /quit выход  /clear очистить",
+    "app.title": "[bold cyan]Aerolytica[/bold cyan] v{version}",
+    "app.ready": "Готово  ↑/↓ прокрутка  PageUp/PageDown страни"
+    "ца  /copy копировать ответ  /quit выход  /cle"
+    "ar очистить",
     "app.thinking": "Думаю",
     "app.interrupted": "Текущий диалог прерван",
     "app.interrupted.short": "Прервано.",
@@ -1060,43 +1075,43 @@ _RU = {
     "app.model_switched": "Модель переключена на {provider}/{model}",
     "app.effort_set": "Уровень рассуждений установлен на {effort}",
     "app.language_switched": "Язык переключён на {label}",
-    "app.language_current": "Текущий язык: {label} ({code}). Использование: /language ru или /language en",
+    "app.language_current": "Текущий язык: {label} ({code}). Использование"
+    ": /language ru или /language en",
     "app.language_bad": "Язык поддерживает только ru (русский) и en (английский)",
     "app.language_zh": "中文",
     "app.language_en": "English",
     "app.language_select_title": "Выбор языка / Select Language",
-
-    "app.footer": "Enter отправить   Shift+Enter/^j новая строка   ^q выход   ^s сохранить лог   ^y копировать ответ",
-
+    "app.footer": "Enter отправить   Shift+Enter/^j новая строка"
+    "   ^q выход   ^s сохранить лог   ^y копироват"
+    "ь ответ",
     "app.input_placeholder": (
         "Введите сообщение Enter отправить /copy копировать ответ "
         "↑/↓ прокрутка /quit выход /clear очистить"
     ),
-    "app.startup_tip": "[dim]Введите вопрос для начала, /model сменить модель, /variants настроить уровень[/dim]",
+    "app.startup_tip": "[dim]Введите вопрос для начала, /model сменит"
+    "ь модель, /variants настроить уровень[/dim]",
     "app.model_line": "Модель: {provider}/{model}",
     "app.effort_line": "    Уровень: {effort}",
-
     "label.user": "Вы",
     "label.agent": "Aero",
     "label.unknown": "Неизвестно",
-
-    "error.usage_set": "[error]Использование: /set max_tool_rounds 20 или /set model flash или /set variants high[/error]",
+    "error.usage_set": "[error]Использование: /set max_tool_rounds 20"
+    " или /set model flash или /set variants high["
+    "/error]",
     "error.usage_set_tool_rounds": "[error]Использование: /set max_tool_rounds 20[/error]",
     "error.max_tool_rounds_int": "[error]max_tool_rounds должно быть целым числом[/error]",
     "error.max_tool_rounds_range": "[error]max_tool_rounds должно быть >= 1[/error]",
     "error.model_empty": "[error]Имя модели не может быть пустым[/error]",
-    "error.effort_options": "[error]Варианты уровня рассуждений: low / medium / high / max / auto[/error]",
+    "error.effort_options": "[error]Варианты уровня рассуждений: low / med"
+    "ium / high / max / auto[/error]",
     "error.agent_init": "[error]Агент не инициализирован: {error}[/error]",
     "error.revoke_not_found": "[error]{tool} отсутствует в списке «всегда разрешено»[/error]",
-
     "info.tool_rounds_set": "[dim]max_tool_rounds установлено на {value}[/dim]",
     "info.always_allow_none": "[dim]Нет всегда разрешённых инструментов[/dim]",
     "info.always_allow_list": "[dim]Всегда разрешённые инструменты: {tools}[/dim]",
     "info.always_allow_hint": "[dim]Использование: /revoke <инструмент> для отзыва[/dim]",
     "info.always_allow_revoked": "[dim]«Всегда разрешено» отозвано для {tool}[/dim]",
-
     "select.hint": "↑/↓ выбрать    Enter подтвердить",
-
     "confirm.title": "⚠️  Опасная операция",
     "confirm.allow": "Разрешить",
     "confirm.always": "Всегда",
@@ -1108,7 +1123,6 @@ _RU = {
     "confirm.args": "Аргументы:\n{args}\n\n",
     "confirm.irreversible": "Эта операция необратима. Разрешить?",
     "confirm.irreversible_exec": "Эта операция необратима. Разрешить выполнение?",
-
     "bind.quit": "Выход",
     "bind.save_log": "Сохр. лог",
     "bind.copy_reply": "Копировать",
@@ -1116,11 +1130,10 @@ _RU = {
     "bind.focus_prev": "Назад",
     "bind.focus_next": "Вперёд",
     "bind.close": "Закрыть",
-
     "log.panel_title": "[bold cyan]Ход обработки[/bold cyan]",
     "log.collapsed_done": "[dim]Ход обработки свёрнут: {total} записей, задача завершена[/dim]",
-    "log.collapsed_last": "[dim]Ход обработки свёрнут: {total} записей, последняя: {last_line}[/dim]",
-
+    "log.collapsed_last": "[dim]Ход обработки свёрнут: {total} записей, "
+    "последняя: {last_line}[/dim]",
     "help.title": "[bold cyan]Справка Aero[/bold cyan]",
     "help.shortcuts": "[bold]Горячие клавиши[/bold]",
     "help.shortcuts.updn": "  ↑/↓              прокрутка вверх/вниз",
@@ -1133,14 +1146,20 @@ _RU = {
     "help.slash_clear": "  /clear             Очистить контекст диалога",
     "help.slash_help": "  /help              Показать эту справку",
     "help.slash_copy": "  /copy              Скопировать последний ответ",
-    "help.slash_language": "  /language          Выбрать язык (Русский/English), агент отвечает на выбранном языке",
-    "help.slash_model": "  /model             Просмотр/смена модели, напр. /model flash или /model pro",
-    "help.slash_variants": "  /variants          Просмотр/установка уровня рассуждений: low / medium / high / max / auto",
-    "help.slash_set": "  /set max_tool_rounds N  Установить макс. число вызовов инструментов (по умолч. 999)",
+    "help.slash_language": "  /language          Выбрать язык (Русский/En"
+    "glish), агент отвечает на выбранном языке",
+    "help.slash_model": "  /model             Просмотр/смена модели, н"
+    "апр. /model flash или /model pro",
+    "help.slash_variants": "  /variants          Просмотр/установка уровн"
+    "я рассуждений: low / medium / high / max / au"
+    "to",
+    "help.slash_set": "  /set max_tool_rounds N  Установить макс. чи"
+    "сло вызовов инструментов (по умолч. 999)",
     "help.slash_revoke": "  /revoke            Показать всегда разрешённые инструменты",
     "help.slash_revoke_item": "  /revoke <инструмент> Отозвать «всегда разрешено» для инструмента",
-    "help.footer": "[dim]Вводите вопросы для общения с ИИ. Загрузки данных будут обрабатываться автоматически.[/dim]",
-
+    "help.footer": "[dim]Вводите вопросы для общения с ИИ. Загруз"
+    "ки данных будут обрабатываться автоматически."
+    "[/dim]",
     "cmd.clear": "Очистить контекст диалога",
     "cmd.copy": "Скопировать последний ответ",
     "cmd.help": "Показать справку",
@@ -1168,15 +1187,25 @@ _RU = {
 
 _STORE = {"zh": _ZH, "en": _EN, "ja": _JA, "ko": _KO, "fr": _FR, "de": _DE, "es": _ES, "ru": _RU}
 
-_SUPPORTED = {c: n for c, n in [
-    ("zh", "中文"), ("en", "English"), ("ja", "日本語"),
-    ("ko", "한국어"), ("fr", "Français"), ("de", "Deutsch"),
-    ("es", "Español"), ("ru", "Русский"),
-]}
+_SUPPORTED = {
+    c: n
+    for c, n in [
+        ("zh", "中文"),
+        ("en", "English"),
+        ("ja", "日本語"),
+        ("ko", "한국어"),
+        ("fr", "Français"),
+        ("de", "Deutsch"),
+        ("es", "Español"),
+        ("ru", "Русский"),
+    ]
+}
 
 
 def t(key: str, language: str, **kwargs) -> str:
     """Look up translation for key in given language."""
+    if key == "app.title":
+        kwargs.setdefault("version", get_version())
     table = _STORE.get(language, _EN)  # fallback to English for unknown lang
     val = table.get(key)
     if val is None:

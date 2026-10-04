@@ -18,6 +18,7 @@ def test_official_model_picker_uses_server_metadata():
                 display_name="GLM 5.2",
                 description="高质量文本模型",
                 capabilities=("text", "tools"),
+                price_multiplier="2x",
                 recommended=True,
             ),
         )
@@ -30,6 +31,7 @@ def test_official_model_picker_uses_server_metadata():
     Console(file=output, width=100).print(prompt)
     rendered = output.getvalue()
     assert "GLM 5.2" in rendered
-    assert "高质量文本模型" in rendered
-    assert "能力：text、tools" in rendered
-    assert "推荐" in rendered
+    assert "glm-5.2" in rendered
+    assert "文本" in rendered
+    assert "2x" in rendered
+    assert len(prompt.columns) == 4

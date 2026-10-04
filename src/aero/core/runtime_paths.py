@@ -5,12 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from aero.release_environment import user_home
+
 RUNTIME_ROOT_CONFIG = "runtime-root"
 
 
 def aero_home() -> Path:
     """Return Aero's user data directory."""
-    return Path(os.environ.get("AERO_HOME", "~/.aero")).expanduser()
+    return user_home()
 
 
 def runtime_root() -> Path:

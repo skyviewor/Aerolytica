@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from aero.toolbox.registry import register_tool
 
-
 # 数据集类型别名 → 内部 level_type
 _DATA_TYPE_ALIASES = {
     "pressure": "pressure",
@@ -165,7 +164,8 @@ async def describe_cds_dataset(dataset_id: str | None = None) -> dict:
         "properties": {
             "query": {
                 "type": "string",
-                "description": "要素名、CDS 变量名或英文关键词，如 total_precipitation、2m_temperature、precipitation",
+                "description": "要素名、CDS 变量名或英文关键词，如 total_precipitation、2m_te"
+                "mperature、precipitation",
             },
             "short_name": {
                 "type": "string",
@@ -359,5 +359,3 @@ async def lookup_gfs_parameter(
     if inventory_results:
         result["found"] = True
     return result
-
-

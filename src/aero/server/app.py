@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,8 @@ class WebRuntime:
         self.sessions = SessionManager()
         self.artifacts = ArtifactService(self.project_dir)
         self.active_sessions: dict[str, LocalSession] = {}
+        self.update_paused = bool(os.environ.get("AERO_UPDATE_RESTART_TOKEN"))
+        os.environ.pop("AERO_UPDATE_RESTART_TOKEN", None)
         from aero.server.cloud import CloudServices
 
         self.cloud = CloudServices(self)
@@ -123,6 +126,7 @@ class WebRuntime:
 
     def session(self, session_id: str) -> LocalSession | None:
         if session_id in self.active_sessions:
+            self.active_sessions[session_id].update_paused = self.update_paused
             return self.active_sessions[session_id]
         meta = next((item for item in self.sessions.list_sessions() if item.id == session_id), None)
         if meta is None or (
@@ -135,10 +139,13 @@ class WebRuntime:
             session_id,
             session_manager=self.sessions,
         )
+        session.update_paused = self.update_paused
         self.active_sessions[session_id] = session
         return session
 
     def create_session(self) -> LocalSession:
+        if self.update_paused:
+            raise RuntimeError("update_in_progress")
         session = LocalSession(
             self.project_dir, self.config.model_copy(deep=True), session_manager=self.sessions
         )
@@ -180,9 +187,8 @@ class WebRuntime:
             "language": cfg.language,
             "mode": cfg.mode,
             "max_tool_rounds": cfg.max_tool_rounds,
-            "llm_configured": bool(cfg.llm.active_api_key()) or (
-                cfg.llm.provider == "official" and self.cloud.account.data.is_logged_in
-            ),
+            "llm_configured": bool(cfg.llm.active_api_key())
+            or (cfg.llm.provider == "official" and self.cloud.account.data.is_logged_in),
             "vision": {
                 "mode": cfg.vision.mode,
                 "provider": cfg.vision.provider,
@@ -312,6 +318,8 @@ def create_app(
         try:
             run_id = session.start_run(body.prompt)
         except RuntimeError as exc:
+            if str(exc) == "update_in_progress":
+                raise HTTPException(status_code=503, detail="客户端正在更新，请稍后重试") from exc
             if str(exc) == "session_busy":
                 raise HTTPException(status_code=409, detail="当前会话已有运行中的任务") from exc
             raise
@@ -322,7 +330,7 @@ def create_app(
         run_id: str, session_id: str, session: LocalSession = Depends(get_session)
     ):
         status = session.run_status(run_id)
-        if status["status"] == "not_found":
+        if status.get("status") == "not_found":
             raise HTTPException(status_code=404, detail="运行不存在")
         return status
 

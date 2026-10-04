@@ -52,7 +52,48 @@ async def test_revoked_login_prompts_after_agent_poll_401():
 
 
 @pytest.mark.asyncio
-async def test_chat_context_restores_when_local_empty_and_syncs_once():
+async def test_expired_heartbeat_poll_does_not_permanently_block_chat():
+    presence = ChatPresence.__new__(ChatPresence)
+    presence.agent_id = "agent_1"
+    presence.token = "agt_secret"
+    presence._active_session_id = "chat-1"
+    presence._blocked_session_id = ""
+    presence._command_task = None
+    presence._exit = AsyncMock()
+    presence._http = AsyncMock()
+    presence._http.get.return_value = httpx.Response(
+        503,
+        request=httpx.Request("GET", "https://example.test/commands/next"),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await presence._poll_once()
+    assert presence._blocked_session_id == ""
+    presence._exit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_revoked_agent_token_blocks_chat_before_exit_clears_session():
+    presence = ChatPresence.__new__(ChatPresence)
+    presence.agent_id = "agent_1"
+    presence.token = "agt_secret"
+    presence._active_session_id = "chat-1"
+    presence._blocked_session_id = ""
+    presence._command_task = None
+    presence.session = AsyncMock()
+    presence._http = AsyncMock()
+    presence._http.get.return_value = httpx.Response(401)
+
+    async def exit_chat():
+        presence._active_session_id = ""
+
+    presence._exit = AsyncMock(side_effect=exit_chat)
+    await presence._poll_once()
+    assert presence._blocked_session_id == "chat-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("followup", ["unchanged", "remote-change", "manual"])
+async def test_chat_context_restores_when_local_empty_and_syncs_once(followup):
     presence = ChatPresence.__new__(ChatPresence)
     presence.agent_id = "agent_1"
     presence.token = "agt_secret"
@@ -63,11 +104,17 @@ async def test_chat_context_restores_when_local_empty_and_syncs_once():
     presence._http = AsyncMock()
     payload = {"schema": 1, "meta": {}, "messages": [{"role": "user", "content": "你好"}]}
     request = httpx.Request("GET", "https://example.test/context")
-    presence._http.get.return_value = httpx.Response(200, request=request, json={
-        "version": 3, "context": payload,
-    })
+    presence._http.get.return_value = httpx.Response(
+        200,
+        request=request,
+        json={
+            "version": 3,
+            "context": payload,
+        },
+    )
     presence._http.put.return_value = httpx.Response(
-        200, request=httpx.Request("PUT", "https://example.test/context"),
+        200,
+        request=httpx.Request("PUT", "https://example.test/context"),
         json={"version": 4},
     )
     presence.export_context = lambda: None
@@ -83,6 +130,26 @@ async def test_chat_context_restores_when_local_empty_and_syncs_once():
     await presence._sync_context()
     assert presence._context_version == 4
     presence._http.put.assert_awaited_once()
+
+    if followup == "remote-change":
+        presence._reported_context_version = 5
+        await presence._sync_context()
+        assert presence._http.put.await_count == 2
+        assert presence._http.get.await_count == 2
+        assert presence._http.put.call_args.kwargs["json"]["reconcile"] is True
+    elif followup == "manual":
+        presence._flush_messages = AsyncMock()
+        presence._pending_messages = []
+        presence._http.post.return_value = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.test/history"),
+            json={},
+        )
+        await presence._sync_context(manual_request_id="sync-1")
+        assert presence._http.put.await_count == 2
+        presence._flush_messages.assert_awaited_once()
+        presence._http.post.assert_awaited_once()
+        assert presence._http.put.call_args.kwargs["json"]["manual_request_id"] == "sync-1"
 
 
 @pytest.mark.asyncio
@@ -102,13 +169,18 @@ async def test_recovered_oss_append_requires_retry_of_newer_context():
     presence._pending_compactions = []
     presence._context_version = 0
     presence._context_hash = ""
+    presence.is_idle = lambda: True
     presence.agent_id = "agent_1"
     presence.token = "agt_secret"
-    presence.export_context = lambda: {"schema": 1, "meta": {}, "messages": [
-        {"role": "user", "content": "one"}, {"role": "assistant", "content": "two"}]}
+    presence.export_context = lambda: {
+        "schema": 1,
+        "meta": {},
+        "messages": [{"role": "user", "content": "one"}, {"role": "assistant", "content": "two"}],
+    }
     presence._http = AsyncMock()
     presence._http.put.return_value = httpx.Response(
-        200, request=httpx.Request("PUT", "https://example.test/context"),
+        200,
+        request=httpx.Request("PUT", "https://example.test/context"),
         json={"version": 1, "applied": False},
     )
     await presence._sync_context()

@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-
 MAX_EXACT_FILE_SIZE = 50 * 1024 * 1024
 _CONTROLLED_DIRS = {"figures", "plans", "scripts"}
 _REFERENCE_DIRS = {"data", "literature"}
@@ -191,9 +190,7 @@ class CheckpointManager:
             if item["id"].startswith(checkpoint) or item.get("name") == checkpoint
         ]
         if len(matches) > 1:
-            raise CheckpointError(
-                f"检查点名称不唯一，请使用更完整的 ID：{checkpoint}"
-            )
+            raise CheckpointError(f"检查点名称不唯一，请使用更完整的 ID：{checkpoint}")
         return matches[0] if matches else None
 
     def session_snapshot(self, checkpoint: str) -> bytes | None:
@@ -305,15 +302,12 @@ class CheckpointManager:
         if metadata is None:
             raise CheckpointError(f"找不到检查点：{checkpoint}")
         if not metadata.get("exact_restore") or not metadata.get("commit"):
-            raise CheckpointError(
-                "该检查点没有可用的文件快照，只保存了数据清单。"
-            )
+            raise CheckpointError("该检查点没有可用的文件快照，只保存了数据清单。")
 
         target_exact = {
             item["path"]
             for item in metadata.get("files", [])
-            if item.get("restore") == "exact"
-            and self._path_in_scope(item.get("path", ""))
+            if item.get("restore") == "exact" and self._path_in_scope(item.get("path", ""))
         }
         current_exact = {
             item["path"] for item in self.scan_workspace() if item.get("restore") == "exact"
@@ -504,9 +498,7 @@ class CheckpointManager:
         )
         return env
 
-    def _nearest_existing_parent(
-        self, parent_id: str | None, deleted_id: str
-    ) -> str | None:
+    def _nearest_existing_parent(self, parent_id: str | None, deleted_id: str) -> str | None:
         seen = {deleted_id}
         current = parent_id
         while current and current not in seen:

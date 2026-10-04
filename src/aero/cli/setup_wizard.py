@@ -214,13 +214,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         super().__init__()
         self._vision_only = vision_only
         self._primary_only = primary_only
-        self._page = (
-            "vision_mode"
-            if vision_only
-            else "primary_form"
-            if primary_only
-            else "source"
-        )
+        self._page = "vision_mode" if vision_only else "primary_form" if primary_only else "source"
         if not BYOK_UI_ENABLED:
             self._page = "official"
         self._primary: dict[str, Any] = dict(primary or {})
@@ -240,10 +234,14 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             yield Static("", id="setup-error")
             yield Vertical(id="setup-choice-slot")
             with Vertical(id="setup-form"):
-                yield Input(placeholder="接口地址（Endpoint）", id="setup-url", classes="setup-field")
+                yield Input(
+                    placeholder="接口地址（Endpoint）", id="setup-url", classes="setup-field"
+                )
                 yield Input(placeholder="模型 ID", id="setup-model", classes="setup-field")
                 yield Static("", id="setup-provider-help")
-                yield Input(placeholder="API Key", id="setup-key", password=True, classes="setup-field")
+                yield Input(
+                    placeholder="API Key", id="setup-key", password=True, classes="setup-field"
+                )
             with Horizontal(id="setup-actions"):
                 yield Static("继续", id="setup-next", classes="setup-action")
                 yield Static("跳过", id="setup-skip", classes="setup-action")
@@ -298,10 +296,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         options = self._current_option_list()
         if options is not None and self.focused is options:
             highlighted = options.highlighted
-            at_last_option = (
-                highlighted is not None
-                and highlighted == options.option_count - 1
-            )
+            at_last_option = highlighted is not None and highlighted == options.option_count - 1
             if (event.key == "down" and at_last_option) or event.key == "tab":
                 event.stop()
                 event.prevent_default()
@@ -345,7 +340,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         current = (
             self._ACTION_IDS[self._selected_action]
             if self._action_focused
-            else f"#{self.focused.id}" if self.focused is not None else None
+            else f"#{self.focused.id}"
+            if self.focused is not None
+            else None
         )
         if current in targets:
             target = targets[(targets.index(current) + delta) % len(targets)]
@@ -415,18 +412,13 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 Option("使用自定义 API Key 或兼容接口", id="custom"),
             ]
             if OFFICIAL_ACCOUNT_UI_ENABLED:
-                source_options.append(
-                    Option("使用 Aerolytica 官方账号", id="official")
-                )
+                source_options.append(Option("使用 Aerolytica 官方账号", id="official"))
             options.clear_options()
             options.add_options(source_options)
             options.highlighted = 0
             options.focus()
         elif self._page == "official":
-            subtitle.update(
-                "使用邮箱和密码登录。"
-                "密码只用于本次请求，不会保存到本地。"
-            )
+            subtitle.update("使用邮箱和密码登录。密码只用于本次请求，不会保存到本地。")
             form.display = True
             email = self.query_one("#setup-url", Input)
             email.placeholder = "邮箱"
@@ -444,8 +436,10 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             subtitle.update("选择主模型服务商。下一步会列出该服务商支持的模型。")
             assert options is not None
             options.add_options(
-                [Option(preset.name, id=provider)
-                 for provider, preset in BUILTIN_LLM_PROVIDERS.items()]
+                [
+                    Option(preset.name, id=provider)
+                    for provider, preset in BUILTIN_LLM_PROVIDERS.items()
+                ]
                 + [Option("其他 OpenAI-compatible 接口", id="custom")]
             )
             self._set_actions(next_visible=False, back_visible=True)
@@ -476,7 +470,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 title.update(f"配置 {preset.name if preset else provider} API")
                 subtitle.update("填写当前供应商的连接信息。API Key 仅保存到用户级 secrets.yaml。")
             else:
-                subtitle.update("填写主模型连接信息。API Key 仅保存到用户级 secrets.yaml，不会写入项目配置。")
+                subtitle.update(
+                    "填写主模型连接信息。API Key 仅保存到用户级 secrets.yaml，不会写入项目配置。"
+                )
             form.display = True
             self._configure_primary_form()
             self._show_preset_provider_help(self._primary.get("provider", ""))
@@ -492,7 +488,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             )
             self._focus_first_visible_field()
         elif self._page == "vision_mode":
-            subtitle.update("步骤 2 / 2：视觉模型可选。它用于读图、图表、卫星云图、雷达图和图像型 PDF。")
+            subtitle.update(
+                "步骤 2 / 2：视觉模型可选。它用于读图、图表、卫星云图、雷达图和图像型 PDF。"
+            )
             items = []
             if self._primary_supports_vision:
                 items.append(Option("复用当前模型多模态能力", id="reuse_primary"))
@@ -507,12 +505,15 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             items.append(Option("配置独立视觉模型", id="separate"))
             options.display = True
             options.add_options(items)
-            self._set_actions(next_visible=False, back_visible=not self._vision_only, skip_visible=True)
+            self._set_actions(
+                next_visible=False, back_visible=not self._vision_only, skip_visible=True
+            )
             self.query_one("#setup-skip", Static).update("跳过")
             options.highlighted = 0
             options.focus()
         elif self._page == "vision_model":
             from aero.core.llm_providers import model_supports_vision as _msv
+
             subtitle.update("选择视觉模型。视觉模型只在需要读取图片时调用。")
             assert options is not None
             for provider_id, preset in BUILTIN_LLM_PROVIDERS.items():
@@ -520,9 +521,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                     continue
                 for model in preset.models:
                     if _msv(provider_id, model):
-                        options.add_option(
-                            _vision_option(provider_id, model, preset.name)
-                        )
+                        options.add_option(_vision_option(provider_id, model, preset.name))
             if not self._vision.get("_reuse_bailian_primary_key"):
                 options.add_option(Option("其他 OpenAI-compatible 视觉接口", id="custom"))
             self._set_actions(next_visible=False, back_visible=True)
@@ -541,7 +540,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 self._web_search = {"configured": False}
                 self._finish()
                 return
-            subtitle.update("步骤 3 / 3：联网搜索可选。选择搜索供应商并配置 API Key；百炼还需要先在 MCP 广场开通联网搜索 MCP。")
+            subtitle.update(
+                "步骤 3 / 3：联网搜索可选。选择搜索供应商并配置 API Key；百炼还需要先在 MCP 广场开通联网搜索 MCP。"
+            )
             assert options is not None
             bailian_source = self._reusable_search_credential("bailian")
             zhipu_source = self._reusable_search_credential("zhipu")
@@ -577,7 +578,11 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             )
             items = (
                 [provider_items[reusable_provider], Option("暂不配置，需要时再提示", id="skip")]
-                + [item for provider, item in provider_items.items() if provider != reusable_provider]
+                + [
+                    item
+                    for provider, item in provider_items.items()
+                    if provider != reusable_provider
+                ]
                 if reusable_provider
                 else [Option("暂不配置，需要时再提示", id="skip"), *provider_items.values()]
             )
@@ -695,9 +700,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         self._set_input("key", self._web_search.get("api_key", ""))
         name, key_url, hint = key_help.get(provider, key_help["bailian"])
         help_text = self.query_one("#setup-provider-help", Static)
-        help_text.update(
-            f"获取 {name} API Key：\n[link='{key_url}']{key_url}[/link]\n{hint}"
-        )
+        help_text.update(f"获取 {name} API Key：\n[link='{key_url}']{key_url}[/link]\n{hint}")
         help_text.display = True
 
     def _reusable_search_credential(self, provider: str) -> str:
@@ -796,9 +799,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         for index, selector in enumerate(self._ACTION_IDS):
             action = self.query_one(selector, Static)
             action.set_class(
-                self._action_focused
-                and index == self._selected_action
-                and action.display,
+                self._action_focused and index == self._selected_action and action.display,
                 "setup-selected",
             )
 
@@ -903,7 +904,9 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 self._page = "web_search_form"
                 self._render_page()
                 self._verifying_web_search = True
-                self.run_worker(self._verify_web_search_connection(self._web_search), exclusive=True)
+                self.run_worker(
+                    self._verify_web_search_connection(self._web_search), exclusive=True
+                )
                 return
             if choice == "reuse_zhipu":
                 self._web_search = {
@@ -914,9 +917,13 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
                 self._page = "web_search_form"
                 self._render_page()
                 self._verifying_web_search = True
-                self.run_worker(self._verify_web_search_connection(self._web_search), exclusive=True)
+                self.run_worker(
+                    self._verify_web_search_connection(self._web_search), exclusive=True
+                )
                 return
-            provider = "bailian" if choice == "configure_bailian" else choice.removeprefix("configure_")
+            provider = (
+                "bailian" if choice == "configure_bailian" else choice.removeprefix("configure_")
+            )
             self._web_search = {"configured": True, "provider": provider}
             self._page = "web_search_form"
         self._render_page()
@@ -1058,9 +1065,7 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
 
         self._verifying_primary = False
         self._primary.update(values)
-        self._primary_supports_vision = model_supports_vision(
-            values["provider"], values["model"]
-        )
+        self._primary_supports_vision = model_supports_vision(values["provider"], values["model"])
         if self._primary_only:
             self._vision = {"mode": "unconfigured"}
             self._finish()
@@ -1153,13 +1158,20 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         }
 
     def _validate(self, values: dict[str, str]) -> bool:
-        required = (("服务商", "provider"), ("接口地址", "base_url"), ("模型 ID", "model"), ("API Key", "api_key"))
+        required = (
+            ("服务商", "provider"),
+            ("接口地址", "base_url"),
+            ("模型 ID", "model"),
+            ("API Key", "api_key"),
+        )
         missing = [label for label, key in required if not values[key]]
         if missing:
             self.query_one("#setup-error", Static).update("请填写：" + "、".join(missing))
             return False
         if not values["base_url"].startswith(("https://", "http://")):
-            self.query_one("#setup-error", Static).update("接口地址必须以 http:// 或 https:// 开头。")
+            self.query_one("#setup-error", Static).update(
+                "接口地址必须以 http:// 或 https:// 开头。"
+            )
             return False
         return True
 
@@ -1169,17 +1181,13 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             "primary_provider": "source",
             "primary_model": "primary_provider",
             "primary_form": (
-                "primary_provider"
-                if self._primary.get("provider") == "custom"
-                else "primary_model"
+                "primary_provider" if self._primary.get("provider") == "custom" else "primary_model"
             ),
             "vision_mode": "primary_form",
             "vision_model": "vision_mode",
             "vision_form": "vision_model",
             "web_search_setup": (
-                "vision_form"
-                if self._vision.get("mode") == "separate"
-                else "vision_mode"
+                "vision_form" if self._vision.get("mode") == "separate" else "vision_mode"
             ),
             "web_search_form": "web_search_setup",
         }
@@ -1195,12 +1203,14 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         if self._vision_only:
             self.dismiss({"vision": self._vision})
             return
-        self.dismiss({
-            "primary": self._primary,
-            "primary_supports_vision": self._primary_supports_vision,
-            "vision": self._vision,
-            "web_search": self._web_search,
-        })
+        self.dismiss(
+            {
+                "primary": self._primary,
+                "primary_supports_vision": self._primary_supports_vision,
+                "vision": self._vision,
+                "web_search": self._web_search,
+            }
+        )
 
 
 async def _test_primary_connection(values: dict[str, str]) -> None:

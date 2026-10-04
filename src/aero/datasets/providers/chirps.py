@@ -30,8 +30,7 @@ CHIRPS_SPEC = DatasetSpec(
     provider_name="UCSB Climate Hazards Center",
     domain="observations",
     description=(
-        "全球陆地区域的日降水观测融合数据，结合卫星估计与站点观测，"
-        "适用于干旱监测和降水气候分析。"
+        "全球陆地区域的日降水观测融合数据，结合卫星估计与站点观测，适用于干旱监测和降水气候分析。"
     ),
     variables=(
         DatasetVariable(
@@ -128,8 +127,7 @@ class ChirpsProvider:
                 path = request.output_dir / Path(url).name
                 if on_progress:
                     on_progress(
-                        f"CHIRPS 正在获取第 {index}/{len(months)} 个月文件："
-                        f"{year}-{month:02d}"
+                        f"CHIRPS 正在获取第 {index}/{len(months)} 个月文件：{year}-{month:02d}"
                     )
                 was_reused = await self._download_with_resume(
                     client,

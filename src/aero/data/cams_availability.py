@@ -115,8 +115,7 @@ def latest_guaranteed_cams_forecast_cycle(reference_time: datetime | None = None
     newer = [
         item
         for item in candidates
-        if item["run_time_utc"] > guaranteed["run_time_utc"]
-        and item["run_time_utc"] <= _iso(now)
+        if item["run_time_utc"] > guaranteed["run_time_utc"] and item["run_time_utc"] <= _iso(now)
     ]
     return {
         "checked_at_utc": _iso(now),
@@ -125,9 +124,7 @@ def latest_guaranteed_cams_forecast_cycle(reference_time: datetime | None = None
         "schedule": [
             {
                 "cycle": item["cycle"],
-                "guaranteed_available_by_utc": (
-                    f"{item['guaranteed_available_hour_utc']:02d}:00"
-                ),
+                "guaranteed_available_by_utc": (f"{item['guaranteed_available_hour_utc']:02d}:00"),
             }
             for item in CAMS_FORECAST_CYCLES
         ],

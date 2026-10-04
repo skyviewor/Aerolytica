@@ -34,8 +34,7 @@ async def test_runtime_manager_cancellation_terminates_process_group(tmp_path):
     command = [
         "/bin/sh",
         "-c",
-        f"trap '' TERM; echo $$ > {parent_pid_file}; "
-        f"sleep 60 & echo $! > {child_pid_file}; wait",
+        f"trap '' TERM; echo $$ > {parent_pid_file}; sleep 60 & echo $! > {child_pid_file}; wait",
     ]
     manager = RuntimeToolManager()
     task = asyncio.create_task(manager.run_command_async(command, env=dict(os.environ), timeout=60))

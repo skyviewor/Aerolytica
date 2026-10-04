@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from aero.release_environment import user_home
+
 
 def private_directory(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -71,7 +73,7 @@ class DaemonManager:
     def __init__(self, project_dir: Path | str, state_dir: Path | None = None):
         self.project_dir = Path(project_dir).resolve()
         self.workspace_id = hashlib.sha256(str(self.project_dir).encode()).hexdigest()[:20]
-        self.state_dir = state_dir or Path.home() / ".aero" / "daemons" / self.workspace_id
+        self.state_dir = state_dir or user_home() / "daemons" / self.workspace_id
         self.state_path = self.state_dir / "state.json"
         self.log_path = self.state_dir / "daemon.log"
 
@@ -100,16 +102,20 @@ class DaemonManager:
             response = httpx.get(
                 f"http://127.0.0.1:{state['port']}/api/v1/daemon/status",
                 headers={"Authorization": f"Bearer {state['token']}"},
-                timeout=1, trust_env=False,
+                timeout=1,
+                trust_env=False,
             )
             response.raise_for_status()
             if response.json().get("instance_id") != state.get("instance_id"):
                 raise ValueError("wrong_daemon")
         except (httpx.HTTPError, ValueError):
             return {"running": False, "project_dir": str(self.project_dir)}
-        return {"running": True, "pid": state["pid"],
-                "url": f"http://127.0.0.1:{state['port']}/",
-                "project_dir": str(self.project_dir)}
+        return {
+            "running": True,
+            "pid": state["pid"],
+            "url": f"http://127.0.0.1:{state['port']}/",
+            "project_dir": str(self.project_dir),
+        }
 
     def browser_url(self) -> str:
         if not self.status()["running"]:
@@ -128,7 +134,9 @@ class DaemonManager:
             "project_dir": str(self.project_dir),
         }
 
-    def start(self, *, port: int = 0, timeout: float = 15) -> dict[str, Any]:
+    def start(
+        self, *, port: int = 0, timeout: float = 15, interpreter: str | None = None
+    ) -> dict[str, Any]:
         private_directory(self.state_dir)
         launch_lock = WorkspaceLock(self.state_dir / "launch.lock")
         launch_lock.acquire()
@@ -136,15 +144,29 @@ class DaemonManager:
             status = self.status()
             if status["running"]:
                 return status
-            fd = os.open(self.log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY
-                         | os.O_NOFOLLOW, 0o600)
+            fd = os.open(
+                self.log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+            )
             with os.fdopen(fd, "a") as log:
                 process = subprocess.Popen(
-                    [sys.executable, "-m", "aero.cli.daemon", "run",
-                     "--project", str(self.project_dir), "--state-dir", str(self.state_dir),
-                     "--port", str(port)],
-                    cwd=self.project_dir, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                    start_new_session=True, close_fds=True,
+                    [
+                        interpreter or sys.executable,
+                        "-m",
+                        "aero.cli.daemon",
+                        "run",
+                        "--project",
+                        str(self.project_dir),
+                        "--state-dir",
+                        str(self.state_dir),
+                        "--port",
+                        str(port),
+                    ],
+                    cwd=self.project_dir,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                    close_fds=True,
                 )
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
@@ -167,7 +189,8 @@ class DaemonManager:
         response = httpx.post(
             f"http://127.0.0.1:{state['port']}/api/v1/daemon/stop",
             headers={"Authorization": f"Bearer {state['token']}"},
-            timeout=5, trust_env=False,
+            timeout=5,
+            trust_env=False,
         )
         response.raise_for_status()
         deadline = time.monotonic() + 10
@@ -189,27 +212,74 @@ class DaemonManager:
         """Return OS configuration without writing it or invoking OS tools."""
         platform = platform or sys.platform
         label = f"com.aerolytica.daemon.{self.workspace_id}"
-        command = [sys.executable, "-m", "aero.cli.daemon", "run", "--project",
-                   str(self.project_dir), "--state-dir", str(self.state_dir)]
+        from aero.distribution import install_root, managed_install
+        from aero.release_environment import environment_name
+
+        name = environment_name()
+        if name == "testing":
+            label += ".testing"
+        environment = {"AERO_ENVIRONMENT": name, "AERO_HOME": str(user_home())}
+        for variable in (
+            "AERO_INSTALL_ROOT",
+            "AERO_RUNTIME_ROOT",
+            "AERO_SECRETS_PATH",
+            "AERO_OFFICIAL_API_URL",
+            "AERO_OFFICIAL_LLM_URL",
+            "AERO_DOWNLOAD_BASE",
+        ):
+            if os.environ.get(variable):
+                environment[variable] = os.environ[variable]
+
+        interpreter = (
+            str(install_root() / "current/bin/python") if managed_install() else sys.executable
+        )
+        command = [
+            interpreter,
+            "-m",
+            "aero.cli.daemon",
+            "run",
+            "--project",
+            str(self.project_dir),
+            "--state-dir",
+            str(self.state_dir),
+        ]
         if platform == "darwin":
             path = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
-            content = plistlib.dumps({
-                "Label": label, "ProgramArguments": command, "RunAtLoad": True,
-                "WorkingDirectory": str(self.project_dir),
-                "StandardOutPath": str(self.log_path), "StandardErrorPath": str(self.log_path),
-                "KeepAlive": {"SuccessfulExit": False},
-            }).decode()
+            content = plistlib.dumps(
+                {
+                    "Label": label,
+                    "ProgramArguments": command,
+                    "RunAtLoad": True,
+                    "WorkingDirectory": str(self.project_dir),
+                    "EnvironmentVariables": environment,
+                    "StandardOutPath": str(self.log_path),
+                    "StandardErrorPath": str(self.log_path),
+                    "KeepAlive": {"SuccessfulExit": False},
+                }
+            ).decode()
         elif platform.startswith("linux"):
             path = Path.home() / ".config" / "systemd" / "user" / f"{label}.service"
-            def quote(value: str) -> str:
+
+            def quote(value: str, *, command_arg: bool = True) -> str:
                 if "\n" in value or "\r" in value:
                     raise ValueError("invalid_service_path")
-                return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace(
-                    "%", "%%").replace("$", "$$") + '"'
-            content = ("[Unit]\nDescription=Aerolytica workspace service\n"
-                       "[Service]\nType=simple\nUMask=0077\nExecStart="
-                       + " ".join(quote(arg) for arg in command)
-                       + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n")
+                escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+                if command_arg:
+                    escaped = escaped.replace("$", "$$")
+                return '"' + escaped + '"'
+
+            settings = "".join(
+                "Environment=" + quote(f"{key}={value}", command_arg=False) + "\n"
+                for key, value in environment.items()
+            )
+            content = (
+                "[Unit]\nDescription=Aerolytica workspace service\n"
+                "[Service]\nType=simple\nUMask=0077\n"
+                + settings
+                + "ExecStart="
+                + " ".join(quote(arg) for arg in command)
+                + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n"
+            )
         else:
             raise RuntimeError("autostart_unsupported; use detached start")
         return path, content
@@ -230,19 +300,25 @@ class DaemonManager:
                 uid = str(os.getuid())
                 result = subprocess.run(
                     ["launchctl", "bootstrap", f"gui/{uid}", str(path)],
-                    capture_output=True, text=True, check=False,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 if result.returncode not in {0, 37}:  # 37 means already bootstrapped.
                     raise RuntimeError(f"launchctl bootstrap failed: {result.stderr.strip()}")
             elif sys.platform.startswith("linux"):
                 result = subprocess.run(
                     ["systemctl", "--user", "daemon-reload"],
-                    capture_output=True, text=True, check=False,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 if result.returncode == 0:
                     result = subprocess.run(
                         ["systemctl", "--user", "enable", "--now", path.name],
-                        capture_output=True, text=True, check=False,
+                        capture_output=True,
+                        text=True,
+                        check=False,
                     )
                 if result.returncode != 0:
                     raise RuntimeError(f"systemctl --user failed: {result.stderr.strip()}")
@@ -250,12 +326,16 @@ class DaemonManager:
             if sys.platform == "darwin":
                 subprocess.run(
                     ["launchctl", "bootout", f"gui/{os.getuid()}/{path.stem}"],
-                    capture_output=True, text=True, check=False,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
             elif sys.platform.startswith("linux"):
                 subprocess.run(
                     ["systemctl", "--user", "disable", "--now", path.name],
-                    capture_output=True, text=True, check=False,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
             path.unlink(missing_ok=True)
         return {"enabled": enabled, "path": str(path), "activation_required": False}
@@ -288,7 +368,50 @@ def run_daemon(manager: DaemonManager, *, port: int = 0) -> None:
         # Register concrete annotations: Request is deliberately imported lazily.
         async def status(request):
             authenticate(request)
-            return {"running": True, "instance_id": instance_id}
+            busy = any(s.metadata()["active_runs"] for s in runtime.active_sessions.values())
+            busy = busy or any(
+                pair[0].status()["update_busy"] for pair in runtime.cloud.agents.values()
+            )
+            return {
+                "running": True,
+                "instance_id": instance_id,
+                "protocol": 1,
+                "update_busy": bool(busy),
+                "update_paused": runtime.update_paused,
+                "port": sock.getsockname()[1],
+                "hosted_agents": [
+                    {
+                        "agent_id": identifier,
+                        "session_id": pair[0].session.id,
+                        "project_id": pair[0].project_id,
+                    }
+                    for identifier, pair in runtime.cloud.agents.items()
+                ],
+            }
+
+        async def drain(request):
+            authenticate(request)
+            runtime.update_paused = True
+            for session in runtime.active_sessions.values():
+                session.update_paused = True
+            for hosted, _ in runtime.cloud.agents.values():
+                hosted.update_paused = True
+            return await status(request)
+
+        async def resume(request):
+            authenticate(request)
+            runtime.update_paused = False
+            for session in runtime.active_sessions.values():
+                session.update_paused = False
+            for hosted, _ in runtime.cloud.agents.values():
+                hosted.update_paused = False
+            return await status(request)
+
+        async def update_stop(request):
+            state = await status(request)
+            if not state["update_paused"] or state["update_busy"]:
+                raise HTTPException(409, "任务尚未空闲，未停止服务")
+            return await stop(request)
 
         async def stop(request):
             authenticate(request)
@@ -297,12 +420,30 @@ def run_daemon(manager: DaemonManager, *, port: int = 0) -> None:
 
         status.__annotations__["request"] = Request
         stop.__annotations__["request"] = Request
+        for endpoint in (drain, resume, update_stop):
+            endpoint.__annotations__["request"] = Request
+        app.add_api_route("/api/v1/daemon/drain", drain, methods=["POST"])
+        app.add_api_route("/api/v1/daemon/resume", resume, methods=["POST"])
+        app.add_api_route("/api/v1/daemon/update-stop", update_stop, methods=["POST"])
         app.add_api_route("/api/v1/daemon/status", status, methods=["GET"])
         app.add_api_route("/api/v1/daemon/stop", stop, methods=["POST"])
-        private_write(manager.state_path, json.dumps({
-            "pid": os.getpid(), "port": sock.getsockname()[1], "token": token,
-            "instance_id": instance_id, "project_dir": str(manager.project_dir),
-        }))
+        # create_app already installed the SPA catch-all. Control endpoints
+        # must precede it, otherwise status returns HTML instead of JSON.
+        control_routes = app.router.routes[-5:]
+        del app.router.routes[-5:]
+        app.router.routes[0:0] = control_routes
+        private_write(
+            manager.state_path,
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "port": sock.getsockname()[1],
+                    "token": token,
+                    "instance_id": instance_id,
+                    "project_dir": str(manager.project_dir),
+                }
+            ),
+        )
         server.run(sockets=[sock])
     finally:
         manager.state_path.unlink(missing_ok=True)

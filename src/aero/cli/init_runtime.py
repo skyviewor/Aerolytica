@@ -23,6 +23,7 @@ from aero.core.runtime_paths import (
     runtime_root,
     save_runtime_root,
 )
+from aero.distribution import DistributionError, download
 
 ENV_NAME = "aero-agent"
 CONDA_ENVIRONMENT_FILE = Path(__file__).with_name("environment.yaml")
@@ -106,22 +107,35 @@ def ensure_micromamba() -> Path | None:
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             archive = Path(temp_dir) / "micromamba.tar.bz2"
-            urllib.request.urlretrieve(url, archive)
+            download(url, archive, limit=30_000_000)
             with tarfile.open(archive, "r:bz2") as bundle:
                 member = next(
                     (item for item in bundle.getmembers() if item.name == "bin/micromamba"),
                     None,
                 )
-                if member is None:
+                if member is None or not member.isfile() or member.size > 30_000_000:
                     raise RuntimeError("下载包中未找到 bin/micromamba")
                 extracted = bundle.extractfile(member)
                 if extracted is None:
                     raise RuntimeError("无法读取 Micromamba 可执行文件")
                 executable.parent.mkdir(parents=True, exist_ok=True)
-                with executable.open("wb") as destination:
-                    shutil.copyfileobj(extracted, destination)
-        executable.chmod(0o755)
-    except (OSError, RuntimeError, tarfile.TarError, urllib.error.URLError) as exc:
+                fd, temporary = tempfile.mkstemp(prefix=".micromamba-", dir=executable.parent)
+                try:
+                    with os.fdopen(fd, "wb") as destination:
+                        shutil.copyfileobj(extracted, destination)
+                        destination.flush()
+                        os.fsync(destination.fileno())
+                    Path(temporary).chmod(0o755)
+                    os.replace(temporary, executable)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
+    except (
+        OSError,
+        RuntimeError,
+        DistributionError,
+        tarfile.TarError,
+        urllib.error.URLError,
+    ) as exc:
         print(f"Micromamba 安装失败: {exc}")
         return None
 
@@ -240,6 +254,7 @@ def runtime_diagnostics() -> tuple[bool, list[tuple[str, bool, str]]]:
             result = _run(
                 [str(python), "-c", "import platform; print(platform.python_version())"],
                 timeout=30,
+                capture=True,
             )
             version = result.stdout.strip()
             valid = result.returncode == 0 and version.startswith("3.12.")
@@ -277,9 +292,7 @@ def _print_common_packages() -> None:
 def _conda_packages() -> tuple[str, ...]:
     data = yaml.safe_load(CONDA_ENVIRONMENT_FILE.read_text()) or {}
     return tuple(
-        str(package)
-        for package in (data.get("dependencies") or [])
-        if isinstance(package, str)
+        str(package) for package in (data.get("dependencies") or []) if isinstance(package, str)
     )
 
 
@@ -310,7 +323,9 @@ def _confirm(prompt: str, *, default: bool) -> bool:
     return answer in {"y", "yes", "是", "好", "安装", "继续"}
 
 
-def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: list[str], *, timeout: int, capture: bool = False
+) -> subprocess.CompletedProcess[str]:
     """Run an installer attached to the terminal so progress is visible live."""
     env = apply_package_mirrors(dict(os.environ))
     env["MAMBA_ROOT_PREFIX"] = str(runtime_root())
@@ -319,6 +334,7 @@ def _run(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str
         timeout=timeout,
         check=False,
         env=env,
+        **({"capture_output": True, "text": True} if capture else {}),
     )
 
 

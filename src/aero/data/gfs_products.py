@@ -165,9 +165,8 @@ def _extract_inventory_links(page_html: str) -> list[str]:
     links = []
     for href in parser.hrefs:
         name = Path(href).name
-        supported = (
-            re.fullmatch(r"gfs\.t00z\..+?\.(?:anl|f\d{3})\.shtml", name)
-            or re.fullmatch(r"gfs\.t00z\.[a-z0-9]+f\d{3}\.grib2\.shtml", name)
+        supported = re.fullmatch(r"gfs\.t00z\..+?\.(?:anl|f\d{3})\.shtml", name) or re.fullmatch(
+            r"gfs\.t00z\.[a-z0-9]+f\d{3}\.grib2\.shtml", name
         )
         if not supported:
             continue

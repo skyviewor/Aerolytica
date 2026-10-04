@@ -17,9 +17,8 @@ def _fake_grib2_message(discipline: int = 0, category: int = 0, parameter: int =
 def test_parse_grib2_messages_reads_product_metadata():
     from aero.toolbox.tools.grib import _parse_grib2_messages
 
-    data = (
-        _fake_grib2_message(category=0, parameter=0)
-        + _fake_grib2_message(category=2, parameter=2)
+    data = _fake_grib2_message(category=0, parameter=0) + _fake_grib2_message(
+        category=2, parameter=2
     )
     messages = _parse_grib2_messages(data)
 

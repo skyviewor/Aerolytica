@@ -33,6 +33,8 @@ def download_progress_reporter():
     progress_id = next(_PROGRESS_IDS)
     start_time: float | None = None
     start_done = 0
+    last_report: float | None = None
+    completed = False
 
     def report(
         done: int,
@@ -41,13 +43,25 @@ def download_progress_reporter():
         force: bool = False,
         reset_measurement: bool = False,
     ) -> None:
-        nonlocal start_time, start_done
+        nonlocal start_time, start_done, last_report, completed
         if total <= 0:
             return
 
         percent_value = min(100.0, done * 100 / total)
         percent = int(percent_value)
         now = time.monotonic()
+        if completed:
+            return
+        if (
+            last_report is not None
+            and now - last_report < 5
+            and done < total
+            and not force
+            and not reset_measurement
+        ):
+            return
+        last_report = now
+        completed = done >= total
         if start_time is None or reset_measurement:
             # A resumed transfer begins with bytes that were written during a
             # previous connection.  They are progress, not bytes transferred
@@ -62,9 +76,7 @@ def download_progress_reporter():
             speed = transferred / elapsed
             speed_label = f"{format_size(speed)}/s"
             eta_label = (
-                f"ETA {format_duration((total - done) / speed)}"
-                if speed > 0
-                else "ETA 估算中"
+                f"ETA {format_duration((total - done) / speed)}" if speed > 0 else "ETA 估算中"
             )
         filled = min(20, int(20 * percent / 100))
         bar = "█" * filled + "░" * (20 - filled)

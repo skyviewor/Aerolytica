@@ -57,7 +57,9 @@ def _parse_arxiv_atom(xml_text: str) -> list[dict]:
                 if title == "pdf" or rel == "related" and href.endswith(".pdf"):
                     entry["pdf_url"] = href
                 elif title == "doi":
-                    entry["doi"] = href.replace("http://dx.doi.org/", "").replace("https://doi.org/", "")
+                    entry["doi"] = href.replace("http://dx.doi.org/", "").replace(
+                        "https://doi.org/", ""
+                    )
                 elif rel == "alternate" and title:
                     entry["landing_page_url"] = href
             elif tag == "arxiv:primary_category":
@@ -88,7 +90,9 @@ def _extract_arxiv_entry(entry: dict) -> dict:
         "source": "arXiv",
         "issn": "",
         "publication_date": entry.get("published", ""),
-        "publication_year": int(entry["published"][:4]) if entry.get("published") and len(entry.get("published", "")) >= 4 else None,
+        "publication_year": int(entry["published"][:4])
+        if entry.get("published") and len(entry.get("published", "")) >= 4
+        else None,
         "cited_by_count": 0,
         "abstract": entry.get("summary", ""),
         "is_oa": True,
@@ -143,7 +147,9 @@ async def search_arxiv(
             resp.raise_for_status()
     except Exception as e:
         logger.warning("arxiv search failed", error=str(e))
-        debug_exception("arxiv.search_failed", e, url=url, keyword=keyword, author=author, title=title)
+        debug_exception(
+            "arxiv.search_failed", e, url=url, keyword=keyword, author=author, title=title
+        )
         return {"found": False, "error": str(e), "results": []}
 
     entries = _parse_arxiv_atom(resp.text)
@@ -171,7 +177,6 @@ async def search_arxiv(
 
 async def get_arxiv_detail(arxiv_id: str) -> dict[str, Any] | None:
     arxiv_id = arxiv_id.replace("arxiv:", "")
-    search_query = f"id:{arxiv_id}"
     url = f"{ARXIV_API_BASE}?id_list={quote(arxiv_id)}&max_results=1"
     headers = {"User-Agent": USER_AGENT}
 

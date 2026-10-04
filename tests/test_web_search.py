@@ -53,9 +53,7 @@ def test_build_arguments_falls_back_to_search_operators():
         domains=["cma.gov.cn", "jma.go.jp"],
     )
 
-    assert arguments["q"] == (
-        "台风名称 site:cma.gov.cn OR site:jma.go.jp 最近30天"
-    )
+    assert arguments["q"] == ("台风名称 site:cma.gov.cn OR site:jma.go.jp 最近30天")
 
 
 def test_normalize_search_response_returns_structured_results_and_encoded_urls():
@@ -79,9 +77,7 @@ def test_normalize_search_response_returns_structured_results_and_encoded_urls()
     assert result["found"] is True
     assert result["results"][0]["title"] == "台风公报"
     assert result["results"][0]["snippet"] == "最新台风信息"
-    assert result["references"] == [
-        "https://example.com/search?q=western%20pacific"
-    ]
+    assert result["references"] == ["https://example.com/search?q=western%20pacific"]
 
 
 @pytest.mark.asyncio
@@ -332,6 +328,7 @@ def test_web_search_status_is_registered_without_confirmation():
 
     assert spec is not None
     assert spec.requires_confirmation is False
+
 
 def test_bailian_native_search_capability_is_removed():
     import aero.data.web_search as web_search

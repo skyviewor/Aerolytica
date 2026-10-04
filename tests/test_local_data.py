@@ -41,8 +41,7 @@ async def test_scan_preview_reports_metadata_quality_and_does_not_register(monke
     data.mkdir(parents=True)
     _write_netcdf(data / "sample.nc")
     (data / "stations.csv").write_text(
-        "time,lat,lon,temperature\n2024-01-01T00:00:00,40,110,1\n"
-        "2024-01-01T02:00:00,41,111,\n",
+        "time,lat,lon,temperature\n2024-01-01T00:00:00,40,110,1\n2024-01-01T02:00:00,41,111,\n",
         encoding="utf-8",
     )
     (data / "broken.grib2").write_bytes(b"not grib")
@@ -59,7 +58,8 @@ async def test_scan_preview_reports_metadata_quality_and_does_not_register(monke
     assert netcdf["dimensions"] == {"time": 3, "lat": 1, "lon": 2}
     assert netcdf["quality"]["variables"]["temperature"]["missing"] == 1
     assert {issue["code"] for issue in netcdf["quality"]["issues"]} >= {
-        "duplicate_time", "irregular_time_interval"
+        "duplicate_time",
+        "irregular_time_interval",
     }
     csv_item = next(item for item in result["candidates"] if item["format"] == "csv")
     assert csv_item["quality"]["variables"]["temperature"]["missing"] == 1
@@ -101,6 +101,7 @@ async def test_scan_supports_valid_grib_and_pattern_filter(monkeypatch, tmp_path
     (data / "forecast.grib2").write_bytes(_fake_grib2_message())
     (data / "table.csv").write_text("value\n1\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+
     async def fake_lookup():
         return {}
 

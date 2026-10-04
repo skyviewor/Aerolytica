@@ -72,6 +72,4 @@ def test_cams_variable_resolves_underscore_pm25_variant():
 
     assert resolved == ["particulate_matter_2.5um"]
     assert records[0]["name"] == "particulate_matter_2.5um"
-    assert warnings == [
-        "particulate_matter_2_5um 已解析为 ADS 变量名 particulate_matter_2.5um"
-    ]
+    assert warnings == ["particulate_matter_2_5um 已解析为 ADS 变量名 particulate_matter_2.5um"]

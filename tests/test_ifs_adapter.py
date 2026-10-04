@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from aero.adapters.ifs_adapter import (
@@ -10,19 +11,17 @@ from aero.adapters.ifs_adapter import (
     _friendly_http_error,
     _normalize_cycle,
     _normalize_date,
+    _normalize_levels,
+    _normalize_levtype,
     _normalize_step,
     _normalize_variables,
-    _normalize_levtype,
-    _normalize_levels,
-    _normalize_levelist,
     _parse_ifs_index,
     _request_with_retry,
     _retry_message,
     _select_ifs_entries,
-    is_ifs_step_available,
     ifs_forecast_steps_for_range,
+    is_ifs_step_available,
 )
-import httpx
 
 SAMPLE_INDEX = """\
 {"domain":"g","date":"20260604","time":"0000","expver":"0001","class":"od","type":"fc","stream":"oper","levtype":"sfc","step":"3","param":"tp","_offset":0,"_length":587738}
@@ -62,7 +61,7 @@ class TestParseIFSIndex:
         assert entries == []
 
     def test_invalid_json_lines(self):
-        text = "not valid json\n{\"param\":\"2t\",\"_offset\":0,\"_length\":100}\n"
+        text = 'not valid json\n{"param":"2t","_offset":0,"_length":100}\n'
         entries = _parse_ifs_index(text)
         assert len(entries) == 1
         assert entries[0].param == "2t"
@@ -89,9 +88,7 @@ class TestSelectIFSEntries:
 
     def test_select_by_param_levtype_and_level(self):
         entries = self._entries()
-        selected, missing = _select_ifs_entries(
-            entries, ["t"], levtype="pl", levels=["500"]
-        )
+        selected, missing = _select_ifs_entries(entries, ["t"], levtype="pl", levels=["500"])
         assert len(selected) == 1
         assert selected[0].levelist == "500"
 
@@ -109,9 +106,7 @@ class TestSelectIFSEntries:
 
     def test_missing_level(self):
         entries = self._entries()
-        selected, missing = _select_ifs_entries(
-            entries, ["z"], levtype="pl", levels=["1000"]
-        )
+        selected, missing = _select_ifs_entries(entries, ["z"], levtype="pl", levels=["1000"])
         assert len(selected) == 0
         assert len(missing) == 1
         assert missing[0]["level"] == "1000"
@@ -152,7 +147,7 @@ class TestRetryMessages:
         assert "请求过于频繁" in message
         assert "减少并发" in message
 
-    def test_request_with_retry_retries_429(monkeypatch):
+    def test_request_with_retry_retries_429(self, monkeypatch):
         calls = []
         sleeps = []
 
@@ -244,7 +239,39 @@ class TestStepAvailability:
             end_step=96,
             cycle="06",
         )
-        assert steps == [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72, 75, 78, 81, 84, 87, 90]
+        assert steps == [
+            0,
+            3,
+            6,
+            9,
+            12,
+            15,
+            18,
+            21,
+            24,
+            27,
+            30,
+            33,
+            36,
+            39,
+            42,
+            45,
+            48,
+            51,
+            54,
+            57,
+            60,
+            63,
+            66,
+            69,
+            72,
+            75,
+            78,
+            81,
+            84,
+            87,
+            90,
+        ]
         assert len(steps) == 31
 
     def test_is_step_available(self):

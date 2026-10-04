@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from aero.release_environment import user_home
+
 _DEPRECATED_LLM_MODELS = {
     ("deepseek", "deepseek-chat"): "deepseek-v4-flash",
     ("deepseek", "deepseek-reasoner"): "deepseek-v4-pro",
@@ -216,7 +218,7 @@ class AeroConfig(BaseModel):
 
 def user_secrets_path() -> Path:
     override = os.environ.get("AERO_SECRETS_PATH")
-    return Path(override) if override else Path.home() / ".aero" / "secrets.yaml"
+    return Path(override) if override else user_home() / "secrets.yaml"
 
 
 def load_user_secrets() -> dict:

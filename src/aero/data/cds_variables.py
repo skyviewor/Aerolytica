@@ -102,13 +102,16 @@ async def _fetch_one_dataset(dataset_id: str, level_type: str, dataset_label: st
         form = resp.json()
     chinese = _load_reference()["chinese_labels"]
     variables = _extract_variables_from_form(form)
-    return [{
-        "name": v["name"],
-        "label": chinese.get(v["name"], v["label"]),
-        "level_type": level_type,
-        "dataset": dataset_id,
-        "dataset_label": dataset_label,
-    } for v in variables]
+    return [
+        {
+            "name": v["name"],
+            "label": chinese.get(v["name"], v["label"]),
+            "level_type": level_type,
+            "dataset": dataset_id,
+            "dataset_label": dataset_label,
+        }
+        for v in variables
+    ]
 
 
 async def fetch_cds_variables(dataset_ids: list[str] | None = None) -> list[dict]:
@@ -151,20 +154,29 @@ def _load_cache() -> list[dict] | None:
 def _save_cache(variables: list[dict]):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(CACHE_FILE, "w") as f:
-        json.dump({
-            "cached_at": datetime.now().isoformat(),
-            "count": len(variables),
-            "variables": variables,
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "cached_at": datetime.now().isoformat(),
+                "count": len(variables),
+                "variables": variables,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
 
 def _fallback_variables() -> list[dict]:
     ref = _load_reference()
     fallback = ref.get("fallback_variables", [])
     return [
-        {"name": v["name"], "label": v["label"],
-         "level_type": v["level_type"],
-         "dataset": "", "dataset_label": ""}
+        {
+            "name": v["name"],
+            "label": v["label"],
+            "level_type": v["level_type"],
+            "dataset": "",
+            "dataset_label": "",
+        }
         for v in fallback
     ]
 
@@ -197,8 +209,11 @@ async def get_cds_variables(dataset_ids: list[str] | None = None) -> list[dict]:
                 supplemented.append(fv)
         all_vars = live_vars + supplemented
         if supplemented:
-            logger.info("supplemented from fallback", count=len(supplemented),
-                        missing_levels=[lt for lt in {"pressure", "surface"} if lt not in live_levels])
+            logger.info(
+                "supplemented from fallback",
+                count=len(supplemented),
+                missing_levels=[lt for lt in {"pressure", "surface"} if lt not in live_levels],
+            )
         _save_cache(all_vars)
         if dataset_ids:
             return [v for v in all_vars if v.get("dataset") in dataset_ids]
@@ -226,9 +241,7 @@ def search_cds_variables(variables: list[dict], keyword: str) -> list[dict]:
     for v in variables:
         name = v["name"]
         label = v["label"]
-        if (kw_lower in name or name in kw_lower
-                or kw in label or label in kw
-                or name in name_set):
+        if kw_lower in name or name in kw_lower or kw in label or label in kw or name in name_set:
             results.append(v)
 
     return results
@@ -249,8 +262,10 @@ def describe_cds_dataset(dataset_id: str | None = None) -> dict:
             }
         related = {}
         for key, comp in comparisons.items():
-            if dataset_id in key or (isinstance(comp, dict) and
-                any(dataset_id in str(v) for v in comp.values() if isinstance(v, str))):
+            if dataset_id in key or (
+                isinstance(comp, dict)
+                and any(dataset_id in str(v) for v in comp.values() if isinstance(v, str))
+            ):
                 related[key] = comp
         return {
             "found": True,
@@ -264,15 +279,17 @@ def describe_cds_dataset(dataset_id: str | None = None) -> dict:
 
     summary = []
     for did, info in datasets.items():
-        summary.append({
-            "id": did,
-            "label": info["label"],
-            "level_type": info.get("level_type", ""),
-            "resolution": info.get("resolution", ""),
-            "temporal": info.get("temporal", ""),
-            "variables_count": info.get("variables_count", ""),
-            "brief": info["description"].split("。")[0] + "。",
-        })
+        summary.append(
+            {
+                "id": did,
+                "label": info["label"],
+                "level_type": info.get("level_type", ""),
+                "resolution": info.get("resolution", ""),
+                "temporal": info.get("temporal", ""),
+                "variables_count": info.get("variables_count", ""),
+                "brief": info["description"].split("。")[0] + "。",
+            }
+        )
 
     return {
         "found": True,
@@ -280,7 +297,10 @@ def describe_cds_dataset(dataset_id: str | None = None) -> dict:
         "comparisons": {
             "single_levels_vs_land": comparisons.get("single_levels_vs_land", {}),
         },
-        "note": "如需查看某个数据集的详细信息（完整描述、使用场景、注意事项），请指定 dataset_id 再次查询。",
+        "note": (
+            "如需查看某个数据集的详细信息（完整描述、使用场景、注意事项），"
+            "请指定 dataset_id 再次查询。"
+        ),
         "references": [
             "https://cds.climate.copernicus.eu/datasets",
         ],

@@ -36,11 +36,16 @@ def visible_history(payload: dict) -> list[dict]:
             role, content = message.get("role"), message.get("content")
             if role not in {"user", "assistant"} or not isinstance(content, str):
                 continue
-            marker = next((prefix for prefix in
-                           ("[compact_summary]", "[Previous conversation summary]")
-                           if role == "user" and content.startswith(prefix)), None)
+            marker = next(
+                (
+                    prefix
+                    for prefix in ("[compact_summary]", "[Previous conversation summary]")
+                    if role == "user" and content.startswith(prefix)
+                ),
+                None,
+            )
             if marker:
-                transcript.append({"role": "summary", "content": content[len(marker):].strip()})
+                transcript.append({"role": "summary", "content": content[len(marker) :].strip()})
                 summary_ack = True
                 continue
             if summary_ack and role == "assistant":
@@ -56,7 +61,13 @@ def visible_history(payload: dict) -> list[dict]:
         if role not in {"user", "assistant", "summary"} or not isinstance(content, str):
             continue
         if content.strip():
-            result.append({"role": role, "content": content,
-                           "images": describe_images(content, f"history:{len(result)}")
-                           if role == "assistant" else []})
+            result.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "images": describe_images(content, f"history:{len(result)}")
+                    if role == "assistant"
+                    else [],
+                }
+            )
     return result

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 from types import SimpleNamespace
 
 import httpx
@@ -35,9 +33,7 @@ class Session:
         self.transport = transport
 
     async def request(self, method, path, **kwargs):
-        async with httpx.AsyncClient(
-            transport=self.transport, base_url=self.base_url
-        ) as client:
+        async with httpx.AsyncClient(transport=self.transport, base_url=self.base_url) as client:
             return await client.request(method, path, **kwargs)
 
     async def close(self):
@@ -82,39 +78,22 @@ async def test_remote_agent_register_wait_and_reply(tmp_path, monkeypatch):
                 },
                 request=request,
             )
-        if request.url.path.endswith("/memory") and request.method == "GET":
-            encrypted = b"encrypted-memory"
-            return httpx.Response(
-                200,
-                json={
-                    "snapshot": base64.b64encode(encrypted).decode(),
-                    "checksum": hashlib.sha256(encrypted).hexdigest(),
-                },
-                request=request,
-            )
         return httpx.Response(200, json={"status": "ok"}, request=request)
 
     transport = httpx.MockTransport(handler)
     agent_http = httpx.AsyncClient(transport=transport, base_url="https://relay.test")
-    client = RemoteAgentClient(
-        Session(transport), agent_http=agent_http, select_agent=False
-    )
+    client = RemoteAgentClient(Session(transport), agent_http=agent_http, select_agent=False)
     registration = await client.register("ocean", description="测试 Agent")
     assert registration["status"] == "offline"
     command = await client.wait_for_command()
     assert command["content"] == "列出文件"
     await client.send_progress("处理中", command_id="cmd_1")
     await client.send_message("完成", command_id="cmd_1")
-    await client.upload_memory("remote-test", b"encrypted-memory")
-    assert await client.download_memory("remote-test") == b"encrypted-memory"
-    memory_upload = next(
-        call for call in calls if call[0] == "PUT" and call[1].endswith("/memory")
-    )
-    assert memory_upload[2] == "Bearer agt_token"
+    await client.update_command_status("cmd_1", "completed")
+    assert len([call for call in calls if call[1].endswith("/events")]) == 2
+    assert any(call[1].endswith("/commands/cmd_1/status") for call in calls)
     assert all(
-        auth == "Bearer agt_token"
-        for method, path, auth in calls
-        if path != "/v1/agents/register"
+        auth == "Bearer agt_token" for method, path, auth in calls if path != "/v1/agents/register"
     )
     await client.close()
 
@@ -122,23 +101,17 @@ async def test_remote_agent_register_wait_and_reply(tmp_path, monkeypatch):
 def test_remote_agent_registry_supports_multiple_agents_and_name_selection(tmp_path, monkeypatch):
     monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
     registry = RemoteAgentRegistry()
-    first = registry.add(
-        agent_id="agent_1", name="ocean", description="海洋 Agent", token="agt_1"
-    )
-    second = registry.add(
-        agent_id="agent_2", name="paper", description="论文 Agent", token="agt_2"
-    )
+    first = registry.add(agent_id="agent_1", name="ocean", description="海洋 Agent", token="agt_1")
+    second = registry.add(agent_id="agent_2", name="paper", description="论文 Agent", token="agt_2")
     assert [agent.name for agent in registry.list()] == ["ocean", "paper"]
     assert registry.resolve("OCEAN") == first
     assert registry.resolve("agent_2") == second
     with pytest.raises(RemoteAgentError, match="多个 Agent"):
         registry.resolve()
     with pytest.raises(RemoteAgentError, match="已存在"):
-        registry.add(
-            agent_id="agent_3", name="ocean", description="重复", token="agt_3"
-        )
+        registry.add(agent_id="agent_3", name="ocean", description="重复", token="agt_3")
     for invalid_name in ("Ocean", "ocean-data", "ocean data"):
-        with pytest.raises(RemoteAgentError, match="小写英文"):
+        with pytest.raises(RemoteAgentError, match="小写字母"):
             registry.ensure_name_available(invalid_name)
 
 
@@ -278,9 +251,7 @@ async def test_lease_renewal_posts_running_status(tmp_path, monkeypatch):
         agent_http=httpx.AsyncClient(transport=transport, base_url="https://relay.test"),
     )
     stop = asyncio.Event()
-    task = asyncio.create_task(
-        renew_command_lease(client, "cmd_1", stop, interval_seconds=0.01)
-    )
+    task = asyncio.create_task(renew_command_lease(client, "cmd_1", stop, interval_seconds=0.01))
     await asyncio.sleep(0.025)
     stop.set()
     await task

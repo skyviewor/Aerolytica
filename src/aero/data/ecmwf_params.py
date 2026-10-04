@@ -125,7 +125,7 @@ async def lookup_ecmwf_parameters(
                 "source": f"{PARAM_DB_WEB}/?filter={search_text}",
                 "message": f"ECMWF 参数库查询暂时失败：HTTP {exc.response.status_code}。",
             }
-        results = _rank_results(results, query=query, short_name=short_name)[:max(1, limit)]
+        results = _rank_results(results, query=query, short_name=short_name)[: max(1, limit)]
 
         return {
             "found": bool(results),
@@ -134,7 +134,9 @@ async def lookup_ecmwf_parameters(
             "count": len(results),
             "parameters": [await _format_param(client, item) for item in results],
             "source": f"{PARAM_DB_WEB}/?filter={search_text}",
-            "note": "来源为 ECMWF Parameter Database，适合核对 paramId、shortName、单位和官方定义。",
+            "note": (
+                "来源为 ECMWF Parameter Database，适合核对 paramId、shortName、单位和官方定义。"
+            ),
         }
 
 

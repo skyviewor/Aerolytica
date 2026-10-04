@@ -59,8 +59,12 @@ async def check_bailian_web(api_key: str) -> str:
 
 
 async def search_zhipu_web(
-    api_key: str, query: str, *, limit: int = 8,
-    freshness_days: int | None = None, domains: list[str] | None = None,
+    api_key: str,
+    query: str,
+    *,
+    limit: int = 8,
+    freshness_days: int | None = None,
+    domains: list[str] | None = None,
     base_url: str = ZHIPU_WEB_SEARCH_URL,
 ) -> dict[str, Any]:
     payload = {
@@ -72,8 +76,13 @@ async def search_zhipu_web(
     }
     if freshness_days:
         payload["search_recency_filter"] = (
-            "day" if freshness_days <= 1 else "week" if freshness_days <= 7
-            else "month" if freshness_days <= 30 else "year"
+            "day"
+            if freshness_days <= 1
+            else "week"
+            if freshness_days <= 7
+            else "month"
+            if freshness_days <= 30
+            else "year"
         )
     if domains:
         payload["search_domain_filter"] = domains[0]
@@ -158,11 +167,7 @@ def _build_arguments(
     query_field = _first_field(properties, _QUERY_FIELDS)
     if query_field is None:
         query_field = next(
-            (
-                name
-                for name in required
-                if (properties.get(name) or {}).get("type") == "string"
-            ),
+            (name for name in required if (properties.get(name) or {}).get("type") == "string"),
             None,
         )
     if query_field is None:
@@ -274,9 +279,7 @@ def _collect_results(value: Any, results: list[dict[str, str]], references: list
     if not isinstance(value, dict):
         return
 
-    url = _clean_url(
-        str(value.get("url") or value.get("link") or value.get("source_url") or "")
-    )
+    url = _clean_url(str(value.get("url") or value.get("link") or value.get("source_url") or ""))
     title = str(value.get("title") or value.get("name") or "").strip()
     snippet = str(
         value.get("snippet")

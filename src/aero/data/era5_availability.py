@@ -54,9 +54,15 @@ async def resolve_era5_source(
     canonical_vars = [resolve_cds_name(v) for v in variables]
 
     now = _now()
-    debug_log("era5.availability.check_start", requested_source=requested,
-              variables=canonical_vars, year=year, month=f"{month:02d}", day=day,
-              pressure_level=pressure_level)
+    debug_log(
+        "era5.availability.check_start",
+        requested_source=requested,
+        variables=canonical_vars,
+        year=year,
+        month=f"{month:02d}",
+        day=day,
+        pressure_level=pressure_level,
+    )
 
     cds_status = await _check_cds(canonical_vars, year, month, day, pressure_level, now)
 
@@ -69,8 +75,7 @@ async def resolve_era5_source(
             reason=cds_status.reason,
         )
 
-    debug_log("era5.availability.cds_unavailable",
-              reason=cds_status.reason)
+    debug_log("era5.availability.cds_unavailable", reason=cds_status.reason)
     return ERA5AvailabilityDecision(
         requested_source=requested,
         selected_source=None,
@@ -115,7 +120,10 @@ async def check_era5_source_availability(
         result["sources"]["cds"] = {
             "source": "cds",
             "available": True,
-            "reason": "CDS 官方源通常按请求动态生成 ERA5；实际可用性取决于 CDS 凭证、数据集更新和队列状态。",
+            "reason": (
+                "CDS 官方源通常按请求动态生成 ERA5；"
+                "实际可用性取决于 CDS 凭证、数据集更新和队列状态。"
+            ),
             "time_range": "ERA5 常规数据通常从 1940 年起，近实时 ERA5T 约有数天延迟。",
             "checked_at": _iso(now),
         }
@@ -166,8 +174,7 @@ async def _check_cds(
             )
 
         dataset_id = (
-            "reanalysis-era5-pressure-levels" if pressure_level
-            else "reanalysis-era5-single-levels"
+            "reanalysis-era5-pressure-levels" if pressure_level else "reanalysis-era5-single-levels"
         )
         return ERA5SourceStatus(
             source="cds",
@@ -177,8 +184,11 @@ async def _check_cds(
             checked_at=_iso(now),
         )
     except Exception as e:
-        debug_exception("era5.availability.cds_check_failed", e,
-                        config_path=str(config_path) if 'config_path' in locals() else "unknown")
+        debug_exception(
+            "era5.availability.cds_check_failed",
+            e,
+            config_path=str(config_path) if "config_path" in locals() else "unknown",
+        )
         return ERA5SourceStatus(
             source="cds",
             available=False,

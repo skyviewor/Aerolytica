@@ -205,10 +205,7 @@ def _forecast_schedule_note(product: str, date: str | None = None) -> str:
             "这个历史 GFS 0.25° 产品通常 0-120 小时逐小时输出，"
             "123-240 小时每 3 小时输出，252-384 小时每 12 小时输出。"
         )
-    return (
-        "这个 GFS 产品通常 0-120 小时逐小时输出，"
-        "之后到 384 小时每 3 小时输出。"
-    )
+    return "这个 GFS 产品通常 0-120 小时逐小时输出，之后到 384 小时每 3 小时输出。"
 
 
 def cache_path() -> Path:
@@ -535,15 +532,9 @@ def parse_s3_list_bucket(xml_text: str) -> dict:
     root = ET.fromstring(xml_text)
     ns = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
     common_prefixes = [
-        elem.text or ""
-        for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns)
-        if elem.text
+        elem.text or "" for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns) if elem.text
     ]
-    contents = [
-        elem.text or ""
-        for elem in root.findall("s3:Contents/s3:Key", ns)
-        if elem.text
-    ]
+    contents = [elem.text or "" for elem in root.findall("s3:Contents/s3:Key", ns) if elem.text]
     token = root.findtext("s3:NextContinuationToken", default=None, namespaces=ns)
     return {
         "common_prefixes": common_prefixes,

@@ -191,19 +191,14 @@ class CloudSyncEngine:
         includes = binding.get("includes") or sorted(ALLOWED_ROOTS)
         normalized = [str(item).strip("/") for item in includes if str(item).strip("/")]
         return any(
-            path == item.removesuffix("/**")
-            or path.startswith(item.removesuffix("/**") + "/")
+            path == item.removesuffix("/**") or path.startswith(item.removesuffix("/**") + "/")
             for item in normalized
         )
 
     def _configured_roots(self) -> set[str]:
         binding = self._state.get("binding") or {}
         includes = binding.get("includes") or sorted(ALLOWED_ROOTS)
-        return {
-            str(item).strip("/").split("/", 1)[0]
-            for item in includes
-            if str(item).strip("/")
-        }
+        return {str(item).strip("/").split("/", 1)[0] for item in includes if str(item).strip("/")}
 
     @staticmethod
     def _validate_includes(includes: list[str] | None) -> list[str]:
@@ -246,7 +241,10 @@ class CloudSyncEngine:
         }
 
     async def bind(
-        self, user_id: str, project_id: str, root_directory_id: str | None = None,
+        self,
+        user_id: str,
+        project_id: str,
+        root_directory_id: str | None = None,
         includes: list[str] | None = None,
     ) -> dict[str, Any]:
         async with self._mutex:
@@ -301,7 +299,8 @@ class CloudSyncEngine:
         binding = self._state["binding"]
         directories = {
             str(i["data"]["directory_id"]): i["data"]
-            for i in items if i["entity_type"] == "directory"
+            for i in items
+            if i["entity_type"] == "directory"
         }
         scope = binding["root_directory_id"]
         if scope and (scope not in directories or _deleted(directories[scope])):
@@ -328,8 +327,14 @@ class CloudSyncEngine:
                 raise CloudSyncError("Cloud snapshot escaped project scope")
             kind = "dir" if item["entity_type"] == "directory" else "file"
             parent = relative(row.get("directory_id"))
-            path = parent if kind == "dir" else (
-                "/".join(filter(None, (parent, row["filename"]))) if parent is not None else None
+            path = (
+                parent
+                if kind == "dir"
+                else (
+                    "/".join(filter(None, (parent, row["filename"])))
+                    if parent is not None
+                    else None
+                )
             )
             if kind == "file" and ("/" in row["filename"] or "\\" in row["filename"]):
                 raise CloudSyncError("Invalid cloud filename")
@@ -370,9 +375,7 @@ class CloudSyncEngine:
             if cursor in seen:
                 raise CloudSyncError("Repeated cloud snapshot cursor")
             seen.add(cursor)
-        self._state["remote_entities"] = {
-            self._entity_key(item): item["data"] for item in items
-        }
+        self._state["remote_entities"] = {self._entity_key(item): item["data"] for item in items}
         self._state["remote_cursor"] = checkpoint
         return self._remote_from_items(items)
 
@@ -382,9 +385,15 @@ class CloudSyncEngine:
         cursor = self._state.get("remote_cursor")
         seen: set[str] = set()
         while True:
-            page = await self._api("GET", "/changes", params={
-                "project_id": binding["project_id"], "limit": 200, "cursor": cursor,
-            })
+            page = await self._api(
+                "GET",
+                "/changes",
+                params={
+                    "project_id": binding["project_id"],
+                    "limit": 200,
+                    "cursor": cursor,
+                },
+            )
             for item in page["items"]:
                 entities[self._entity_key(item)] = item["data"]
             next_cursor = page.get("next_cursor") or page.get("cursor")
@@ -397,11 +406,17 @@ class CloudSyncEngine:
             cursor = next_cursor
         self._state["remote_entities"] = entities
         self._state["remote_cursor"] = cursor
-        return self._remote_from_items([
-            {"entity_type": key.split(":", 1)[0],
-             "entity_id": key.split(":", 1)[1], "operation": "upsert", "data": data}
-            for key, data in entities.items()
-        ])
+        return self._remote_from_items(
+            [
+                {
+                    "entity_type": key.split(":", 1)[0],
+                    "entity_id": key.split(":", 1)[1],
+                    "operation": "upsert",
+                    "data": data,
+                }
+                for key, data in entities.items()
+            ]
+        )
 
     async def _remote(self) -> dict[str, dict]:
         if self._state.get("remote_cursor") and isinstance(
@@ -444,11 +459,17 @@ class CloudSyncEngine:
                 md5.update(block)
             after = os.fstat(stream.fileno())
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
         ):
             raise SyncConflict("Local file changed during scan")
-        return {"kind": "file", "sha256": sha.hexdigest(), "md5": md5.hexdigest(),
-                "size": after.st_size}
+        return {
+            "kind": "file",
+            "sha256": sha.hexdigest(),
+            "md5": md5.hexdigest(),
+            "size": after.st_size,
+        }
 
     def _local(self) -> dict[str, dict]:
         result = {}
@@ -462,8 +483,11 @@ class CloudSyncEngine:
                     dirs[:] = []
                     continue
                 result[rel] = {"kind": "dir"}
-                dirs[:] = [d for d in dirs if self._eligible_path(f"{rel}/{d}")
-                           and not (Path(directory) / d).is_symlink()]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if self._eligible_path(f"{rel}/{d}") and not (Path(directory) / d).is_symlink()
+                ]
                 for name in files:
                     path = f"{rel}/{name}"
                     if self._eligible_path(path):
@@ -518,8 +542,7 @@ class CloudSyncEngine:
                     # New local-only directories must precede their files.
                     creates = [p for p in deletes if p in local and p not in remote]
                     ordered = sorted(normal + creates, key=lambda p: (p.count("/"), p))
-                    ordered += sorted(set(deletes) - set(creates),
-                                      key=lambda p: (-p.count("/"), p))
+                    ordered += sorted(set(deletes) - set(creates), key=lambda p: (-p.count("/"), p))
                     for path in ordered:
                         self._guard()
                         if path in self._state["conflicts"] or not self._eligible_path(path):
@@ -558,10 +581,10 @@ class CloudSyncEngine:
             return
         local_changed = not _same(local, base["local"])
         previous = base["remote"]
-        cloud_changed = (
-            (cloud or {}).get("version") != (previous or {}).get("version")
-            or (cloud or {}).get("file_id", (cloud or {}).get("directory_id"))
-            != (previous or {}).get("file_id", (previous or {}).get("directory_id"))
+        cloud_changed = (cloud or {}).get("version") != (previous or {}).get("version") or (
+            cloud or {}
+        ).get("file_id", (cloud or {}).get("directory_id")) != (previous or {}).get(
+            "file_id", (previous or {}).get("directory_id")
         )
         if local_changed and cloud_changed:
             raise SyncConflict("Both local and cloud changed")
@@ -607,8 +630,11 @@ class CloudSyncEngine:
             return
         if expected and expected["kind"] != "file":
             raise SyncConflict("File/directory type conflict")
-        payload = await self._api("POST", f"/files/{_id(cloud['file_id'])}/download-url",
-                                  json={"revision_id": cloud["revision_id"]})
+        payload = await self._api(
+            "POST",
+            f"/files/{_id(cloud['file_id'])}/download-url",
+            json={"revision_id": cloud["revision_id"]},
+        )
         fd, name = tempfile.mkstemp(dir=self._state_dir, prefix="download-")
         sha = hashlib.sha256()
         md5 = hashlib.md5(usedforsecurity=False)
@@ -629,8 +655,12 @@ class CloudSyncEngine:
                             md5.update(chunk)
                 stream.flush()
                 os.fsync(stream.fileno())
-            local = {"kind": "file", "sha256": sha.hexdigest(), "md5": md5.hexdigest(),
-                     "size": size}
+            local = {
+                "kind": "file",
+                "sha256": sha.hexdigest(),
+                "md5": md5.hexdigest(),
+                "size": size,
+            }
             if not self._matches(local, cloud):
                 raise SyncConflict("Downloaded content checksum/size could not be verified")
             self._unchanged(path, expected)
@@ -653,8 +683,11 @@ class CloudSyncEngine:
                 return
             entity = "directories" if cloud["kind"] == "dir" else "files"
             key = "directory_id" if cloud["kind"] == "dir" else "file_id"
-            deleted = await self._api("DELETE", f"/{entity}/{_id(cloud[key])}",
-                                      params={"expected_version": cloud["version"]})
+            deleted = await self._api(
+                "DELETE",
+                f"/{entity}/{_id(cloud[key])}",
+                params={"expected_version": cloud["version"]},
+            )
             deleted["kind"] = cloud["kind"]
             remote[path] = deleted
             self._baseline(path, None, deleted)
@@ -672,12 +705,14 @@ class CloudSyncEngine:
         if local["kind"] == "dir":
             if cloud and _deleted(cloud):
                 record = await self._api(
-                    "POST", f"/directories/{_id(cloud['directory_id'])}/restore",
+                    "POST",
+                    f"/directories/{_id(cloud['directory_id'])}/restore",
                     json={"expected_version": cloud["version"]},
                 )
             else:
                 record = await self._api(
-                    "POST", f"/projects/{_id(self._state['binding']['project_id'])}/directories",
+                    "POST",
+                    f"/projects/{_id(self._state['binding']['project_id'])}/directories",
                     json={"name": PurePosixPath(path).name, "parent_directory_id": directory_id},
                 )
             record["kind"] = "dir"
@@ -685,20 +720,29 @@ class CloudSyncEngine:
             self._baseline(path, local, record)
             return
         if cloud and _deleted(cloud):
-            cloud = await self._api("POST", f"/files/{_id(cloud['file_id'])}/restore",
-                                    json={"expected_version": cloud["version"]})
+            cloud = await self._api(
+                "POST",
+                f"/files/{_id(cloud['file_id'])}/restore",
+                json={"expected_version": cloud["version"]},
+            )
             cloud["kind"] = "file"
             remote[path] = cloud
         snapshot = self._snapshot(path, local)
-        pending = {"path": path, "snapshot": snapshot.name, "local": local,
-                   "expected_version": cloud["version"] if cloud else 0,
-                   "request": {"filename": PurePosixPath(path).name,
-                               "size_bytes": local["size"],
-                               "expected_version": cloud["version"] if cloud else 0,
-                               "project_id": self._state["binding"]["project_id"],
-                               "directory_id": directory_id,
-                               "content_type": "application/octet-stream"},
-                   "stage": "allocate"}
+        pending = {
+            "path": path,
+            "snapshot": snapshot.name,
+            "local": local,
+            "expected_version": cloud["version"] if cloud else 0,
+            "request": {
+                "filename": PurePosixPath(path).name,
+                "size_bytes": local["size"],
+                "expected_version": cloud["version"] if cloud else 0,
+                "project_id": self._state["binding"]["project_id"],
+                "directory_id": directory_id,
+                "content_type": "application/octet-stream",
+            },
+            "stage": "allocate",
+        }
         if cloud:
             pending["request"]["file_id"] = cloud["file_id"]
         self._state["pending"][path] = pending
@@ -740,6 +784,7 @@ class CloudSyncEngine:
             pending["upload_id"] = payload["upload_id"]
             pending["stage"] = "put"
             self._save()  # Record ID before the first PUT; never persist signed URLs.
+
             async def chunks():
                 with snapshot.open("rb") as stream:
                     while chunk := stream.read(CHUNK_SIZE):
@@ -748,16 +793,22 @@ class CloudSyncEngine:
 
             async with self.client.transfer() as client:
                 uploaded = await client.put(
-                    self.client.check_url(payload["upload_url"]), content=chunks(),
-                    headers={"Content-Type": "application/octet-stream",
-                             "Content-Length": str(pending["local"]["size"])},
+                    self.client.check_url(payload["upload_url"]),
+                    content=chunks(),
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(pending["local"]["size"]),
+                    },
                 )
                 uploaded.raise_for_status()
             self._guard()
             pending["stage"] = "complete"
             self._save()
-        record = await self._api("POST", f"/uploads/{_id(pending['upload_id'])}/complete",
-                                 json={"expected_version": pending["expected_version"]})
+        record = await self._api(
+            "POST",
+            f"/uploads/{_id(pending['upload_id'])}/complete",
+            json={"expected_version": pending["expected_version"]},
+        )
         record["kind"] = "file"
         self._baseline(path, pending["local"], record)
         del self._state["pending"][path]
@@ -798,9 +849,11 @@ class CloudSyncEngine:
                     if not local or local["kind"] != "file" or not cloud or _deleted(cloud):
                         raise SyncConflict("Keep-both requires two live files")
                     source = PurePosixPath(path)
-                    alternate = str(source.with_name(
-                        f"{source.stem}.local-{uuid.uuid4().hex[:12]}{source.suffix}"
-                    ))
+                    alternate = str(
+                        source.with_name(
+                            f"{source.stem}.local-{uuid.uuid4().hex[:12]}{source.suffix}"
+                        )
+                    )
                     snapshot = self._snapshot(path, local)
                     try:
                         self._unchanged(alternate, None)

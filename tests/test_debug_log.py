@@ -62,10 +62,7 @@ def test_structlog_warning_writes_file_and_debug_log(tmp_path):
     structlog.get_logger().warning("test.warning", detail="copyable")
 
     assert "test.warning" in standard_path.read_text(encoding="utf-8")
-    events = [
-        json.loads(line)
-        for line in debug_path.read_text(encoding="utf-8").splitlines()
-    ]
+    events = [json.loads(line) for line in debug_path.read_text(encoding="utf-8").splitlines()]
     mirrored = [event for event in events if event["event"] == "log.warning_or_error"]
     assert mirrored[-1]["log_level"] == "warning"
     assert mirrored[-1]["log_event"] == "test.warning"

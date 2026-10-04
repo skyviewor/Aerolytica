@@ -15,11 +15,13 @@ from typing import Any
 
 import httpx
 
-from aero.agent.loop import AgentLoop
 from aero.agent.audit_snapshot import render_conversation, zip_conversation
+from aero.agent.loop import AgentLoop
 from aero.agent.session import SessionManager, SessionMeta
 from aero.application.cloud_runtime import CloudAgentRuntime, RelayRuntimeTransport
 from aero.application.local_session import LocalSession
+from aero.cli.agent_listing import render_agent_list
+from aero.core.cloud_sync import CloudSyncEngine
 from aero.core.config import AeroConfig
 from aero.core.official_account import OfficialAccountError
 from aero.core.remote_agent import (
@@ -28,7 +30,7 @@ from aero.core.remote_agent import (
     RemoteAgentError,
     renew_command_lease,
 )
-from aero.core.cloud_sync import CloudSyncEngine
+from aero.release_environment import user_home
 
 
 def run_agent_cli(args: list[str]) -> int:
@@ -46,15 +48,27 @@ def run_agent_cli(args: list[str]) -> int:
                 raise ValueError("aero agent list 不接受其他参数")
             return asyncio.run(_list_agents())
         if action == "run":
-            selector = _run_args(args[1:])
+            selector, background = _background_args(args[1:])
+            if background:
+                return _start_background_service(selector)
             return asyncio.run(_run_service(selector))
+        if action == "start":
+            selector, background = _background_args(args[1:])
+            if selector is None:
+                raise ValueError("用法：aero agent start 智能体名称")
+            return asyncio.run(_start_service(selector, background=background))
         if action == "status":
             selector = _selector_arg(args[1:], "status")
             return asyncio.run(_show_status(selector))
+        if action in {"stop", "delete"}:
+            selector = _run_args(args[1:])
+            if selector is None:
+                raise ValueError(f"用法：aero agent {action} 智能体名称或 ID")
+            if action == "stop":
+                return _stop_service(selector)
+            return asyncio.run(_delete_agent(selector))
         if action == "context-sync":
-            if len(args) != 3 or args[2] not in {"on", "off"}:
-                raise ValueError("用法：aero agent context-sync 智能体名称或 ID on|off")
-            return asyncio.run(_set_context_sync(args[1], args[2] == "on"))
+            raise ValueError("官方账户强制同步上下文；请使用 aero agent status 查看状态。")
         if action == "snapshot":
             selector, upload, output = _snapshot_args(args[1:])
             return asyncio.run(_export_snapshot(selector, upload=upload, output=output))
@@ -63,11 +77,6 @@ def run_agent_cli(args: list[str]) -> int:
             if selector is None:
                 raise ValueError("用法：aero agent takeover 智能体名称或 ID")
             return asyncio.run(_takeover(selector))
-        if action == "clone":
-            selector = _selector_arg(args[1:], "clone")
-            if selector is None:
-                raise ValueError("用法：aero agent clone 智能体名称或 ID")
-            return asyncio.run(_takeover(selector, clone=True))
         if action == "resume":
             selector = _selector_arg(args[1:], "resume")
             if selector is None:
@@ -114,6 +123,12 @@ def _run_args(args: list[str]) -> str | None:
     return args[0].strip() if args else None
 
 
+def _background_args(args: list[str]) -> tuple[str | None, bool]:
+    if args.count("--background") > 1:
+        raise ValueError("--background 不能重复指定")
+    return _run_args([item for item in args if item != "--background"]), "--background" in args
+
+
 def _snapshot_args(args: list[str]) -> tuple[str | None, bool, Path | None]:
     selector = None
     output = None
@@ -149,18 +164,23 @@ async def _export_snapshot(selector: str | None, *, upload: bool, output: Path |
             response = await client.session.request("GET", "/v1/agents")
             if response.status_code >= 400:
                 raise RemoteAgentError("读取云端智能体列表失败。")
-            matches = [item for item in response.json().get("agents", [])
-                       if item.get("agent_type") == "chat" and
-                       (selector is None or selector in {item.get("agent_id"), item.get("name")})]
+            matches = [
+                item
+                for item in response.json().get("agents", [])
+                if item.get("agent_type") == "chat"
+                and (selector is None or selector in {item.get("agent_id"), item.get("name")})
+            ]
             if len(matches) != 1:
                 raise RemoteAgentError("请指定一个本机普通聊天的智能体 ID。")
             remote = matches[0]
             client.agent_id = remote["agent_id"]
             client.agent_name = remote["name"]
-        session_id = str(remote.get("session_id") or _memory_session_id(client.agent_id, Path.cwd().resolve()))
+        session_id = str(
+            remote.get("session_id") or _memory_session_id(client.agent_id, Path.cwd().resolve())
+        )
         manager = SessionManager()
         if manager.load(session_id) is None:
-            manager = SessionManager(Path.home() / ".aero" / "agent-memory")
+            manager = SessionManager(user_home() / "agent-memory")
         text = render_conversation(manager, session_id)
         archive = zip_conversation(text)
         destination = output or Path.cwd() / (
@@ -172,7 +192,10 @@ async def _export_snapshot(selector: str | None, *, upload: bool, output: Path |
         print(f"审计快照已导出：{destination}（{len(archive)} 字节）")
         print("请先人工审阅 ZIP 中的 conversation.txt，脱敏无法识别所有敏感信息。")
         if upload:
-            if not sys.stdin.isatty() or input("确认已审阅文件，允许上传云端？输入 YES：").strip() != "YES":
+            if (
+                not sys.stdin.isatty()
+                or input("确认已审阅文件，允许上传云端？输入 YES：").strip() != "YES"
+            ):
                 raise RemoteAgentError("上传已取消；本地 ZIP 已保留。")
             await _upload_audit_snapshot(client, destination.name, archive)
             print("审计快照已上传云端，可在网页智能体详情中查看或下载。")
@@ -183,11 +206,15 @@ async def _export_snapshot(selector: str | None, *, upload: bool, output: Path |
 
 async def _upload_audit_snapshot(client: RemoteAgentClient, filename: str, archive: bytes) -> None:
     content_type = "application/zip"
-    response = await client.session.request("POST", "/v1/storage/upload-url", json={
-        "filename": filename,
-        "size_bytes": len(archive),
-        "content_type": content_type,
-    })
+    response = await client.session.request(
+        "POST",
+        "/v1/storage/upload-url",
+        json={
+            "filename": filename,
+            "size_bytes": len(archive),
+            "content_type": content_type,
+        },
+    )
     if response.status_code >= 400:
         raise RemoteAgentError(f"申请云端存储失败：{response.status_code}")
     upload = response.json()
@@ -198,13 +225,12 @@ async def _upload_audit_snapshot(client: RemoteAgentClient, filename: str, archi
             upload["upload_url"], content=archive, headers={"Content-Type": content_type}
         )
         uploaded.raise_for_status()
-    completed = await client.session.request(
-        "POST", f"/v1/storage/{upload['object_id']}/complete"
-    )
+    completed = await client.session.request("POST", f"/v1/storage/{upload['object_id']}/complete")
     if completed.status_code >= 400:
         raise RemoteAgentError(f"云端文件校验失败：{completed.status_code}")
     linked = await client.session.request(
-        "POST", f"/v1/agents/{client.agent_id}/audit-snapshots",
+        "POST",
+        f"/v1/agents/{client.agent_id}/audit-snapshots",
         json={"object_id": upload["object_id"]},
     )
     if linked.status_code >= 400:
@@ -221,8 +247,11 @@ async def _takeover(selector: str, *, clone: bool = False) -> int:
         response = await client.session.request("GET", "/v1/agents")
         if response.status_code >= 400:
             raise RemoteAgentError("读取云端智能体列表失败。")
-        matches = [item for item in response.json().get("agents", [])
-                   if selector in {item.get("agent_id"), item.get("name")}]
+        matches = [
+            item
+            for item in response.json().get("agents", [])
+            if selector in {item.get("agent_id"), item.get("name")}
+        ]
         if len(matches) != 1:
             raise RemoteAgentError("找不到唯一的目标智能体，请使用智能体 ID。")
         agent_id = matches[0]["agent_id"]
@@ -248,10 +277,16 @@ async def _takeover(selector: str, *, clone: bool = False) -> int:
             payload = context_response.json()["context"]
             payload.setdefault("meta", {})["project_dir"] = str(root)
             SessionManager().import_portable_context(result["session_id"], payload)
-            print(f"聊天上下文已恢复到本机。请在当前目录运行 aero chat --continue 继续会话：{result['display_name']}")
+            print(
+                "聊天上下文已恢复到本机。请在当前目录运行 aero chat --continue "
+                f"继续会话：{result['display_name']}"
+            )
             return 0
         client.registry.add(
-            agent_id=result["agent_id"], name=result["name"], description="", token=result["token"],
+            agent_id=result["agent_id"],
+            name=result["name"],
+            description="",
+            token=result["token"],
         )
         engine = CloudSyncEngine(root, client.session)
         await engine.bind(client.session.data.user_id, result["project_id"])
@@ -268,28 +303,112 @@ async def _resume_stopped_agent(selector: str) -> int:
     try:
         response = await client.session.request("GET", "/v1/agents")
         response.raise_for_status()
-        matches = [item for item in response.json().get("agents", [])
-                   if selector in {item.get("agent_id"), item.get("name")}]
+        matches = [
+            item
+            for item in response.json().get("agents", [])
+            if selector in {item.get("agent_id"), item.get("name")}
+        ]
         if len(matches) != 1:
             raise RemoteAgentError("找不到唯一的智能体，请使用智能体 ID。")
         target = matches[0]
         if target.get("agent_type") == "chat":
             raise RemoteAgentError("普通聊天请在客户端开启新会话。")
         response = await client.session.request(
-            "POST", f"/v1/agents/{target['agent_id']}/takeover",
+            "POST",
+            f"/v1/agents/{target['agent_id']}/takeover",
             json={"resume_local": True},
         )
         if response.status_code >= 400:
             raise RemoteAgentError("原设备仍在线或智能体没有可恢复会话，暂不能重新上线。")
         result = response.json()
         client.registry.add(
-            agent_id=result["agent_id"], name=result["name"],
-            description="", token=result["token"],
+            agent_id=result["agent_id"],
+            name=result["name"],
+            description="",
+            token=result["token"],
         )
-        print(f"已恢复智能体授权：{result['display_name']}。请在已绑定云项目的工作区运行 aero agent run {result['agent_id']}。")
+        print(
+            f"已恢复智能体授权：{result['display_name']}。请在已绑定云项目的工作区运行 aero agent \
+run {result['agent_id']}。"
+        )
         return 0
     finally:
         await client.close()
+
+
+async def _start_service(selector: str, *, background: bool = False) -> int:
+    """Register only missing names, then run the existing/new Agent."""
+    client = RemoteAgentClient(select_agent=False)
+    try:
+        existing = next(
+            (
+                agent
+                for agent in client.registry.list()
+                if agent.agent_id == selector or agent.name.lower() == selector.lower()
+            ),
+            None,
+        )
+    finally:
+        await client.close()
+    if existing is None:
+        registered = await _register(selector, "")
+        if registered != 0:
+            return registered
+    selected = existing.agent_id if existing else selector
+    if background:
+        return _start_background_service(selected)
+    return await _run_service(selected)
+
+
+def _stop_service(selector: str) -> int:
+    from aero.cli.agent_background import stop_background_agent
+    from aero.core.remote_agent import RemoteAgentRegistry
+
+    agent = RemoteAgentRegistry().resolve(selector)
+    try:
+        stopped = stop_background_agent(agent.agent_id)
+    except OSError as exc:
+        raise RemoteAgentError("无法连接后台控制服务，请检查进程日志。") from exc
+    print(f"智能体已停止：{agent.name}" if stopped else f"智能体当前未在本机运行：{agent.name}")
+    print("注册和对话历史已保留，可用 aero agent start 再次启动。")
+    return 0
+
+
+async def _delete_agent(selector: str) -> int:
+    client = RemoteAgentClient(agent_selector=selector)
+    try:
+        print(f"将删除智能体 {client.agent_name}（{client.agent_id}）。")
+        print("这会删除该智能体的云端对话、上下文及相关附件/审计文件，并移除本机注册凭据。")
+        print("本地工作区文件、会话文件及日志保留；其他智能体不受影响。删除无法撤销。")
+        try:
+            confirmation = input(f"请输入注册名称 {client.agent_name} 确认删除：").strip()
+        except EOFError:
+            confirmation = ""
+        if confirmation != client.agent_name:
+            print("已取消删除。")
+            return 0
+        _stop_service(client.agent_id)
+        response = await client.session.request("DELETE", f"/v1/agents/{client.agent_id}")
+        if response.status_code >= 400:
+            raise RemoteAgentError("云端删除失败，本机注册凭据已保留，请检查登录或稍后重试。")
+        client.registry.remove(client.agent_id)
+        print(f"智能体已删除：{client.agent_name}")
+        return 0
+    finally:
+        await client.close()
+
+
+def _start_background_service(selector: str | None) -> int:
+    from aero.cli.agent_background import launch_background_agent
+    from aero.core.remote_agent import RemoteAgentRegistry
+
+    agent = RemoteAgentRegistry().resolve(selector)
+    pid, log_path = launch_background_agent(agent.agent_id, Path.cwd())
+    print(f"智能体后台进程已启动：{agent.name}（PID {pid}）")
+    print(f"日志：{log_path}")
+    print("可以关闭终端；云端连接与报到结果请查看日志或 aero agent list。")
+    print(f"停止后台进程：aero agent stop {agent.name}")
+    return 0
 
 
 async def _register(name: str, description: str) -> int:
@@ -300,7 +419,9 @@ async def _register(name: str, description: str) -> int:
         if description:
             print(f"描述：{description}")
         print(f"智能体 ID：{result.get('agent_id') or ''}")
-        print("令牌已安全保存到 ~/.aero/secrets.yaml")
+        from aero.core.config import user_secrets_path
+
+        print(f"令牌已安全保存到 {user_secrets_path()}")
         print(f"运行 aero agent run {name} 开始待命。")
         return 0
     finally:
@@ -314,13 +435,13 @@ async def _list_agents() -> int:
         if not agents:
             print("本地没有已注册的智能体。")
             return 0
-        for agent in agents:
-            last_seen = f"，最后活动：{agent['last_seen_at']}" if agent.get("last_seen_at") else ""
-            print(
-                f"{agent['name']}\t{agent.get('description') or '-'}\t{agent['status']}"
-                f"\t{agent['agent_id']}{last_seen}"
-            )
-        return 0
+        query_error = next(
+            (agent.get("status_error") for agent in agents if agent.get("status_error")), ""
+        )
+        if query_error:
+            print(f"提示：{query_error}以下仍列出全部本机注册记录。")
+        render_agent_list(agents)
+        return 1 if query_error else 0
     finally:
         await client.close()
 
@@ -330,6 +451,7 @@ async def _show_status(selector: str | None) -> int:
     try:
         status = await client.status()
         print(f"智能体：{status.get('name') or client.agent_name or client.agent_id}")
+        print(f"智能体 ID：{client.agent_id}")
         print(f"状态：{status.get('status') or 'unknown'}")
         if status.get("last_seen_at"):
             print(f"最后活动：{status['last_seen_at']}")
@@ -345,7 +467,8 @@ async def _set_context_sync(selector: str, enabled: bool) -> int:
     client = RemoteAgentClient(agent_selector=selector)
     try:
         response = await client.session.request(
-            "PATCH", f"/v1/agents/{client.agent_id}/context-sync",
+            "PATCH",
+            f"/v1/agents/{client.agent_id}/context-sync",
             json={"enabled": enabled},
         )
         if response.status_code >= 400:
@@ -361,8 +484,31 @@ async def _set_context_sync(selector: str, enabled: bool) -> int:
         await client.close()
 
 
-async def _run_service(selector: str | None) -> int:
-    """Run the fenced resident worker against the workspace's bound project."""
+def _workspace_project_id(project_dir: Path) -> str | None:
+    binding_path = project_dir / ".aero" / "cloud-sync" / "state.json"
+    try:
+        state = json.loads(binding_path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise RemoteAgentError("无法读取工作区云同步配置，请检查配置文件。") from exc
+    binding = state.get("binding") if isinstance(state, dict) else None
+    project_id = binding.get("project_id") if isinstance(binding, dict) else None
+    if project_id is not None and (not isinstance(project_id, str) or not project_id):
+        raise RemoteAgentError("工作区云项目绑定配置无效。")
+    return project_id
+
+
+async def _run_service(
+    selector: str | None,
+    *,
+    process_lock: AgentProcessLock | None = None,
+    on_ready=None,
+    on_runtime=None,
+) -> int:
+    """Run the fenced resident worker, optionally with a bound cloud project."""
+    from aero.toolbox import builtin_tools  # noqa: F401
+
     config = _load_config()
     client = RemoteAgentClient(agent_selector=selector)
     client._require_registration()
@@ -371,26 +517,33 @@ async def _run_service(selector: str | None) -> int:
     except Exception:
         await client.close()
         raise
-    binding_path = Path.cwd().resolve() / ".aero" / "cloud-sync" / "state.json"
-    try:
-        state = json.loads(binding_path.read_text())
-    except (OSError, ValueError) as exc:
-        await client.close()
-        raise RemoteAgentError("请先将当前工作区绑定到云端项目，再启动常驻智能体。") from exc
-    binding = state.get("binding") if isinstance(state, dict) else None
-    project_id = binding.get("project_id") if isinstance(binding, dict) else None
-    if not project_id:
-        await client.close()
-        raise RemoteAgentError("请先将当前工作区绑定到云端项目，再启动常驻智能体。")
-
     project_dir = Path.cwd().resolve()
+    try:
+        project_id = _workspace_project_id(project_dir)
+    except RemoteAgentError:
+        await client.close()
+        raise
+
     remote_agent = await client.status()
-    session_id = str(remote_agent.get("session_id") or _memory_session_id(client.agent_id, project_dir))
+    session_id = str(
+        remote_agent.get("session_id") or _memory_session_id(client.agent_id, project_dir)
+    )
+    saved = SessionManager().load(session_id)
+    if saved is not None:
+        meta = saved[1]
+        if meta.model:
+            config.llm.model = meta.official_text_model or meta.model
+        if meta.provider:
+            config.llm.provider = meta.provider
+        config.mode = meta.mode
+        if meta.vision_model:
+            config.vision.model = meta.official_vision_model or meta.vision_model
     if remote_agent.get("project_id") and remote_agent["project_id"] != project_id:
         await client.close()
         raise RemoteAgentError("本地云项目与智能体绑定项目不同，不能启动。")
-    process_lock = AgentProcessLock(client.agent_id)
-    process_lock.acquire()
+    if process_lock is None:
+        process_lock = AgentProcessLock(client.agent_id)
+        process_lock.acquire()
     session = LocalSession(project_dir, config, session_id=session_id)
     http = httpx.AsyncClient(
         base_url=client.session.base_url,
@@ -399,14 +552,16 @@ async def _run_service(selector: str | None) -> int:
     runtime = CloudAgentRuntime(
         session,
         RelayRuntimeTransport(
-            http, client.agent_id, client.agent_token,
+            http,
+            client.agent_id,
+            client.agent_token,
             account_access_token=client.session.access_token,
         ),
         device_id=f"cli-{project_dir.name}",
-        project_id=str(project_id),
+        project_id=project_id,
         account_id=client.session.data.user_id,
         account_identity=lambda: client.session.data.user_id,
-        state_dir=Path.home() / ".aero" / "agent-runtime",
+        state_dir=user_home() / "agent-runtime",
     )
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -417,11 +572,29 @@ async def _run_service(selector: str | None) -> int:
     for signum in (signal.SIGINT, signal.SIGTERM):
         with suppress(NotImplementedError):
             loop.add_signal_handler(signum, request_stop)
+    if on_runtime is not None:
+        on_runtime(runtime)
+    if os.environ.get("AERO_UPDATE_RESTART_TOKEN"):
+        runtime.update_paused = True
+        session.update_paused = True
+        os.environ.pop("AERO_UPDATE_RESTART_TOKEN", None)
     await runtime.start()
     print(f"远程智能体已启动：{client.agent_name or client.agent_id}")
-    print("已绑定云端项目：" + str(project_id))
+    print(
+        "已绑定云端项目：" + str(project_id)
+        if project_id
+        else "未绑定云端项目：可正常对话，项目文件同步需另行绑定。"
+    )
     print("正在等待云端指令，按 Ctrl+C 停止。")
     try:
+        if on_ready is not None:
+            async with asyncio.timeout(12):
+                while runtime.transport.lease_token is None:
+                    if runtime._task.done():
+                        runtime._task.result()
+                        raise RemoteAgentError("后台智能体未取得云端运行授权。")
+                    await asyncio.sleep(0.05)
+            on_ready()
         stop_waiter = asyncio.create_task(stop_event.wait())
         try:
             done, _ = await asyncio.wait(
@@ -452,7 +625,7 @@ async def _run_legacy_service(selector: str | None) -> int:
     process_lock = AgentProcessLock(client.agent_id)
     process_lock.acquire()
     project_dir = Path.cwd().resolve()
-    memory_manager = SessionManager(Path.home() / ".aero" / "agent-memory")
+    memory_manager = SessionManager(user_home() / "agent-memory")
     memory_session_id = _memory_session_id(client.agent_id, project_dir)
     memory_source = await _restore_agent_memory(
         client,
@@ -486,6 +659,12 @@ async def _run_legacy_service(selector: str | None) -> int:
         )
 
     try:
+        capability = await client._agent_request(
+            "PUT",
+            f"/v1/agents/{client.agent_id}/capabilities",
+            json={"web_conversation_v2": True},
+        )
+        capability.raise_for_status()
         await client.serve(
             handle_command,
             stop_event=stop_event,
@@ -565,7 +744,7 @@ async def _execute_command(
     )
     response_text = ""
     try:
-        async for event in agent.run_stream(content):
+        async for event in _command_events(client, agent, command):
             if event.type == "status" and event.content:
                 await client.send_progress(str(event.content), command_id=command_id)
             elif event.type == "text":
@@ -578,9 +757,7 @@ async def _execute_command(
                 if agent.confirm_future is not None and not agent.confirm_future.done():
                     agent.confirm_future.set_result("deny")
             elif event.type == "content_blocked":
-                await client.send_error(
-                    event.content or "请求被拦截。", command_id=command_id
-                )
+                await client.send_error(event.content or "请求被拦截。", command_id=command_id)
                 return
         await client.send_message(
             response_text.strip() or "指令已处理，但没有可返回的文本结果。",
@@ -599,6 +776,29 @@ async def _execute_command(
             await lease_task
 
 
+async def _command_events(client: RemoteAgentClient, agent: AgentLoop, command: dict):
+    from aero.application.incoming_attachments import stage_command
+    from aero.application.remote_command import command_settings, use_remote_command
+    from aero.application.turn_context import use_turn_id
+
+    async def request(method, path, **kwargs):
+        response = await client._agent_request(
+            method, f"/v1/agents/{client.agent_id}/{path}", **kwargs
+        )
+        response.raise_for_status()
+        return response.json()
+
+    prompt = await stage_command(
+        command,
+        request,
+        Path.cwd() / ".aero" / "attachments",
+        _memory_session_id(client.agent_id, Path.cwd()),
+    )
+    with use_turn_id(command["command_id"]), use_remote_command(command), command_settings(agent):
+        async for event in agent.run_stream(prompt):
+            yield event
+
+
 def _load_config() -> AeroConfig:
     config_path = Path.cwd() / "aero.yaml"
     return AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
@@ -609,11 +809,13 @@ def _print_agent_usage() -> None:
         """远程 Agent 命令：
   aero agent register --name ocean [--description \"备注\"]  注册并保存 Agent 凭据
   aero agent list                              列出本地 Agent 及在线状态
-  aero agent run [Agent 名称或 Agent ID]  前台常驻并等待云端指令
+  aero agent run [Agent 名称或 Agent ID] [--background]  运行已注册智能体
+  aero agent start 名称 [--background]          未注册则先注册，随后运行
+  aero agent stop 名称或 ID                    停止本机后台进程，保留注册和历史
+  aero agent delete 名称或 ID                  确认后删除云端智能体及本机注册
   aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出可读审计快照
   aero agent takeover [名称或 ID]  在空目录接管已离线智能体及云端项目
-  aero agent clone [名称或 ID]     在空目录克隆智能体和云端项目
   aero agent resume [名称或 ID]    网页下线后恢复原工作区的智能体授权
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
-  aero agent context-sync [名称或 ID] on|off  开关该智能体的自动上下文同步"""
+"""
     )

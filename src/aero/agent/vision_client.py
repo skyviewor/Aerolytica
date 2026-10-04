@@ -91,10 +91,12 @@ class VisionClient:
             encoded = base64.b64encode(raw).decode("ascii")
             data_uri = f"data:{mime_type};base64,{encoded}"
 
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": data_uri, "detail": detail},
-            })
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_uri, "detail": detail},
+                }
+            )
 
         body = {
             "model": self._config.model,

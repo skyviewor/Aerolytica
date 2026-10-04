@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
 from aero.data.ifs_availability import (
-    normalize_source,
-    _parse_ifs_date_prefixes,
     _parse_ifs_cycle_prefixes,
+    _parse_ifs_date_prefixes,
     _parse_s3_list_bucket,
-    VALID_SOURCES,
+    normalize_source,
 )
 
 
@@ -39,11 +36,11 @@ class TestNormalizeSource:
 class TestParseDatePrefixes:
     def test_parse_ecmwf_dates(self):
         html = (
-            '<html><body>'
+            "<html><body>"
             '<a href="/forecasts/20260604/">20260604</a>'
             '<a href="/forecasts/20260603/">20260603</a>'
             '<a href="/forecasts/20260605/">20260605</a>'
-            '</body></html>'
+            "</body></html>"
         )
         dates = _parse_ifs_date_prefixes(html)
         assert dates == ["20260603", "20260604", "20260605"]
@@ -60,12 +57,12 @@ class TestParseDatePrefixes:
 class TestParseCyclePrefixes:
     def test_parse_cycles(self):
         html = (
-            '<html><body>'
+            "<html><body>"
             '<a href="00z/">00z/</a>'
             '<a href="06z/">06z/</a>'
             '<a href="12z/">12z/</a>'
             '<a href="18z/">18z/</a>'
-            '</body></html>'
+            "</body></html>"
         )
         cycles = _parse_ifs_cycle_prefixes(html)
         assert cycles == ["00", "06", "12", "18"]

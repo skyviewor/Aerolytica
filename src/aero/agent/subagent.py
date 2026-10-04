@@ -15,14 +15,14 @@ SubAgentLauncher = Callable[[str, str, str, str], dict]
 SubAgentStatusProvider = Callable[[str | None], dict]
 SubAgentCanceller = Callable[[str], dict]
 
-_SUBAGENT_LAUNCHER: contextvars.ContextVar[SubAgentLauncher | None] = (
-    contextvars.ContextVar("aero_subagent_launcher", default=None)
+_SUBAGENT_LAUNCHER: contextvars.ContextVar[SubAgentLauncher | None] = contextvars.ContextVar(
+    "aero_subagent_launcher", default=None
 )
 _SUBAGENT_STATUS_PROVIDER: contextvars.ContextVar[SubAgentStatusProvider | None] = (
     contextvars.ContextVar("aero_subagent_status_provider", default=None)
 )
-_SUBAGENT_CANCELLER: contextvars.ContextVar[SubAgentCanceller | None] = (
-    contextvars.ContextVar("aero_subagent_canceller", default=None)
+_SUBAGENT_CANCELLER: contextvars.ContextVar[SubAgentCanceller | None] = contextvars.ContextVar(
+    "aero_subagent_canceller", default=None
 )
 
 _SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")

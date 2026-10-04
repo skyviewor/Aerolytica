@@ -1,6 +1,5 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-
 from cnmaps import draw_maps, get_adm_maps
 
 selected = get_adm_maps(province=["北京市", "天津市"], level="省")

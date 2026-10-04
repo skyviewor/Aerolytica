@@ -1,6 +1,5 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-
 from cnmaps import draw_map, get_adm_maps
 
 country_cases = [

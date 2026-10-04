@@ -9,6 +9,33 @@ import pytest
 from aero.toolbox.registry import ToolRegistry, get_registry
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_download_progress_reporter",
+        "_find_config",
+        "_find_config_path",
+        "_find_project_dir",
+        "_fmt_duration",
+        "_fmt_size",
+        "_short_path",
+        "check_web_search_config",
+        "_ensure_vision_client",
+        "_reuse_existing_era5_file",
+        "_summarize_dataset",
+        "_inspect_grib2_with_cfgrib",
+        "_load_gfs_parameter_lookup",
+        "_parse_grib2_messages",
+        "_parse_grib2_product_metadata",
+        "scan_local_files",
+    ],
+)
+def test_legacy_builtin_tool_exports_remain_available(name):
+    from aero.toolbox import builtin_tools
+
+    assert callable(getattr(builtin_tools, name))
+
+
 def test_register_tool_decorator():
     from aero.core.types import ToolSpec
     from aero.toolbox.registry import ToolRegistry
@@ -234,9 +261,7 @@ async def test_ensure_runtime_tools_installs_missing_in_private_runtime(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ensure_runtime_tools_creates_private_environment_when_missing(
-    monkeypatch, tmp_path
-):
+async def test_ensure_runtime_tools_creates_private_environment_when_missing(monkeypatch, tmp_path):
     from aero.agent.runtime import Runtime
     from aero.toolbox import builtin_tools
 
@@ -296,9 +321,7 @@ async def test_ensure_runtime_tools_bootstraps_managed_micromamba_when_missing(
     env_bin = root / "envs" / "aero-agent" / "bin"
     managed_micromamba = root / "bin" / "micromamba"
     monkeypatch.setenv("AERO_RUNTIME_ROOT", str(root))
-    monkeypatch.setattr(
-        Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": str(env_bin)})
-    )
+    monkeypatch.setattr(Runtime, "_build_exec_env", staticmethod(lambda: {"PATH": str(env_bin)}))
 
     manager = get_runtime_tool_manager()
     monkeypatch.setattr(manager, "find_conda_executable", lambda env: None)
@@ -334,9 +357,7 @@ async def test_ensure_runtime_tools_bootstraps_managed_micromamba_when_missing(
 
 
 @pytest.mark.asyncio
-async def test_ensure_runtime_tools_reports_private_package_install_failure(
-    monkeypatch, tmp_path
-):
+async def test_ensure_runtime_tools_reports_private_package_install_failure(monkeypatch, tmp_path):
     from aero.agent.runtime import Runtime
     from aero.toolbox import builtin_tools
 
@@ -623,8 +644,7 @@ def test_plot_validation_accepts_correct_raw_mathtext_unit(tmp_path):
     script.write_text(
         "import matplotlib.pyplot as plt\n"
         "fig, ax = plt.subplots()\n"
-        r'ax.set_xlabel(r"PVU ($10^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}}$)")'
-        + "\n",
+        r'ax.set_xlabel(r"PVU ($10^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}}$)")' + "\n",
         encoding="utf-8",
     )
 
@@ -638,8 +658,7 @@ def test_plot_validation_rejects_mathtext_commands_outside_math_mode(tmp_path):
     script.write_text(
         "import matplotlib.pyplot as plt\n"
         "fig, ax = plt.subplots()\n"
-        r'ax.set_xlabel(r"PVU (0^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}})")'
-        + "\n",
+        r'ax.set_xlabel(r"PVU (0^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}})")' + "\n",
         encoding="utf-8",
     )
 
@@ -782,16 +801,11 @@ def test_multi_panel_cartopy_plot_validation_requires_canvas_bounds_guard(tmp_pa
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
     assert result is not None
-    assert any(
-        "assert_artists_inside_canvas(fig)" in item
-        for item in result["violations"]
-    )
+    assert any("assert_artists_inside_canvas(fig)" in item for item in result["violations"])
 
 
 @pytest.mark.asyncio
-async def test_run_shell_truncates_install_output_more_aggressively(
-    monkeypatch, tmp_path
-):
+async def test_run_shell_truncates_install_output_more_aggressively(monkeypatch, tmp_path):
     from aero.agent.runtime import ExecutionResult, Runtime
     from aero.toolbox import builtin_tools
 
@@ -861,9 +875,7 @@ async def test_run_shell_blocks_cnmaps_in_mamba_install(monkeypatch, tmp_path):
 
     assert result["status"] == "error"
     assert result["cnmaps_conda_install_blocked"] is True
-    assert result["suggested_command"] == (
-        f"{env_bin}/python -m pip install -U cnmaps"
-    )
+    assert result["suggested_command"] == (f"{env_bin}/python -m pip install -U cnmaps")
     assert "从 conda/mamba 包列表中移除 cnmaps" in result["message"]
 
 
@@ -876,9 +888,7 @@ def test_cnmaps_conda_guard_allows_pip_and_unrelated_conda_installs():
     assert _cnmaps_conda_install_error("micromamba create -n plot cnmaps") is not None
 
 
-def test_shell_guard_blocks_user_conda_and_allows_scoped_managed_micromamba(
-    monkeypatch, tmp_path
-):
+def test_shell_guard_blocks_user_conda_and_allows_scoped_managed_micromamba(monkeypatch, tmp_path):
     from aero.toolbox.tools.runtime import _user_conda_runtime_error
 
     root = tmp_path / "runtime"
@@ -888,9 +898,7 @@ def test_shell_guard_blocks_user_conda_and_allows_scoped_managed_micromamba(
 
     assert _user_conda_runtime_error("conda create -n aero-agent python=3.12") is not None
     assert (
-        _user_conda_runtime_error(
-            "/Users/test/miniconda3/envs/aero-agent/bin/mamba install nco -y"
-        )
+        _user_conda_runtime_error("/Users/test/miniconda3/envs/aero-agent/bin/mamba install nco -y")
         is not None
     )
     assert _user_conda_runtime_error("micromamba install nco -y") is not None
@@ -1086,7 +1094,7 @@ async def test_run_shell_rejects_urllib_download_for_covered_source(monkeypatch)
     monkeypatch.setattr(Runtime, "run_subprocess_streaming", fail_if_called)
 
     result = await builtin_tools.run_shell(
-        "python3 -c \"import urllib.request; "
+        'python3 -c "import urllib.request; '
         "urllib.request.urlopen('https://ads.atmosphere.copernicus.eu/api/retrieve/v1/"
         "datasets/cams-global-atmospheric-composition-forecasts')\"",
         "manual ads request",

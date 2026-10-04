@@ -73,9 +73,7 @@ def test_setup_runtime_creates_private_python_312_environment(monkeypatch, tmp_p
     assert "python=3.12" in calls[0]
 
 
-def test_setup_runtime_china_mirror_forces_mainland_package_sources(
-    monkeypatch, tmp_path, capsys
-):
+def test_setup_runtime_china_mirror_forces_mainland_package_sources(monkeypatch, tmp_path, capsys):
     root, micromamba, env = configure_runtime(monkeypatch, tmp_path)
     micromamba.parent.mkdir(parents=True)
     micromamba.write_text("")
@@ -115,14 +113,14 @@ def test_setup_runtime_full_installs_conda_then_pip_packages(monkeypatch, tmp_pa
 def test_ensure_micromamba_extracts_managed_binary(monkeypatch, tmp_path):
     _root, micromamba, _env = configure_runtime(monkeypatch, tmp_path)
 
-    def fake_urlretrieve(_url: str, destination: Path):
+    def fake_download(_url: str, destination: Path, **_kwargs):
         payload = b"#!/bin/sh\n"
         with tarfile.open(destination, "w:bz2") as archive:
             info = tarfile.TarInfo("bin/micromamba")
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
 
-    monkeypatch.setattr(init_runtime.urllib.request, "urlretrieve", fake_urlretrieve)
+    monkeypatch.setattr(init_runtime, "download", fake_download)
 
     assert init_runtime.ensure_micromamba() == micromamba
     assert micromamba.read_bytes() == b"#!/bin/sh\n"
@@ -170,7 +168,7 @@ def test_runtime_diagnostics_requires_python_312(monkeypatch, tmp_path):
     monkeypatch.setattr(
         init_runtime,
         "_run",
-        lambda command, timeout: completed(command, stdout="3.12.9\n"),
+        lambda command, timeout, capture=False: completed(command, stdout="3.12.9\n"),
     )
 
     healthy, checks = init_runtime.runtime_diagnostics()
@@ -186,7 +184,9 @@ def test_common_package_files_keep_pip_only_runtime_packages():
 
 
 def test_conda_helper_documents_managed_runtime_and_pip_only_cnmaps():
-    skill_text = Path("src/aero/skills/builtin/conda-helper/SKILL.md").read_text()
+    skill_text = (
+        Path(__file__).resolve().parents[1] / "src/aero/skills/builtin/conda-helper/SKILL.md"
+    ).read_text()
     assert "~/.aero/runtime/bin/micromamba" in skill_text
     assert "~/.aero/runtime/envs/aero-agent/bin/python" in skill_text
     assert "ensure_runtime_tools" in skill_text

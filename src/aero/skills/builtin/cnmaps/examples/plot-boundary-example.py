@@ -1,6 +1,5 @@
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-
 from cnmaps import draw_maps, get_adm_maps
 
 fig = plt.figure(figsize=(10, 10))

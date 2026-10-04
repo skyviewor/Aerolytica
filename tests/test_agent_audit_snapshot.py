@@ -15,13 +15,25 @@ def test_audit_export_contains_persisted_tool_context_but_masks_secrets(tmp_path
     cipher = Fernet(Fernet.generate_key())
     monkeypatch.setattr(session_module, "_get_fernet", lambda: cipher)
     manager = SessionManager(tmp_path)
-    manager.save("test-session", [
-        Message(role="user", content="你好"),
-        Message(role="assistant", content="调用工具", tool_calls=[
-            ToolCall(id="call-1", name="search", arguments={"query": "天气", "api_key": "verysecretkey"})
-        ]),
-        Message(role="tool", content="结果：晴天", tool_call_id="call-1"),
-    ], SessionMeta(id="test-session", name="测试智能体", model="test-model"))
+    manager.save(
+        "test-session",
+        [
+            Message(role="user", content="你好"),
+            Message(
+                role="assistant",
+                content="调用工具",
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="search",
+                        arguments={"query": "天气", "api_key": "verysecretkey"},
+                    )
+                ],
+            ),
+            Message(role="tool", content="结果：晴天", tool_call_id="call-1"),
+        ],
+        SessionMeta(id="test-session", name="测试智能体", model="test-model"),
+    )
 
     text = render_conversation(manager, "test-session")
     assert "测试智能体" in text

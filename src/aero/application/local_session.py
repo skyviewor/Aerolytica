@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import secrets
@@ -82,6 +83,7 @@ class LocalSession:
         self._event_counters: dict[str, int] = {}
         self._event_waiters: dict[str, asyncio.Condition] = {}
         self._run_tasks: dict[str, asyncio.Task[None]] = {}
+        self._run_timers = {}
         self._run_states: dict[str, RunState] = {}
         self._run_errors: dict[str, str] = {}
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
@@ -206,6 +208,8 @@ class LocalSession:
         estimated = estimated_chars // 3
         if estimated < limit * 0.8:
             return False
+        if self.config.llm.provider == "official":
+            await self.agent._prepare_account_turn()
         self._save()
         before = self.session_manager.export_portable_context(self.id)
         prompt = summary_prompt_for(self.agent.messages)
@@ -216,6 +220,12 @@ class LocalSession:
             base_url=self.config.llm.base_url,
         )
         client = LLMClient(config)
+        client.relay_purpose = "compact"
+        from aero.application.turn_context import current_turn_id
+
+        client.relay_turn_id = current_turn_id() or getattr(
+            getattr(self.agent, "llm", None), "relay_turn_id", ""
+        )
         try:
             summary = (await client.chat([Message(role="user", content=prompt)])).strip()
         finally:
@@ -257,6 +267,10 @@ class LocalSession:
         return self._event_waiters.setdefault(run_id, asyncio.Condition())
 
     def _emit(self, run_id: str, event_type: str, data: dict[str, Any] | None = None) -> RunEvent:
+        timer = self._run_timers.get(run_id)
+        if timer and event_type in {"run_completed", "run_cancelled"}:
+            timer.stop()
+            data = {**(data or {}), **timer.payload()}
         event_id = self._event_counters.get(run_id, 0) + 1
         event = RunEvent(
             id=event_id,
@@ -313,9 +327,12 @@ class LocalSession:
             "state": state.value,
             "error": self._run_errors.get(run_id, ""),
             "last_event_id": self._event_counters.get(run_id, 0),
+            **(self._run_timers[run_id].payload() if run_id in self._run_timers else {}),
         }
 
     def start_run(self, prompt: str, *, origin: str = "client") -> str:
+        if getattr(self, "update_paused", False):
+            raise RuntimeError("update_in_progress")
         if any(
             state
             in {
@@ -334,8 +351,10 @@ class LocalSession:
             run_id, "run_started", {"state": RunState.QUEUED.value, "prompt": _safe_text(prompt)}
         )
         from aero.application.request_origin import use_request_origin
+        from aero.application.turn_context import current_turn_id, use_turn_id
 
-        with use_request_origin(origin):
+        turn_id = current_turn_id() or hashlib.sha256(f"{run_id}:0".encode()).hexdigest()
+        with use_request_origin(origin), use_turn_id(turn_id):
             task = asyncio.create_task(self._run(run_id, prompt))
         self._run_tasks[run_id] = task
         return run_id
@@ -383,6 +402,10 @@ class LocalSession:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _run_in_project(self, run_id: str, prompt: str) -> None:
+        from aero.application.request_timing import RequestTimer
+
+        self._run_timers[run_id] = RequestTimer()
+        self._run_timers[run_id].start()
         self._run_states[run_id] = RunState.RUNNING
         self._emit(run_id, "run_state", {"state": RunState.RUNNING.value})
         workspace = self.project_dir
@@ -398,6 +421,9 @@ class LocalSession:
 
         async with self.lock:
             async with AsyncExitStack() as stack:
+                from aero.application.remote_command import command_settings
+
+                stack.enter_context(command_settings(self.agent))
                 stack.enter_context(use_workspace(self.project_dir, workspace))
                 stack.enter_context(use_session_id(self.id))
                 stack.enter_context(use_read_files(self.agent.runtime.read_files))
@@ -544,7 +570,8 @@ class LocalSession:
                 )
             )
             title_source_id = relay_turn_id or uuid.uuid4().hex
-            client.relay_turn_id = f"session-title:{title_source_id}"[:64]
+            client.relay_turn_id = title_source_id
+            client.relay_purpose = "title"
             try:
                 title = await client.chat(
                     [

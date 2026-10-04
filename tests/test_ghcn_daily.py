@@ -147,7 +147,7 @@ async def test_ghcn_accepts_station_suffix_and_partial_date_overlap(tmp_path):
 
     assert result.metadata["actual_ranges"]["USW00094728"] == {
         "start_date": "2026-06-12",
-        "end_date": "2026-06-12",
+        "end_date": "2026-06-13",
     }
 
 

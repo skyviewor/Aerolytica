@@ -58,9 +58,7 @@ def test_skill_selector_matches_plotting_requests(tmp_path):
     )
     _write_skill(builtin, "literature-review", "Use this skill for literature review.")
 
-    selector = SkillSelector(
-        SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project")
-    )
+    selector = SkillSelector(SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project"))
 
     selected = selector.select("帮我把 ERA5 降水数据画图，并保存到 figures 目录")
 
@@ -87,16 +85,12 @@ def test_skill_selector_always_activates_plotting_skill_for_a_drawing_verb(tmp_p
     builtin = tmp_path / "builtin"
     _write_skill(builtin, "scientific-plotting", "Scientific plotting workflow.")
     _write_skill(builtin, "literature-review", "Use this skill for literature review.")
-    selector = SkillSelector(
-        SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project")
-    )
+    selector = SkillSelector(SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project"))
 
     assert [item.skill.name for item in selector.select("改画一张 3x3 的图")] == [
         "scientific-plotting"
     ]
-    assert [item.skill.name for item in selector.select("画")] == [
-        "scientific-plotting"
-    ]
+    assert [item.skill.name for item in selector.select("画")] == ["scientific-plotting"]
 
 
 def test_skill_selector_matches_chinese_plotting_requests_from_skill_body(tmp_path):
@@ -109,9 +103,7 @@ def test_skill_selector_matches_chinese_plotting_requests_from_skill_body(tmp_pa
     )
     _write_skill(builtin, "literature-review", "Use this skill for literature review.")
 
-    selector = SkillSelector(
-        SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project")
-    )
+    selector = SkillSelector(SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project"))
 
     selected = selector.select("画华南降水空间分布图")
 
@@ -131,9 +123,7 @@ def test_skill_selector_adds_cnmaps_for_china_map_requests(tmp_path):
         "Use this skill for compliant boundary queries with cnmaps.",
     )
 
-    selector = SkillSelector(
-        SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project")
-    )
+    selector = SkillSelector(SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project"))
 
     selected = selector.select("帮我画一张中国区域降水图")
 
@@ -171,9 +161,7 @@ def test_skill_context_mentions_references_without_loading_them(tmp_path):
     references.mkdir()
     (references / "maps.md").write_text("Detailed map rules should not be injected.")
 
-    selector = SkillSelector(
-        SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project")
-    )
+    selector = SkillSelector(SkillLoader(builtin_dir=builtin, project_dir=tmp_path / "project"))
     context = render_skill_context(selector.select("画图"))
 
     assert "references/maps.md" in context
@@ -204,8 +192,9 @@ def test_weather_verification_context_points_to_cyeva_reference():
 
 
 def test_builtin_weather_verification_requires_executed_cyeva():
-    skill_text = Path(
-        "src/aero/skills/builtin/weather-verification/SKILL.md"
+    skill_text = (
+        Path(__file__).resolve().parents[1]
+        / "src/aero/skills/builtin/weather-verification/SKILL.md"
     ).read_text()
 
     assert "## Mandatory execution gate" in skill_text

@@ -36,6 +36,9 @@ class AttachedChatApp(App[None]):
 
     def __init__(self, base_url: str, token: str, session_id: str | None = None) -> None:
         super().__init__()
+        from aero.version import title
+
+        self.title = title()
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.session_id = session_id
@@ -66,9 +69,7 @@ class AttachedChatApp(App[None]):
         await self._http.aclose()
 
     def _write(self, text: str, role: str = "system") -> None:
-        self.query_one("#transcript", VerticalScroll).mount(
-            Static(text, classes=f"message {role}")
-        )
+        self.query_one("#transcript", VerticalScroll).mount(Static(text, classes=f"message {role}"))
         self.query_one("#transcript", VerticalScroll).scroll_end(animate=False)
 
     def _status(self, text: str) -> None:
@@ -144,7 +145,8 @@ class AttachedChatApp(App[None]):
         try:
             headers = {"Accept": "text/event-stream"}
             async with self._http.stream(
-                "GET", f"/api/v1/runs/{run_id}/events",
+                "GET",
+                f"/api/v1/runs/{run_id}/events",
                 params={"session_id": self.session_id, "after": self._event_cursor},
                 headers=headers,
             ) as response:

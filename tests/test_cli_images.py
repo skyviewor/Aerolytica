@@ -126,8 +126,7 @@ def test_billing_scrolls_to_bottom_after_markdown_layout():
         async with app.run_test(size=(100, 24)) as pilot:
             app._show_checkpoint_message(
                 "\n\n".join(
-                    f"历史记录 {index}：" + ("很长的账单前置内容" * 8)
-                    for index in range(80)
+                    f"历史记录 {index}：" + ("很长的账单前置内容" * 8) for index in range(80)
                 )
             )
             await pilot.pause(0.1)

@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aero.release_environment import user_home
+
 _DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 _DEFAULT_BACKUPS = 3
 
@@ -39,7 +41,7 @@ def configure_debug_logging(
         enabled = env_enabled != "0"
 
     env_path = os.environ.get("AERO_DEBUG_LOG_PATH")
-    log_path = Path(path or env_path or Path.home() / ".aero" / "debug.log")
+    log_path = Path(path or env_path or user_home() / "debug.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     with _lock:

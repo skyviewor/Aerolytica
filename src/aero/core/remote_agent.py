@@ -9,20 +9,20 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from aero.core.config import load_user_secrets, save_user_secrets
 from aero.core.official_account import OfficialAccountError, OfficialAccountSession
+from aero.release_environment import user_home
 
 
 class RemoteAgentError(OfficialAccountError):
     """A remote Agent request failed."""
 
 
-_AGENT_NAME_RE = re.compile(r"[a-z]+(?:_[a-z]+)*")
+_AGENT_NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ class RemoteAgentRegistry:
         name = name.strip()
         if not _AGENT_NAME_RE.fullmatch(name):
             raise RemoteAgentError(
-                "Agent 名称只能使用小写英文单词，并用下划线连接，例如 ocean_data。"
+                "Agent 名称须以小写字母开头，可包含数字，用下划线连接，例如 mytest2、ocean_data2。"
             )
         if any(agent.name.lower() == name for agent in self.list()):
             raise RemoteAgentError(f"Agent 名称「{name}」已存在，请换一个名称。")
@@ -116,12 +116,28 @@ class RemoteAgentRegistry:
         save_user_secrets(self._secrets)
         return record
 
+    def remove(self, agent_id: str) -> None:
+        """Remove only the selected local registration, preserving other secrets."""
+        agents = [agent for agent in self.list() if agent.agent_id != agent_id]
+        self._secrets["remote_agents"] = {
+            "version": 1,
+            "agents": {
+                agent.agent_id: {
+                    "name": agent.name,
+                    "description": agent.description,
+                    "token": agent.token,
+                }
+                for agent in agents
+            },
+        }
+        save_user_secrets(self._secrets)
+
 
 class AgentProcessLock:
     """Prevent two local processes from consuming the same Agent queue."""
 
     def __init__(self, agent_id: str) -> None:
-        lock_dir = Path.home() / ".aero" / "agent-locks"
+        lock_dir = user_home() / "agent-locks"
         lock_dir.mkdir(parents=True, exist_ok=True)
         self.path = lock_dir / f"{agent_id}.lock"
         self._handle = None
@@ -215,23 +231,36 @@ class RemoteAgentClient:
         return result
 
     async def list_registered_remote_agents(self) -> list[dict[str, Any]]:
-        response = await self.session.request("GET", "/v1/agents")
-        if response.status_code >= 400:
-            raise RemoteAgentError(_error(response, "查询远程 Agent 列表失败。"))
+        locals_ = self.registry.list()
+        if not locals_:
+            return []
+        query_error = ""
+        remote_items = []
+        try:
+            response = await self.session.request("GET", "/v1/agents")
+            if response.status_code >= 400:
+                query_error = "无法查询云端状态，请检查登录和服务连接。"
+            else:
+                remote_items = response.json().get("agents")
+                if not isinstance(remote_items, list):
+                    raise ValueError("invalid agent list")
+        except (OfficialAccountError, httpx.HTTPError, ValueError, AttributeError):
+            query_error = "无法查询云端状态，请检查登录和网络连接。"
         remote = {
             str(item.get("agent_id")): item
-            for item in response.json().get("agents", [])
+            for item in remote_items or []
             if isinstance(item, dict) and item.get("agent_id")
         }
         result = []
-        for local in self.registry.list():
+        for local in locals_:
             item = remote.get(local.agent_id, {})
             result.append(
                 {
-                    "name": item.get("name") or local.name,
+                    "name": local.name,
                     "description": item.get("description") or local.description,
                     "agent_id": local.agent_id,
-                    "status": item.get("status") or "unavailable",
+                    "status": "unknown" if query_error else item.get("status") or "unavailable",
+                    "status_error": query_error,
                     "last_seen_at": item.get("last_seen_at"),
                 }
             )
@@ -305,9 +334,7 @@ class RemoteAgentClient:
         return await self.send_event("status", status=status)
 
     async def send_progress(self, content: str, *, command_id: str) -> dict[str, Any]:
-        return await self.send_event(
-            "progress", content=content, in_reply_to=command_id
-        )
+        return await self.send_event("progress", content=content, in_reply_to=command_id)
 
     async def send_message(self, content: str, *, command_id: str) -> dict[str, Any]:
         content = content.strip()

@@ -290,7 +290,10 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "source_url" in prompt
     assert "Citing references" in prompt
     assert "official two-line configuration" in prompt
-    assert "Never inspect, guess, find, cat, read_file, or run Python against Aero secret files" in prompt
+    assert (
+        "Never inspect, guess, find, cat, read_file, or run Python against Aero secret files"
+        in prompt
+    )
     assert "surface temperature for SST" in prompt
     assert "analyze_image" in prompt
     assert "list_figures" in prompt
@@ -299,7 +302,10 @@ def test_build_system_prompt_prefers_tools_in_english():
     assert "Without a successful `analyze_image` call in the current turn" in prompt
     assert "do not write any visual interpretation" in prompt
     assert "where precipitation/clouds/features are concentrated" in prompt
-    assert "generated or revised figures must appear inline in the chat via Markdown image syntax" in prompt
+    assert (
+        "generated or revised figures must appear inline in the chat via Markdown image syntax"
+        in prompt
+    )
     assert "Never omit the inline image" in prompt
     assert "Call `preview_image` when the user explicitly asks to open the image" in prompt
     assert "When the user explicitly asks to open a local PDF or paper" in prompt
@@ -560,7 +566,7 @@ def test_run_shell_progress_redacts_inline_secrets():
         "start",
         {
             "command": (
-                "python3 -c \"import cdsapi; cdsapi.Client("
+                'python3 -c "import cdsapi; cdsapi.Client('
                 "url='https://ads.atmosphere.copernicus.eu/api', "
                 "key='ee3a913f-03e7-4c83-a3b9-ed422aa0e091')\""
             )
@@ -708,14 +714,17 @@ def test_stderr_display_distinguishes_logs_from_errors():
     assert _display_status_line("stderr: 2026-06-12 23:39:07,972 INFO Request ID is abc") == (
         "命令日志：2026-06-12 23:39:07,972 INFO Request ID is abc"
     )
-    assert _display_status_line("stderr: 2026-06-12 23:39:30,326 INFO status has been updated to running") == (
-        "命令日志：2026-06-12 23:39:30,326 INFO status has been updated to running"
-    )
-    assert _display_status_line("stderr: Download completed!") == "命令日志：Download completed!"
     assert _display_status_line(
-        "stderr: findfont: Failed to find font weight bold, now using 400."
-    ) == "命令日志：findfont: Failed to find font weight bold, now using 400."
-    assert _display_status_line("stderr: Traceback (most recent call last):").startswith("错误输出：")
+        "stderr: 2026-06-12 23:39:30,326 INFO status has been updated to running"
+    ) == ("命令日志：2026-06-12 23:39:30,326 INFO status has been updated to running")
+    assert _display_status_line("stderr: Download completed!") == "命令日志：Download completed!"
+    assert (
+        _display_status_line("stderr: findfont: Failed to find font weight bold, now using 400.")
+        == "命令日志：findfont: Failed to find font weight bold, now using 400."
+    )
+    assert _display_status_line("stderr: Traceback (most recent call last):").startswith(
+        "错误输出："
+    )
     assert _display_status_line("stderr: /bin/bash: mamba: No such file or directory").startswith(
         "错误输出："
     )
@@ -724,11 +733,14 @@ def test_stderr_display_distinguishes_logs_from_errors():
 def test_plot_validation_uses_specific_progress_label():
     from aero.agent.loop import _tool_error_progress_message
 
-    assert _tool_error_progress_message(
-        "run_shell",
-        {"command": "python plot.py"},
-        {"status": "error", "scientific_plot_validation_failed": True},
-    ) == "绘图脚本检查未通过"
+    assert (
+        _tool_error_progress_message(
+            "run_shell",
+            {"command": "python plot.py"},
+            {"status": "error", "scientific_plot_validation_failed": True},
+        )
+        == "绘图脚本检查未通过"
+    )
 
 
 def test_reference_injection_uses_markdown_text_links():
@@ -1013,7 +1025,7 @@ def test_download_progress_resets_speed_measurement_for_resume(monkeypatch):
     report = download_progress.download_progress_reporter()
     report(10 * 1024 * 1024, 249 * 1024 * 1024, force=True)
     report(211 * 1024 * 1024, 249 * 1024 * 1024, force=True, reset_measurement=True)
-    report(213 * 1024 * 1024, 249 * 1024 * 1024)
+    report(213 * 1024 * 1024, 249 * 1024 * 1024, force=True)
 
     assert "速度测量中 ETA 估算中" in messages[1]
     assert "2.0 MB/s" in messages[2]
@@ -1160,7 +1172,7 @@ async def test_official_provider_loads_and_executes_relay_mcp_tool():
     await agent.close()
 
 
-def test_agent_applies_llm_config_update(tmp_path, monkeypatch):
+def test_agent_applies_llm_config_update(tmp_path, monkeypatch, byok_ui):
     from aero.agent.loop import AgentLoop
     from aero.core.config import clear_llm_api_key, save_llm_api_key
 

@@ -223,7 +223,7 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
     description=(
         "执行 shell 命令。适合调用成熟 CLI 工具下载远程文件或处理本地文件；"
         "命令默认直接在用户当前工作根目录执行，不要猜测目录或在命令前添加 cd。"
-        "运行时会自动把 Aero 私有环境 ~/.aero/runtime/envs/aero-agent/bin 放到 PATH 前面，"
+        "运行时会自动把当前环境的 Aero 私有科研环境 bin 目录放到 PATH 前面，"
         "通常不需要手动 conda activate。"
         "凡是通过 run_shell 执行 python/python3/pip/pip3/python -m pip，都必须解析到 aero-agent；"
         "不要用 base、系统 Python 或绝对路径绕过该环境。"
@@ -353,8 +353,10 @@ async def run_shell(
             error_message = stderr.strip().splitlines()[-1]
         else:
             error_message = f"命令退出码 {result.exit_code}"
-    message = "未找到匹配内容" if no_matches else (
-        "命令执行完成" if successful else f"命令执行失败：{error_message}"
+    message = (
+        "未找到匹配内容"
+        if no_matches
+        else ("命令执行完成" if successful else f"命令执行失败：{error_message}")
     )
 
     return {
@@ -405,8 +407,10 @@ def _has_multiple_subplots(source: str) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        name = node.func.attr if isinstance(node.func, ast.Attribute) else (
-            node.func.id if isinstance(node.func, ast.Name) else ""
+        name = (
+            node.func.attr
+            if isinstance(node.func, ast.Attribute)
+            else (node.func.id if isinstance(node.func, ast.Name) else "")
         )
         if name != "subplots":
             continue
@@ -415,13 +419,23 @@ def _has_multiple_subplots(source: str) -> bool:
         ):
             continue
         keywords = {kw.arg: kw.value for kw in node.keywords}
-        rows = dimension(keywords["nrows"]) if "nrows" in keywords else (
-            dimension(node.args[0]) if node.args else 1
+        rows = (
+            dimension(keywords["nrows"])
+            if "nrows" in keywords
+            else (dimension(node.args[0]) if node.args else 1)
         )
-        columns = dimension(keywords["ncols"]) if "ncols" in keywords else (
-            dimension(node.args[1]) if len(node.args) > 1 else 1
+        columns = (
+            dimension(keywords["ncols"])
+            if "ncols" in keywords
+            else (dimension(node.args[1]) if len(node.args) > 1 else 1)
         )
-        if rows is not None and columns is not None and rows > 0 and columns > 0 and rows * columns > 1:
+        if (
+            rows is not None
+            and columns is not None
+            and rows > 0
+            and columns > 0
+            and rows * columns > 1
+        ):
             return True
     return False
 
@@ -441,7 +455,11 @@ def _search_has_no_matches(command: str, result) -> bool:
         return False
     if "|" in tokens:
         index = tokens.index("|")
-        return tokens.count("|") == 1 and index + 1 < len(tokens) and Path(tokens[index + 1]).name == "head"
+        return (
+            tokens.count("|") == 1
+            and index + 1 < len(tokens)
+            and Path(tokens[index + 1]).name == "head"
+        )
     return True
 
 
@@ -490,9 +508,7 @@ def _scientific_plot_script_error(command: str, workdir: str) -> dict | None:
                 "layout 只能在 plt.subplots()/plt.figure() 创建画布时设置，"
                 "不能传给 savefig/print_png"
             )
-        if is_cartopy_contour_map and re.search(
-            r"bbox_inches\s*=\s*['\"]tight['\"]", source
-        ):
+        if is_cartopy_contour_map and re.search(r"bbox_inches\s*=\s*['\"]tight['\"]", source):
             violations.append(
                 "Cartopy 地图不得使用 bbox_inches='tight'；请使用 "
                 "layout='compressed'、合适的 figsize 和 colorbar 参数控制留白"
@@ -612,11 +628,7 @@ def _scientific_label_violations(source: str) -> list[str]:
         math_segments = label.split("$")
         text_segments = math_segments[::2]
         math_commands = (r"\mathrm", r"\,", r"\frac", r"\cdot", r"\times")
-        if any(
-            command in segment
-            for segment in text_segments
-            for command in math_commands
-        ) or any(
+        if any(command in segment for segment in text_segments for command in math_commands) or any(
             re.search(r"(?<!\\)[_^]\{", segment) for segment in text_segments
         ):
             violations.append(
@@ -625,12 +637,11 @@ def _scientific_label_violations(source: str) -> list[str]:
                 'r"PVU ($10^{-6}\\,\\mathrm{K\\,m^2\\,kg^{-1}\\,s^{-1}}$)"'
             )
         if "\\\\" in label and any(
-            marker in label
-            for marker in ("\\\\mathrm", "\\\\,", "\\\\^", "\\\\_", "\\\\frac")
+            marker in label for marker in ("\\\\mathrm", "\\\\,", "\\\\^", "\\\\_", "\\\\frac")
         ):
             violations.append(
                 f"第 {node.lineno} 行的 {node.func.attr} 生成了双反斜杠；"
-                "原始字符串 r\"...\" 中的 MathText 命令只能使用单反斜杠"
+                '原始字符串 r"..." 中的 MathText 命令只能使用单反斜杠'
             )
         if re.search(r"\bPVU\b", label, flags=re.IGNORECASE):
             if re.search(r"(?<!1)0\^\{\s*-?6\s*\}", label):
@@ -638,9 +649,7 @@ def _scientific_label_violations(source: str) -> list[str]:
                     f"第 {node.lineno} 行的 {node.func.attr} 把 PVU 的 "
                     "`10^{-6}` 误写成了 `0^{-6}`"
                 )
-            canonical_pvu_unit = (
-                r"$10^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}}$"
-            )
+            canonical_pvu_unit = r"$10^{-6}\,\mathrm{K\,m^2\,kg^{-1}\,s^{-1}}$"
             if canonical_pvu_unit not in label:
                 violations.append(
                     f"第 {node.lineno} 行的 {node.func.attr} 的 PVU 单位格式不规范；"
@@ -664,7 +673,10 @@ def _covered_download_code_shell_error(command: str) -> dict | None:
             "suggested_tools": ["download_cams", "download_era5"],
             "command": _redact_shell_command(command),
         }
-    if any(marker in lowered for marker in ("urllib.request", "urlopen(", "requests.post", "requests.get")):
+    if any(
+        marker in lowered
+        for marker in ("urllib.request", "urlopen(", "requests.post", "requests.get")
+    ):
         urls = _shell_urls(command)
         if any(_is_covered_data_url(url) for url in urls):
             return {
@@ -820,9 +832,7 @@ def _is_ads_cams_url(url: str) -> bool:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
     path = parsed.path.lower()
-    return host == "ads.atmosphere.copernicus.eu" and (
-        "/datasets/cams-" in path or "/api/" in path
-    )
+    return host == "ads.atmosphere.copernicus.eu" and ("/datasets/cams-" in path or "/api/" in path)
 
 
 def _is_cds_dataset_url(url: str) -> bool:

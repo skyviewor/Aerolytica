@@ -25,125 +25,183 @@ PRICING: dict[str, ModelPrice] = {
     # DeepSeek official off-peak list price (CNY per 1K tokens).
     # Provider-aware peak pricing is applied when usage is recorded.
     "deepseek-v4-flash": ModelPrice(
-        input_price=0.001, cached_input_price=0.000020, output_price=0.002,
+        input_price=0.001,
+        cached_input_price=0.000020,
+        output_price=0.002,
         context_window=1_000_000,
     ),
     "deepseek-v4-pro": ModelPrice(
-        input_price=0.003, cached_input_price=0.000025, output_price=0.006,
+        input_price=0.003,
+        cached_input_price=0.000025,
+        output_price=0.006,
         context_window=1_000_000,
     ),
     "deepseek-chat": ModelPrice(
-        input_price=0.001, cached_input_price=0.000020, output_price=0.002,
+        input_price=0.001,
+        cached_input_price=0.000020,
+        output_price=0.002,
         context_window=1_000_000,
     ),
     "deepseek-reasoner": ModelPrice(
-        input_price=0.001, cached_input_price=0.000020, output_price=0.002,
+        input_price=0.001,
+        cached_input_price=0.000020,
+        output_price=0.002,
         context_window=1_000_000,
     ),
     # Kimi (CNY per 1K tokens)
     "kimi-k2.6": ModelPrice(
-        input_price=0.0065, cached_input_price=0.0011, output_price=0.027,
+        input_price=0.0065,
+        cached_input_price=0.0011,
+        output_price=0.027,
         context_window=262_144,
     ),
     "kimi-k2.5": ModelPrice(
-        input_price=0.004, cached_input_price=0.0007, output_price=0.021,
+        input_price=0.004,
+        cached_input_price=0.0007,
+        output_price=0.021,
         context_window=262_144,
     ),
     "kimi-k2-thinking": ModelPrice(
-        input_price=0.004, cached_input_price=0.0007, output_price=0.021,
+        input_price=0.004,
+        cached_input_price=0.0007,
+        output_price=0.021,
         context_window=262_144,
     ),
     "kimi-k2-0905-preview": ModelPrice(
-        input_price=0.004, cached_input_price=0.0007, output_price=0.021,
+        input_price=0.004,
+        cached_input_price=0.0007,
+        output_price=0.021,
         context_window=262_144,
     ),
     "moonshot-v1-128k": ModelPrice(
-        input_price=0.01, cached_input_price=0.01, output_price=0.03,
+        input_price=0.01,
+        cached_input_price=0.01,
+        output_price=0.03,
         context_window=131_072,
     ),
     "moonshot-v1-32k": ModelPrice(
-        input_price=0.005, cached_input_price=0.005, output_price=0.02,
+        input_price=0.005,
+        cached_input_price=0.005,
+        output_price=0.02,
         context_window=32_768,
     ),
     # Qwen / Bailian (CNY per 1K tokens)
     # Prices are the standard China-mainland prices published by Model Studio;
     # implicit cache hits for Bailian-hosted models cost 20% of input tokens.
     "qwen3.7": ModelPrice(
-        input_price=0.002, cached_input_price=0.0004, output_price=0.008,
+        input_price=0.002,
+        cached_input_price=0.0004,
+        output_price=0.008,
         context_window=1_000_000,
     ),
     "qwen3.7-max": ModelPrice(
-        input_price=0.012, cached_input_price=0.0024, output_price=0.036,
+        input_price=0.012,
+        cached_input_price=0.0024,
+        output_price=0.036,
         context_window=1_000_000,
     ),
     "qwen-plus": ModelPrice(
-        input_price=0.002, cached_input_price=0.002, output_price=0.006,
+        input_price=0.002,
+        cached_input_price=0.002,
+        output_price=0.006,
         context_window=131_072,
     ),
     "qwen-max": ModelPrice(
-        input_price=0.02, cached_input_price=0.02, output_price=0.06,
+        input_price=0.02,
+        cached_input_price=0.02,
+        output_price=0.06,
         context_window=32_768,
     ),
     "qwen-turbo": ModelPrice(
-        input_price=0.0005, cached_input_price=0.0005, output_price=0.0015,
+        input_price=0.0005,
+        cached_input_price=0.0005,
+        output_price=0.0015,
         context_window=131_072,
     ),
     "qwen-long": ModelPrice(
-        input_price=0.0005, cached_input_price=0.0005, output_price=0.0015,
+        input_price=0.0005,
+        cached_input_price=0.0005,
+        output_price=0.0015,
         context_window=1_000_000,
     ),
     "qwen3-max": ModelPrice(
-        input_price=0.008, cached_input_price=0.008, output_price=0.024,
+        input_price=0.008,
+        cached_input_price=0.008,
+        output_price=0.024,
         context_window=131_072,
     ),
     "qwen3-plus": ModelPrice(
-        input_price=0.0035, cached_input_price=0.0035, output_price=0.0105,
+        input_price=0.0035,
+        cached_input_price=0.0035,
+        output_price=0.0105,
         context_window=131_072,
     ),
     # OpenAI (USD → CNY, per 1K tokens; cache pricing from prompt caching docs)
     "gpt-4o": ModelPrice(
-        input_price=0.018, cached_input_price=0.009, output_price=0.072,
+        input_price=0.018,
+        cached_input_price=0.009,
+        output_price=0.072,
         context_window=128_000,
     ),
     "gpt-4o-mini": ModelPrice(
-        input_price=0.00108, cached_input_price=0.00054, output_price=0.00432,
+        input_price=0.00108,
+        cached_input_price=0.00054,
+        output_price=0.00432,
         context_window=128_000,
     ),
     # --- Vision ---
     "qwen3-vl-plus": ModelPrice(
-        input_price=0.003, cached_input_price=0.003, output_price=0.012,
+        input_price=0.003,
+        cached_input_price=0.003,
+        output_price=0.012,
         context_window=32_768,
     ),
     "qwen3-vl-flash": ModelPrice(
-        input_price=0.0015, cached_input_price=0.0015, output_price=0.006,
+        input_price=0.0015,
+        cached_input_price=0.0015,
+        output_price=0.006,
         context_window=32_768,
     ),
     "qwen-vl-max": ModelPrice(
-        input_price=0.003, cached_input_price=0.003, output_price=0.012,
+        input_price=0.003,
+        cached_input_price=0.003,
+        output_price=0.012,
         context_window=32_768,
     ),
     "qwen-vl-plus": ModelPrice(
-        input_price=0.0015, cached_input_price=0.0015, output_price=0.006,
+        input_price=0.0015,
+        cached_input_price=0.0015,
+        output_price=0.006,
         context_window=32_768,
     ),
     "qwen3.5-flash": ModelPrice(
-        input_price=0.0015, cached_input_price=0.0015, output_price=0.006,
+        input_price=0.0015,
+        cached_input_price=0.0015,
+        output_price=0.006,
         context_window=1_000_000,
     ),
     "qwen3.5-plus": ModelPrice(
-        input_price=0.003, cached_input_price=0.003, output_price=0.012,
+        input_price=0.003,
+        cached_input_price=0.003,
+        output_price=0.012,
         context_window=1_000_000,
     ),
     "qwen3.6-flash": ModelPrice(
-        input_price=0.0015, cached_input_price=0.0015, output_price=0.006,
+        input_price=0.0015,
+        cached_input_price=0.0015,
+        output_price=0.006,
         context_window=1_000_000,
     ),
     "qwen3.6-plus": ModelPrice(
-        input_price=0.003, cached_input_price=0.003, output_price=0.012,
+        input_price=0.003,
+        cached_input_price=0.003,
+        output_price=0.012,
         context_window=1_000_000,
     ),
     "qwen3.7-plus": ModelPrice(
-        input_price=0.002, cached_input_price=0.0004, output_price=0.008,
+        input_price=0.002,
+        cached_input_price=0.0004,
+        output_price=0.008,
         context_window=1_000_000,
     ),
 }
@@ -213,7 +271,9 @@ CONTEXT_WINDOWS: dict[str, int] = {
 
 
 _DEFAULT_PRICE = ModelPrice(
-    input_price=0.002, cached_input_price=0.002, output_price=0.008,
+    input_price=0.002,
+    cached_input_price=0.002,
+    output_price=0.008,
     context_window=128_000,
 )
 
@@ -590,11 +650,15 @@ def _usage_increment_cost(
     price = get_price(model, provider)
     multiplier = deepseek_official_price_multiplier(provider, occurred_at)
     non_cached = prompt_tokens - cached_tokens
-    return multiplier * (
-        non_cached * price.input_price
-        + cached_tokens * price.cached_input_price
-        + completion_tokens * price.output_price
-    ) / 1000
+    return (
+        multiplier
+        * (
+            non_cached * price.input_price
+            + cached_tokens * price.cached_input_price
+            + completion_tokens * price.output_price
+        )
+        / 1000
+    )
 
 
 def deepseek_official_price_multiplier(

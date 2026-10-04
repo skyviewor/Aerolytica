@@ -44,19 +44,21 @@ async def test_remote_changes_updates_persisted_cursor_and_merges_entities():
             "cursor": "cursor-1",
         }
         return {
-            "items": [{
-                "entity_type": "file",
-                "entity_id": "file_2",
-                "operation": "upsert",
-                "data": {
-                    "file_id": "file_2",
-                    "project_id": "project_1",
-                    "directory_id": "directory_1",
-                    "filename": "new.md",
-                    "status": "active",
-                    "deleted_at": None,
-                },
-            }],
+            "items": [
+                {
+                    "entity_type": "file",
+                    "entity_id": "file_2",
+                    "operation": "upsert",
+                    "data": {
+                        "file_id": "file_2",
+                        "project_id": "project_1",
+                        "directory_id": "directory_1",
+                        "filename": "new.md",
+                        "status": "active",
+                        "deleted_at": None,
+                    },
+                }
+            ],
             "has_more": False,
             "cursor": "cursor-2",
             "next_cursor": None,

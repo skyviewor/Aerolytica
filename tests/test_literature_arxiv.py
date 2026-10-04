@@ -1,34 +1,42 @@
 """Tests for arXiv literature search module."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from aero.core.debug_log import configure_debug_logging
 from aero.data.literature_arxiv import (
-    _parse_arxiv_atom,
     _extract_arxiv_entry,
-    search_arxiv,
+    _parse_arxiv_atom,
     get_arxiv_detail,
+    search_arxiv,
 )
 
 SAMPLE_ATOM_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom"
       xmlns:arxiv="http://arxiv.org/schemas/atom">
-  <link href="http://export.arxiv.org/api/query?search_query=all%3Atropical+cyclone&amp;start=0&amp;max_results=2" rel="self" type="application/atom+xml"/>
-  <title type="html">ArXiv Query: search_query=all:tropical cyclone&amp;start=0&amp;max_results=2</title>
+  <link \
+href="http://export.arxiv.org/api/query?search_query=all%3Atropical+cyclone&amp;start=0&amp;max_re\
+sults=2" rel="self" type="application/atom+xml"/>
+  <title type="html">ArXiv Query: search_query=all:tropical \
+cyclone&amp;start=0&amp;max_results=2</title>
   <id>http://export.arxiv.org/api/Abc123</id>
   <updated>2025-06-01T00:00:00Z</updated>
-  <opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">42</opensearch:totalResults>
-  <opensearch:startIndex xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:startIndex>
-  <opensearch:itemsPerPage xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">2</opensearch:itemsPerPage>
+  <opensearch:totalResults \
+xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">42</opensearch:totalResults>
+  <opensearch:startIndex \
+xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:startIndex>
+  <opensearch:itemsPerPage \
+xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">2</opensearch:itemsPerPage>
   <entry>
     <id>http://arxiv.org/abs/2301.12345v1</id>
     <updated>2025-01-15T10:00:00Z</updated>
     <published>2025-01-15T10:00:00Z</published>
     <title>Tropical Cyclone Intensity Prediction Using Deep Learning</title>
-    <summary>This paper proposes a novel deep learning approach for predicting tropical cyclone intensity using satellite imagery and reanalysis data. Experiments on the Atlantic basin show 95% accuracy.</summary>
+    <summary>This paper proposes a novel deep learning approach for predicting tropical cyclone \
+intensity using satellite imagery and reanalysis data. Experiments on the Atlantic basin show 95% \
+accuracy.</summary>
     <author>
       <name>John Smith</name>
     </author>
@@ -37,7 +45,8 @@ SAMPLE_ATOM_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
     </author>
     <arxiv:primary_category term="cs.AI"/>
     <category term="physics.ao-ph"/>
-    <link title="pdf" href="http://arxiv.org/pdf/2301.12345v1" rel="related" type="application/pdf"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2301.12345v1" rel="related" \
+type="application/pdf"/>
     <link title="doi" href="http://dx.doi.org/10.1234/test.001" rel="related"/>
     <arxiv:comment>Accepted at Nature Climate Change, 15 pages, 4 figures</arxiv:comment>
   </entry>
@@ -46,12 +55,14 @@ SAMPLE_ATOM_RESPONSE = """<?xml version="1.0" encoding="UTF-8"?>
     <updated>2025-02-20T15:00:00Z</updated>
     <published>2025-02-20T15:00:00Z</published>
     <title>ENSO Forecasting with Graph Neural Networks</title>
-    <summary>A graph neural network framework for ENSO forecasting achieving 18-month lead times.</summary>
+    <summary>A graph neural network framework for ENSO forecasting achieving 18-month lead \
+times.</summary>
     <author>
       <name>Alice Wang</name>
     </author>
     <arxiv:primary_category term="physics.ao-ph"/>
-    <link title="pdf" href="http://arxiv.org/pdf/2302.67890v2" rel="related" type="application/pdf"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2302.67890v2" rel="related" \
+type="application/pdf"/>
   </entry>
 </feed>"""
 
@@ -66,7 +77,8 @@ SINGLE_ENTRY_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
     <summary>Test abstract.</summary>
     <author><name>Test Author</name></author>
     <arxiv:primary_category term="cs.AI"/>
-    <link title="pdf" href="http://arxiv.org/pdf/2301.12345v1" rel="related" type="application/pdf"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2301.12345v1" rel="related" \
+type="application/pdf"/>
   </entry>
 </feed>"""
 
@@ -106,7 +118,9 @@ class TestParseArxivAtom:
         assert "Nature Climate Change" in entries[0]["comment"]
 
     def test_parses_empty_atom(self):
-        entries = _parse_arxiv_atom("<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'></feed>")
+        entries = _parse_arxiv_atom(
+            "<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'></feed>"
+        )
         assert len(entries) == 0
 
     def test_handles_missing_fields(self):
@@ -139,8 +153,13 @@ class TestExtractArxivEntry:
         assert work["oa_status"] == "gold"
 
     def test_has_pdf_url_with_fallback(self):
-        entry = {"id": "http://arxiv.org/abs/9999.99999v1", "title": "Test", "summary": "Test",
-                 "authors": [], "published": "2025-01-01T00:00:00Z"}
+        entry = {
+            "id": "http://arxiv.org/abs/9999.99999v1",
+            "title": "Test",
+            "summary": "Test",
+            "authors": [],
+            "published": "2025-01-01T00:00:00Z",
+        }
         work = _extract_arxiv_entry(entry)
         assert work["pdf_url"] == "https://arxiv.org/pdf/9999.99999.pdf"
         assert work["landing_page_url"] == "https://arxiv.org/abs/9999.99999"
@@ -152,8 +171,13 @@ class TestExtractArxivEntry:
         assert "v1" not in work["arxiv_id"]
 
     def test_handles_arxiv_id_without_version(self):
-        entry = {"id": "http://arxiv.org/abs/9999.99999", "title": "T", "summary": "S",
-                 "authors": [], "published": "2025-01-01T00:00:00Z"}
+        entry = {
+            "id": "http://arxiv.org/abs/9999.99999",
+            "title": "T",
+            "summary": "S",
+            "authors": [],
+            "published": "2025-01-01T00:00:00Z",
+        }
         work = _extract_arxiv_entry(entry)
         assert work["arxiv_id"] == "9999.99999"
 
@@ -200,10 +224,7 @@ class TestSearchArxiv:
             result = await search_arxiv(keyword="test")
 
         assert result["found"] is False
-        events = [
-            json.loads(line)
-            for line in debug_path.read_text(encoding="utf-8").splitlines()
-        ]
+        events = [json.loads(line) for line in debug_path.read_text(encoding="utf-8").splitlines()]
         arxiv_events = [event for event in events if event["event"] == "arxiv.search_failed"]
         assert arxiv_events
         assert arxiv_events[-1]["error"] == "Connection error"

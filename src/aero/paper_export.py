@@ -54,9 +54,7 @@ def export_paper(
         missing_tools.append("pandoc")
     tectonic = None
     if normalized_format == "pdf":
-        tectonic = tectonic_path or shutil.which(
-            "tectonic", path=runtime_env.get("PATH")
-        )
+        tectonic = tectonic_path or shutil.which("tectonic", path=runtime_env.get("PATH"))
         if not tectonic:
             missing_tools.append("tectonic")
     if missing_tools:
@@ -66,9 +64,7 @@ def export_paper(
             missing_tools=missing_tools,
         )
 
-    temporary = output.with_name(
-        f".main.tmp-{uuid.uuid4().hex[:8]}.{extension}"
-    )
+    temporary = output.with_name(f".main.tmp-{uuid.uuid4().hex[:8]}.{extension}")
     command = [
         str(pandoc),
         str(source),

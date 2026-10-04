@@ -119,16 +119,14 @@ async def get_cams_latest_forecast_cycle(reference_time_utc: str = "") -> dict:
             "query": {
                 "type": "string",
                 "description": (
-                    "变量关键词、别名或 ADS 变量名，如 臭氧、pm2.5、o3、"
-                    "total_column_ozone。"
+                    "变量关键词、别名或 ADS 变量名，如 臭氧、pm2.5、o3、total_column_ozone。"
                 ),
             },
             "level_type": {
                 "type": "string",
                 "enum": ["single", "multi"],
                 "description": (
-                    "可选：single 表示单层/柱总量，multi 表示需要 pressure_levels "
-                    "的多层变量。"
+                    "可选：single 表示单层/柱总量，multi 表示需要 pressure_levels 的多层变量。"
                 ),
             },
         },
@@ -446,9 +444,7 @@ def _validate_variable_level_combination(
     variable_records: list[dict[str, str]],
     pressure_levels: tuple[int, ...],
 ) -> str:
-    single_level = [
-        item["name"] for item in variable_records if item.get("level_type") == "single"
-    ]
+    single_level = [item["name"] for item in variable_records if item.get("level_type") == "single"]
     multi_level = [item["name"] for item in variable_records if item.get("level_type") == "multi"]
     if pressure_levels and single_level:
         return (
@@ -489,8 +485,10 @@ def _dest_path(
     if end != start:
         date_part += f"_{end:%Y%m%d}"
     config = find_config()
-    return find_project_dir() / config.output.data_dir / (
-        f"cams_{dataset_part}_{var_part}_{date_part}{ext}"
+    return (
+        find_project_dir()
+        / config.output.data_dir
+        / (f"cams_{dataset_part}_{var_part}_{date_part}{ext}")
     )
 
 

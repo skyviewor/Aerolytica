@@ -69,7 +69,6 @@ def test_parse_and_search_inventory_page():
     assert records[0]["description"] == "Pressure Reduced to MSL [Pa]"
     assert records[1]["level"] == "2 m above ground"
     assert (
-        gfs_products.search_gfs_inventory(inventory, "TMP")[0]["description"]
-        == "Temperature [K]"
+        gfs_products.search_gfs_inventory(inventory, "TMP")[0]["description"] == "Temperature [K]"
     )
     assert gfs_products.search_gfs_inventory(inventory, "mean sea level")[0]["parameter"] == "PRMSL"

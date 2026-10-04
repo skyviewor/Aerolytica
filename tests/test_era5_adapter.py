@@ -300,10 +300,7 @@ async def test_subset_netcdf_crops_time_and_area(tmp_path):
         {
             "t2m": (
                 ("time", "latitude", "longitude"),
-                [
-                    [[float(i + j + k) for k in range(3)] for j in range(3)]
-                    for i in range(48)
-                ],
+                [[[float(i + j + k) for k in range(3)] for j in range(3)] for i in range(48)],
             )
         },
         coords={
@@ -311,7 +308,7 @@ async def test_subset_netcdf_crops_time_and_area(tmp_path):
             "latitude": [1.0, 0.0, -1.0],
             "longitude": [100.0, 101.0, 102.0],
         },
-    ).to_netcdf(source, engine="scipy")
+    ).to_netcdf(source, engine="netcdf4")
 
     output = tmp_path / "subset.nc"
     result = await subset_netcdf(
@@ -346,7 +343,7 @@ async def test_subset_netcdf_crops_vertical_levels(tmp_path):
     xr.Dataset(
         {"air": (("level", "latitude", "longitude"), [[[1.0]], [[2.0]], [[3.0]]])},
         coords={"level": [1000.0, 850.0, 500.0], "latitude": [0.0], "longitude": [100.0]},
-    ).to_netcdf(source, engine="scipy")
+    ).to_netcdf(source, engine="netcdf4")
 
     output = tmp_path / "pressure_subset.nc"
     result = await subset_netcdf(

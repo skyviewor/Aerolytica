@@ -16,7 +16,17 @@ from aero.toolbox.registry import register_tool
 
 
 def _ensure_vision_client():
+    from aero.application.turn_context import current_primary_model
+
     config = find_config()
+    active_primary = current_primary_model()
+    if active_primary is not None and active_primary[0] == "official":
+        # Workspace secrets may still contain a saved BYOK visual profile.
+        # An official turn must use Relay, without modifying that saved profile.
+        config = config.model_copy(deep=True)
+        config.vision.mode = "official"
+        config.vision.provider = "official"
+        config.vision.model = "auto"
     vision_config = resolved_vision_config(config)
     if vision_config is None:
         return None, config, None
@@ -143,9 +153,25 @@ async def analyze_image(
     if vision_config.mode == "official" and not vision_is_configured(config):
         await client.close()
         return {
-            "status": "error", "error_type": "authentication",
+            "status": "error",
+            "error_type": "authentication",
             "message": "官方登录已失效，请重新登录后分析图片。",
         }
+
+    if vision_config.mode == "official":
+        from aero.application.turn_context import current_primary_model
+        from aero.core.official_vision_policy import select_official_vision_model
+
+        provider, primary_model = current_primary_model() or (config.llm.provider, config.llm.model)
+        if provider == "official":
+            try:
+                # Resolve before cache lookup so a result from another model is not reused.
+                vision_config.model = await select_official_vision_model(primary_model)
+            except Exception as exc:
+                await client.close()
+                return _vision_error_payload(
+                    exc, config=vision_config, image_paths=image_paths, detail=detail
+                )
 
     for path in image_paths:
         if not Path(path).exists():

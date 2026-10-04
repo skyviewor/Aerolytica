@@ -148,12 +148,19 @@ def test_explicit_vision_is_preserved_and_logout_disables_default(monkeypatch):
 
 
 @pytest.mark.parametrize("prompt,limit", [("最新台风叫什么", 2), ("调研并比较台风", 8)])
-async def test_streaming_search_batch_enforces_limit_and_removes_tool(prompt, limit):
+async def test_streaming_search_batch_enforces_limit_and_removes_tool(prompt, limit, monkeypatch):
     import json
+    from unittest.mock import AsyncMock
 
     from aero.agent.llm_client import StreamEvent
     from aero.agent.loop import AgentLoop
+    from aero.core.agent_preferences import AgentPreferences
     from aero.core.types import ToolCall
+
+    monkeypatch.setattr(
+        "aero.core.agent_preferences.begin_agent_question",
+        AsyncMock(return_value=AgentPreferences()),
+    )
 
     config = AeroConfig()
     config.llm.provider = "official"
@@ -239,6 +246,15 @@ async def test_default_official_vision_request_and_errors(
 
     class Account:
         async def request_to(self, base, method, path, **kwargs):
+            if path == "/vision/upload-url":
+                return httpx.Response(
+                    200,
+                    json={
+                        "upload_url": "https://oss.test/upload",
+                        "image_url": "https://oss.test/image.png",
+                        "headers": {},
+                    },
+                )
             received.append(kwargs["json"])
             return httpx.Response(
                 status,
@@ -253,6 +269,11 @@ async def test_default_official_vision_request_and_errors(
             pass
 
     monkeypatch.setattr("aero.agent.official_vision_client.OfficialAccountSession", Account)
+
+    async def upload(self, url, **kwargs):
+        return httpx.Response(200, request=httpx.Request("PUT", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "put", upload)
     image = tmp_path / "image.png"
     image.write_bytes(b"mock image")
     config = AeroConfig()

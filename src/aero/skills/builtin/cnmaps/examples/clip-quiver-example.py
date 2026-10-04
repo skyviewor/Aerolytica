@@ -1,7 +1,6 @@
-import numpy as np
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-
+import numpy as np
 from cnmaps import clip_contours_by_map, clip_quiver_by_map, draw_map, get_adm_maps
 from cnmaps.sample import load_wind
 

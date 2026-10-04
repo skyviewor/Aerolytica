@@ -22,9 +22,14 @@ FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP":
 
 def describe_images(content: str, event_id: str) -> list[dict[str, str]]:
     sources = dict.fromkeys(extract_image_paths(content))
-    return [{"attachment_id": hashlib.sha256(f"{event_id}:{source}".encode()).hexdigest()[:32],
-             "source": source} for source in list(sources)[:32]
-            if Path(source).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}]
+    return [
+        {
+            "attachment_id": hashlib.sha256(f"{event_id}:{source}".encode()).hexdigest()[:32],
+            "source": source,
+        }
+        for source in list(sources)[:32]
+        if Path(source).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    ]
 
 
 def workspace_roots(project_dir: Path) -> list[Path]:
@@ -40,7 +45,7 @@ def open_image(source: str, roots: list[Path]):
     """Open only regular images within approved roots, including symlink resolution."""
     roots = [root.resolve() for root in roots]
     path = Path(source).expanduser()
-    for candidate in ([path] if path.is_absolute() else [root / path for root in roots]):
+    for candidate in [path] if path.is_absolute() else [root / path for root in roots]:
         resolved = candidate.resolve()
         if not any(resolved.is_relative_to(root) for root in roots) or not resolved.is_file():
             continue
@@ -64,8 +69,12 @@ def open_image(source: str, roots: list[Path]):
 
 
 class ImagePublisher:
-    def __init__(self, request: Callable[..., Awaitable[dict[str, Any]]],
-                 roots: Callable[[], list[Path]], journal: Path):
+    def __init__(
+        self,
+        request: Callable[..., Awaitable[dict[str, Any]]],
+        roots: Callable[[], list[Path]],
+        journal: Path,
+    ):
         self.request = request
         self.roots = roots
         self.journal = journal
@@ -138,9 +147,14 @@ class ImagePublisher:
         handle = None
         try:
             handle, content_type, size = await asyncio.to_thread(open_image, source, roots)
-            upload = await self.request("POST", f"{prefix}/upload", json={
-                "size_bytes": size, "content_type": content_type,
-            })
+            upload = await self.request(
+                "POST",
+                f"{prefix}/upload",
+                json={
+                    "size_bytes": size,
+                    "content_type": content_type,
+                },
+            )
             if upload.get("completed"):
                 self._release_snapshot(item["attachment_id"])
                 return
@@ -154,9 +168,14 @@ class ImagePublisher:
 
             # A separate client ensures no Relay authorization/cookies reach OSS.
             async with httpx.AsyncClient(timeout=60, follow_redirects=False) as http:
-                response = await http.put(url, content=chunks(), headers={
-                    "Content-Type": content_type, "Content-Length": str(size),
-                })
+                response = await http.put(
+                    url,
+                    content=chunks(),
+                    headers={
+                        "Content-Type": content_type,
+                        "Content-Length": str(size),
+                    },
+                )
                 response.raise_for_status()
             await self.request("POST", f"{prefix}/complete", json={})
             self._release_snapshot(item["attachment_id"])

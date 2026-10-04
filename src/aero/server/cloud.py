@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+import secrets
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from aero.core.config import save_llm_profile
@@ -18,6 +18,7 @@ from aero.core.official_account import (
     OfficialLoginRequiredError,
     relay_llm_url,
 )
+from aero.release_environment import user_home
 
 
 class LoginBody(BaseModel):
@@ -53,6 +54,7 @@ class AgentBody(BaseModel):
 class AgentStartBody(BaseModel):
     project_id: str = Field(min_length=1, max_length=64)
     session_id: str = Field(min_length=1, max_length=128)
+    update_restore: bool = False
 
 
 class CloudServices:
@@ -72,9 +74,11 @@ class CloudServices:
             from aero.core.cloud_sync import CloudSyncEngine
 
             self._sync = CloudSyncEngine(
-                self.web.project_dir, self.account,
-                busy=lambda: any(s.metadata()["active_runs"]
-                                 for s in self.web.active_sessions.values()),
+                self.web.project_dir,
+                self.account,
+                busy=lambda: any(
+                    s.metadata()["active_runs"] for s in self.web.active_sessions.values()
+                ),
             )
         return self._sync
 
@@ -140,7 +144,8 @@ class CloudServices:
         result = {
             "state": self.account.state,
             "user": {"user_id": data.user_id, "email": data.email} if data.is_logged_in else None,
-            "credits": None, "settings": self.web.settings_view(),
+            "credits": None,
+            "settings": self.web.settings_view(),
         }
         if data.is_logged_in:
             try:
@@ -230,8 +235,10 @@ def cloud_router(require_auth) -> APIRouter:
     async def bind(body: BindingBody, cloud=Depends(service)):
         await cloud.account.access_token()
         await cloud.sync.bind(
-            user_id=cloud.account.data.user_id, project_id=body.project_id,
-            root_directory_id=body.directory_id, includes=body.includes,
+            user_id=cloud.account.data.user_id,
+            project_id=body.project_id,
+            root_directory_id=body.directory_id,
+            includes=body.includes,
         )
         cloud.sync.pause(not body.enabled)
         if body.enabled:
@@ -264,12 +271,26 @@ def cloud_router(require_auth) -> APIRouter:
         )
 
     @router.post("/agents/{agent_id}/start")
-    async def start_agent(agent_id: str, body: AgentStartBody, cloud=Depends(service)):
+    async def start_agent(
+        agent_id: str, body: AgentStartBody, request: Request, cloud=Depends(service)
+    ):
+        if body.update_restore:
+            if (
+                not cloud.web.update_paused
+                or request.headers.get("origin")
+                or not secrets.compare_digest(
+                    request.headers.get("authorization", ""), f"Bearer {cloud.web.launch_token}"
+                )
+            ):
+                raise HTTPException(403, "仅本机升级控制器可恢复暂停中的 Agent")
+        elif cloud.web.update_paused:
+            raise HTTPException(503, "客户端正在更新，请稍后重试")
         from aero.application.cloud_runtime import CloudAgentRuntime, RelayRuntimeTransport
         from aero.core.remote_agent import RemoteAgentRegistry
 
-        agent = next((item for item in RemoteAgentRegistry().list()
-                      if item.agent_id == agent_id), None)
+        agent = next(
+            (item for item in RemoteAgentRegistry().list() if item.agent_id == agent_id), None
+        )
         if agent is None:
             raise HTTPException(404, "本机没有该 Agent 的安全令牌")
         session = cloud.web.session(body.session_id)
@@ -278,25 +299,47 @@ def cloud_router(require_auth) -> APIRouter:
         existing = cloud.agents.get(agent_id)
         if existing is not None:
             old_runtime, old_client = existing
-            if (old_runtime.session.id == body.session_id
-                    and old_runtime.project_id == body.project_id):
+            if (
+                old_runtime.session.id == body.session_id
+                and old_runtime.project_id == body.project_id
+            ):
                 return old_runtime.status()
             await old_runtime.stop()
             await old_client.aclose()
             cloud.agents.pop(agent_id, None)
         client = httpx.AsyncClient(base_url=cloud.account.base_url, timeout=35)
         hosted = CloudAgentRuntime(
-            session, RelayRuntimeTransport(
-                client, agent.agent_id, agent.token,
+            session,
+            RelayRuntimeTransport(
+                client,
+                agent.agent_id,
+                agent.token,
                 account_access_token=cloud.account.access_token,
             ),
-            device_id=f"web-{cloud.web.project_dir.name}", project_id=body.project_id,
+            device_id=f"web-{cloud.web.project_dir.name}",
+            project_id=body.project_id,
             account_id=cloud.account.data.user_id,
             account_identity=lambda: cloud.account.data.user_id,
-            state_dir=Path.home() / ".aero" / "agent-runtime",
+            state_dir=user_home() / "agent-runtime",
         )
         cloud.agents[agent_id] = (hosted, client)
-        return await hosted.start()
+        hosted.update_paused = cloud.web.update_paused
+        session.update_paused = cloud.web.update_paused
+        result = await hosted.start()
+        if body.update_restore:
+            try:
+                async with asyncio.timeout(15):
+                    while hosted.transport.lease_token is None:
+                        if hosted._task.done():
+                            raise RuntimeError("restored_agent_failed")
+                        await asyncio.sleep(0.05)
+            except (RuntimeError, TimeoutError) as exc:
+                await hosted.stop()
+                await client.aclose()
+                cloud.agents.pop(agent_id, None)
+                raise HTTPException(503, "恢复后的 Agent 尚未就绪") from exc
+            result = hosted.status()
+        return result
 
     @router.post("/agents/{agent_id}/stop")
     async def stop_agent(agent_id: str, cloud=Depends(service)):
@@ -312,9 +355,7 @@ def cloud_router(require_auth) -> APIRouter:
         return await cloud.agent_json("GET", f"/{agent_id}/messages")
 
     @router.post("/agents/{agent_id}/messages")
-    async def send_agent_message(
-        agent_id: str, body: dict[str, Any], cloud=Depends(service)
-    ):
+    async def send_agent_message(agent_id: str, body: dict[str, Any], cloud=Depends(service)):
         return await cloud.agent_json("POST", f"/{agent_id}/messages", json=body)
 
     @router.get("/agents/{agent_id}/approvals")
@@ -331,8 +372,6 @@ def cloud_router(require_auth) -> APIRouter:
 
     @router.post("/agents/{agent_id}/commands/{command_id}/cancel")
     async def cancel_agent_command(agent_id: str, command_id: str, cloud=Depends(service)):
-        return await cloud.agent_json(
-            "POST", f"/{agent_id}/commands/{command_id}/cancel", json={}
-        )
+        return await cloud.agent_json("POST", f"/{agent_id}/commands/{command_id}/cancel", json={})
 
     return router

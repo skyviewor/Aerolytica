@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,11 @@ from aero.application.remote_secret import SecretKey, associated_data
 from aero.core.daemon import private_write
 from aero.core.official_account import OfficialLoginRequiredError
 from aero.toolbox.secret_input import get_credential_spec
+
+RESIDENT_REPORT_PROMPT = (
+    "你已进入后台托管模式，请用一句话报到，仅回复“常驻智能体报到”。"
+    "本次不调用工具，不搜索、不读取或修改文件，不更改模型、模式或权限。"
+)
 
 if TYPE_CHECKING:
     from aero.application.local_session import LocalSession
@@ -102,7 +108,7 @@ class CloudAgentRuntime:
         transport: RelayRuntimeTransport,
         *,
         device_id: str,
-        project_id: str,
+        project_id: str | None,
         account_id: str,
         account_identity: Callable[[], str],
         state_dir: Path,
@@ -147,8 +153,11 @@ class CloudAgentRuntime:
         self.context_version = 0
         self.context_sync_enabled = False
         self.context_sync_error = ""
+        self.report_error = ""
         self._context_hash = ""
         self._foreground_execution: str | None = None
+        self.update_paused = False
+        self._claiming_command = False
         self.session.on_compaction = self._queue_compaction
 
     async def _image_request(self, method: str, path: str, **kwargs) -> dict:
@@ -200,6 +209,11 @@ class CloudAgentRuntime:
                     "client_event_id": event_id,
                     "images": attachments,
                     "local_turn_id": turn_id,
+                    **{
+                        k: v
+                        for k, v in self.session.run_status(run_id).items()
+                        if k == "execution_ms"
+                    },
                 }
             )
         self._conversation_events.append(
@@ -208,6 +222,7 @@ class CloudAgentRuntime:
                 "local_turn_id": turn_id,
                 "status": status,
                 "client_event_id": f"end-{run_id}",
+                **{k: v for k, v in self.session.run_status(run_id).items() if k == "execution_ms"},
             }
         )
         private_write(self._conversation_events_path, json.dumps(self._conversation_events))
@@ -229,7 +244,15 @@ class CloudAgentRuntime:
             "active_run_id": self.active_run_id,
             "command_id": self.command_id,
             "context_sync_enabled": self.context_sync_enabled,
-            "context_sync_error": self.context_sync_error,
+            "context_sync_error": self.report_error or self.context_sync_error,
+            "update_busy": bool(
+                self.active_run_id
+                or self.command_id
+                or self._foreground_execution
+                or self._claiming_command
+                or self.session.metadata().get("active_runs")
+            ),
+            "update_paused": self.update_paused,
         }
 
     async def start(self) -> dict[str, Any]:
@@ -274,6 +297,7 @@ class CloudAgentRuntime:
         self.transport.lease_token = int(result["lease_token"])
         self._deadline = started + min(float(result.get("ttl_seconds", 120)), 120)
         self._heartbeat_seconds = min(float(result.get("heartbeat_seconds", 15)), 15)
+        await self.transport.request("PUT", "capabilities", json={"web_conversation_v2": True})
         self.session.execution_guard = self.project_execution
         self.state = "online"
         self.context_sync_enabled = bool(result.get("context_sync_enabled"))
@@ -286,7 +310,9 @@ class CloudAgentRuntime:
                 self.session.restore_portable_context(saved["context"])
             self.context_sync_error = ""
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
+            if exc.response.status_code == 404:
+                self._discard_pending_compactions()
+            else:
                 self.context_sync_error = f"云端上下文读取失败（{exc.response.status_code}）"
         except (ValueError, KeyError) as exc:
             self.context_sync_error = f"云端上下文格式错误：{type(exc).__name__}"
@@ -302,6 +328,16 @@ class CloudAgentRuntime:
             or self.command_id
         ):
             return
+        reported = getattr(self, "_reported_context_version", self.context_version)
+        if self._pending_compactions or reported != self.context_version:
+            try:
+                await self.transport.request("GET", "context")
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+                self._discard_pending_compactions()
+                self.context_version = reported
+                self._context_hash = ""
         if manual_request_id:
             if self._foreground_execution or self.command_id:
                 return
@@ -425,6 +461,10 @@ class CloudAgentRuntime:
         except (httpx.HTTPError, LeaseLost):
             pass
 
+    def _discard_pending_compactions(self) -> None:
+        self._pending_compactions = []
+        private_write(self._context_events_path, "[]")
+
     async def _heartbeats(self) -> None:
         while not self._stop.is_set():
             await asyncio.sleep(self._heartbeat_seconds)
@@ -435,8 +475,9 @@ class CloudAgentRuntime:
                 metadata.get("name") if metadata.get("title_source") in {"auto", "manual"} else ""
             )
             result = await self.transport.request(
-                "POST", "runtime/heartbeat", json={"title": title}
+                "POST", "runtime/heartbeat", json={"title": title, "web_conversation_v2": True}
             )
+            self._reported_context_version = int(result.get("context_version") or 0)
             if bool(result.get("context_sync_enabled")) and not self.context_sync_enabled:
                 self._context_hash = ""
                 self.context_version = int(result.get("context_version") or 0)
@@ -467,8 +508,12 @@ class CloudAgentRuntime:
         if self.command_id and run_id == self.active_run_id:
             yield
             return
-        result = await self.transport.request(
-            "POST", "runtime/project/acquire", json={"execution_id": run_id}
+        result = (
+            await self.transport.request(
+                "POST", "runtime/project/acquire", json={"execution_id": run_id}
+            )
+            if self.project_id
+            else None
         )
         self._foreground_execution = run_id
         terminal_status = None
@@ -500,18 +545,20 @@ class CloudAgentRuntime:
             with suppress(OSError, ValueError, RuntimeError):
                 self._queue_foreground_messages(run_id, terminal_status)
             self._foreground_execution = None
-            with suppress(httpx.HTTPError, LeaseLost):
-                await self.transport.request(
-                    "POST",
-                    "runtime/project/release",
-                    json={
-                        "execution_id": run_id,
-                        "project_lease_token": result["project_lease_token"],
-                    },
-                )
+            if result is not None:
+                with suppress(httpx.HTTPError, LeaseLost):
+                    await self.transport.request(
+                        "POST",
+                        "runtime/project/release",
+                        json={
+                            "execution_id": run_id,
+                            "project_lease_token": result["project_lease_token"],
+                        },
+                    )
 
     async def _approval(self, command_id: str, run_id: str, event: Any) -> None:
-        # Only operation identifiers are cloud-visible, not tool arguments/secrets.
+        from aero.application.approval_details import approval_payload
+
         request_id = f"{run_id}:{event.id}"[:64]
         await self.transport.request(
             "POST",
@@ -519,8 +566,7 @@ class CloudAgentRuntime:
             json={
                 "request_id": request_id,
                 "payload": {
-                    "tool": str(event.data.get("tool", "operation"))[:120],
-                    "message": "Local operation requires approval",
+                    **approval_payload(event.data),
                     "run_id": run_id,
                 },
             },
@@ -672,9 +718,25 @@ class CloudAgentRuntime:
         self.command_id = command_id
         self.state = "running"
         try:
-            self.active_run_id = self.session.start_run(
-                str(command.get("content", "")), origin="web"
+            from aero.application.incoming_attachments import stage_command
+            from aero.application.remote_command import use_remote_command
+            from aero.application.turn_context import use_turn_id
+
+            prompt = await stage_command(
+                command,
+                self.transport.request,
+                self.session.project_dir / ".aero" / "attachments",
+                self.session.id,
             )
+            with use_turn_id(command_id), use_remote_command(command):
+                # A long poll claimed this command before drain was requested.
+                # Let that one command finish; pause still fences every new one.
+                paused = getattr(self.session, "update_paused", False)
+                self.session.update_paused = False
+                try:
+                    self.active_run_id = self.session.start_run(prompt, origin="web")
+                finally:
+                    self.session.update_paused = paused
             response_parts: list[str] = []
             async for event in self.session.events(self.active_run_id):
                 self._assert_lease()
@@ -721,6 +783,11 @@ class CloudAgentRuntime:
                         "images": attachments,
                         "in_reply_to": command_id,
                         "client_event_id": event_id,
+                        **{
+                            k: v
+                            for k, v in self.session.run_status(self.active_run_id).items()
+                            if k == "execution_ms"
+                        },
                     },
                 )
             elif final == "failed":
@@ -732,11 +799,25 @@ class CloudAgentRuntime:
                         "content": "本机智能体执行失败。",
                         "in_reply_to": command_id,
                         "client_event_id": f"error-{uuid.uuid4().hex}",
+                        **{
+                            k: v
+                            for k, v in self.session.run_status(self.active_run_id).items()
+                            if k == "execution_ms"
+                        },
                     },
                 )
             else:
                 await self.transport.request(
-                    "POST", f"commands/{command_id}/status", json={"status": final}
+                    "POST",
+                    f"commands/{command_id}/status",
+                    json={
+                        "status": final,
+                        **{
+                            k: v
+                            for k, v in self.session.run_status(self.active_run_id).items()
+                            if k == "execution_ms"
+                        },
+                    },
                 )
         except BaseException:
             self._record(command_id, "interrupted")
@@ -751,15 +832,19 @@ class CloudAgentRuntime:
         while not self._stop.is_set():
             self._assert_lease()
             # Do not claim another command while a foreground task is active.
-            if self.session.metadata().get("active_runs"):
+            if self.update_paused or self.session.metadata().get("active_runs"):
                 await asyncio.sleep(0.2)
                 continue
             # Keep the existing Relay long-poll alive instead of waking once per
             # second. Heartbeats run independently, so this does not delay lease
             # renewal or account-change detection.
-            result = await self.transport.request(
-                "GET", "commands/next", params={"wait_seconds": 25}
-            )
+            self._claiming_command = True
+            try:
+                result = await self.transport.request(
+                    "GET", "commands/next", params={"wait_seconds": 25}
+                )
+            finally:
+                self._claiming_command = False
             if result.get("command"):
                 await self._execute(result["command"])
                 self.state = "online"
@@ -779,7 +864,7 @@ class CloudAgentRuntime:
                         for fn in (
                             self._heartbeats,
                             self._watch_identity,
-                            self._poll,
+                            self._report_and_poll,
                             self._sync_images,
                         )
                     ]
@@ -812,6 +897,41 @@ class CloudAgentRuntime:
         finally:
             if self.state not in {"account_changed", "login_required"}:
                 self.state = "stopped"
+
+    async def _report_and_poll(self) -> None:
+        """Bootstrap only an empty conversation through the normal execution path."""
+        from aero.application.conversation_history import visible_history
+
+        saved = self.session.session_manager.export_portable_context(self.session.id)
+        history = visible_history(saved) if saved else self.session.messages_view()
+        if any(message.get("role") == "user" for message in history):
+            await self.transport.request(
+                "POST",
+                "history",
+                json={"hosted_bootstrap": True, "messages": history},
+                timeout=120,
+            )
+        if not any(message.get("role") == "user" for message in history):
+            # start_run is atomic with the busy check: a foreground message wins
+            # rather than receiving a second greeting while already in flight.
+            try:
+                run_id = self.session.start_run(RESIDENT_REPORT_PROMPT, origin="client")
+            except RuntimeError as exc:
+                if str(exc) not in {"session_busy", "update_in_progress"}:
+                    raise
+            else:
+                try:
+                    await self.session.wait_run(run_id)
+                    state = self.session.run_status(run_id)
+                    if state.get("state") != "completed":
+                        self.context_sync_error = "常驻智能体报到失败，请检查额度或执行状态后重试。"
+                        self.report_error = self.context_sync_error
+                        logging.getLogger(__name__).warning(self.report_error)
+                    await self._flush_conversation_events()
+                except asyncio.CancelledError:
+                    await self.session.cancel(run_id)
+                    raise
+        await self._poll()
 
     async def stop(self) -> None:
         self._stop.set()

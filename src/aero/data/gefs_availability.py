@@ -522,15 +522,9 @@ def parse_s3_list_bucket(xml_text: str) -> dict:
     root = ET.fromstring(xml_text)
     ns = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
     common_prefixes = [
-        elem.text or ""
-        for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns)
-        if elem.text
+        elem.text or "" for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns) if elem.text
     ]
-    contents = [
-        elem.text or ""
-        for elem in root.findall("s3:Contents/s3:Key", ns)
-        if elem.text
-    ]
+    contents = [elem.text or "" for elem in root.findall("s3:Contents/s3:Key", ns) if elem.text]
     token = root.findtext("s3:NextContinuationToken", default=None, namespaces=ns)
     return {
         "common_prefixes": common_prefixes,

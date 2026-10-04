@@ -217,11 +217,7 @@ class Merra2Provider:
             for variable in product.common_variables
         ]
         if terms:
-            values = [
-                value
-                for value in values
-                if all(term in value.casefold() for term in terms)
-            ]
+            values = [value for value in values if all(term in value.casefold() for term in terms)]
         return tuple(values)
 
     async def download(

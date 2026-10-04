@@ -41,7 +41,9 @@ def _save_cache(data: dict[str, Any]):
     with open(CACHE_FILE, "w") as f:
         json.dump(
             {"cached_at": datetime.now().isoformat(), "data": data},
-            f, ensure_ascii=False, indent=2,
+            f,
+            ensure_ascii=False,
+            indent=2,
         )
 
 
@@ -110,10 +112,7 @@ async def _fetch_works(
 
 
 def _extract_work(work: dict) -> dict:
-    authors = [
-        a.get("author", {}).get("display_name", "")
-        for a in work.get("authorships", [])
-    ]
+    authors = [a.get("author", {}).get("display_name", "") for a in work.get("authorships", [])]
     primary_loc = work.get("primary_location", {}) or {}
     source = primary_loc.get("source", {}) or {}
     oa = work.get("open_access", {}) or {}
@@ -142,14 +141,9 @@ def _extract_work(work: dict) -> dict:
         "landing_page_url": best_oa.get("landing_page_url", ""),
         "type": work.get("type", ""),
         "concepts": [
-            c.get("display_name", "")
-            for c in work.get("concepts", [])
-            if c.get("level") == 0
+            c.get("display_name", "") for c in work.get("concepts", []) if c.get("level") == 0
         ],
-        "keywords": [
-            kw.get("display_name", "")
-            for kw in work.get("keywords", [])
-        ],
+        "keywords": [kw.get("display_name", "") for kw in work.get("keywords", [])],
     }
 
 
@@ -213,6 +207,7 @@ async def search_works(
 async def get_work_detail(work_id: str) -> dict[str, Any] | None:
     if work_id.startswith("arxiv:"):
         from aero.data.literature_arxiv import get_arxiv_detail
+
         return await get_arxiv_detail(work_id)
 
     headers = {"User-Agent": USER_AGENT}
@@ -342,15 +337,17 @@ def list_saved(literature_dir: Path) -> list[dict[str, Any]]:
         except (json.JSONDecodeError, ValueError):
             continue
         pdf_path = entry / "paper.pdf"
-        results.append({
-            "work_id": meta.get("work_id", entry.name),
-            "title": meta.get("title", ""),
-            "authors": meta.get("authors", []),
-            "year": meta.get("publication_year"),
-            "source": meta.get("source", ""),
-            "doi": meta.get("doi", ""),
-            "has_pdf": pdf_path.exists(),
-            "pdf_size": pdf_path.stat().st_size if pdf_path.exists() else None,
-            "dir": str(entry),
-        })
+        results.append(
+            {
+                "work_id": meta.get("work_id", entry.name),
+                "title": meta.get("title", ""),
+                "authors": meta.get("authors", []),
+                "year": meta.get("publication_year"),
+                "source": meta.get("source", ""),
+                "doi": meta.get("doi", ""),
+                "has_pdf": pdf_path.exists(),
+                "pdf_size": pdf_path.stat().st_size if pdf_path.exists() else None,
+                "dir": str(entry),
+            }
+        )
     return results

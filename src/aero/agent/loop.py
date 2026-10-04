@@ -19,6 +19,7 @@ from aero.agent.progress import ProgressReporter, use_progress_reporter
 from aero.agent.runtime import Runtime
 from aero.agent.skills import SelectedSkill, SkillSelector, render_skill_context
 from aero.agent.system_prompt import build_system_prompt
+from aero.application.turn_context import use_primary_model
 from aero.core.config import AeroConfig
 from aero.core.debug_log import debug_log
 from aero.core.llm_providers import get_provider_preset
@@ -35,9 +36,27 @@ _MAX_VISION_ANALYSES_PER_TURN = 2
 # though its meaning depends entirely on the previous plotting request.  Keep
 # skill selection grounded in recent *user* intent for those referential turns.
 _SKILL_FOLLOW_UP_MARKERS = (
-    "改画", "改成", "重新画", "再画", "重画", "上一张", "刚才", "这张图", "这个图",
-    "上述图", "多子图", "子图", "3x3", "2x2", "3×3", "2×2", "subplot", "panel",
-    "same plot", "previous plot", "redraw",
+    "改画",
+    "改成",
+    "重新画",
+    "再画",
+    "重画",
+    "上一张",
+    "刚才",
+    "这张图",
+    "这个图",
+    "上述图",
+    "多子图",
+    "子图",
+    "3x3",
+    "2x2",
+    "3×3",
+    "2×2",
+    "subplot",
+    "panel",
+    "same plot",
+    "previous plot",
+    "redraw",
 )
 
 
@@ -49,13 +68,42 @@ def _image_fingerprint(path: Path) -> tuple[int, int] | None:
         return None
     return stat.st_mtime_ns, stat.st_size
 
+
 _DESTRUCTIVE_SHELL_PREFIXES = (
-    "rm ", "cp ", "mv ", "dd ", "mkfs", "chmod ", "chown ", "kill ", "pkill ",
-    "shutdown", "reboot", "halt ", "poweroff", "init ", "systemctl stop",
-    "systemctl disable", "systemctl mask", "docker rm", "docker kill",
-    "pip uninstall", "pip install ", "npm uninstall", "npm install ",
-    "gem uninstall", "gem install ", "cargo uninstall", "cargo install",
-    "apt ", "brew ", "yum ", "dnf ", "pacman ", "zypper ", "port install",
+    "rm ",
+    "cp ",
+    "mv ",
+    "dd ",
+    "mkfs",
+    "chmod ",
+    "chown ",
+    "kill ",
+    "pkill ",
+    "shutdown",
+    "reboot",
+    "halt ",
+    "poweroff",
+    "init ",
+    "systemctl stop",
+    "systemctl disable",
+    "systemctl mask",
+    "docker rm",
+    "docker kill",
+    "pip uninstall",
+    "pip install ",
+    "npm uninstall",
+    "npm install ",
+    "gem uninstall",
+    "gem install ",
+    "cargo uninstall",
+    "cargo install",
+    "apt ",
+    "brew ",
+    "yum ",
+    "dnf ",
+    "pacman ",
+    "zypper ",
+    "port install",
 )
 
 
@@ -113,8 +161,7 @@ def _destructive_memo_tools_for_text(text: str) -> set[str]:
     if clear_requested:
         return {"clear_memos"}
     delete_requested = any(
-        marker in lowered
-        for marker in ("删除", "删掉", "移除", "delete", "remove")
+        marker in lowered for marker in ("删除", "删掉", "移除", "delete", "remove")
     )
     return {"delete_memo"} if delete_requested else set()
 
@@ -201,7 +248,9 @@ def _existing_mkdir_is_noop(command: str, workdir: str = ".") -> bool:
     if not base.is_dir():
         base = project_dir
     return all(
-        (Path(target).expanduser() if Path(target).expanduser().is_absolute() else base / target).is_dir()
+        (
+            Path(target).expanduser() if Path(target).expanduser().is_absolute() else base / target
+        ).is_dir()
         for target in targets
     )
 
@@ -228,11 +277,7 @@ def _runtime_tools_already_ready(args: dict) -> bool:
         from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
         manager = get_runtime_tool_manager()
-        requested = [
-            str(tool).strip()
-            for tool in args.get("tools", [])
-            if str(tool).strip()
-        ]
+        requested = [str(tool).strip() for tool in args.get("tools", []) if str(tool).strip()]
         if not requested:
             return True
         unknown = [tool for tool in requested if tool not in manager.packages]
@@ -262,10 +307,9 @@ def _tool_call_needs_confirmation(tool_name: str, args: dict) -> bool:
 def _is_content_filter_error(error: Exception) -> bool:
     msg = str(error)
     return (
-        "Content Exists Risk" in msg
-        or "content_filter" in msg.lower()
-        or "safety" in msg.lower()
+        "Content Exists Risk" in msg or "content_filter" in msg.lower() or "safety" in msg.lower()
     )
+
 
 _TOOL_NAME_REPLACEMENTS = {
     "download_era5": "下载数据",
@@ -634,9 +678,7 @@ def _tool_result_has_error_status(result: object) -> bool:
     )
 
 
-def _tool_error_progress_message(
-    tool_name: str, args: dict | None, result: object
-) -> str:
+def _tool_error_progress_message(tool_name: str, args: dict | None, result: object) -> str:
     """Describe expected validation feedback without calling it a command failure."""
     if (
         tool_name == "run_shell"
@@ -726,8 +768,8 @@ class _StreamingTextSanitizer:
         self._pending += text
         if len(self._pending) <= self._hold_chars:
             return ""
-        ready = self._pending[:-self._hold_chars]
-        self._pending = self._pending[-self._hold_chars:]
+        ready = self._pending[: -self._hold_chars]
+        self._pending = self._pending[-self._hold_chars :]
         return _sanitize_user_facing_text(ready)
 
     def flush(self) -> str:
@@ -738,6 +780,7 @@ class _StreamingTextSanitizer:
 
 def _sanitize_progress_text(text: str) -> str:
     """Hide internal tool/function names from progress shown in the TUI."""
+
     def replace_tool_status(match: re.Match[str]) -> str:
         prefix = match.group(1)
         tool_name = match.group(2).strip()
@@ -1043,6 +1086,7 @@ class AgentLoop:
         self.skill_selector = SkillSelector()
 
         from aero.data.instructions import load_instructions
+
         instructions = load_instructions(project_dir=self.config.output.data_dir)
         system = build_system_prompt(
             config,
@@ -1071,6 +1115,7 @@ class AgentLoop:
     def reset_system_prompt(self, language: str) -> None:
         self.config.language = language
         from aero.data.instructions import load_instructions
+
         instructions = load_instructions(project_dir=self.config.output.data_dir)
         system = build_system_prompt(
             self.config,
@@ -1091,6 +1136,7 @@ class AgentLoop:
         _ensure_cnmaps_when_sciplot_active(selected, skill_selector=self.skill_selector)
         skill_context = render_skill_context(selected)
         from aero.data.instructions import load_instructions
+
         instructions = load_instructions(project_dir=self.config.output.data_dir)
         system = build_system_prompt(
             self.config,
@@ -1110,6 +1156,7 @@ class AgentLoop:
                 "agent.skills_selected",
                 skills=[item.skill.name for item in selected],
             )
+
     def _effective_vision_identity(self) -> tuple[str, str]:
         from aero.core.config import resolved_vision_config
 
@@ -1123,7 +1170,8 @@ class AgentLoop:
             self.runtime.read_files.clear()
         limit = (
             self.config.search_research_budget
-            if RESEARCH.search(prompt) else self.config.search_simple_budget
+            if RESEARCH.search(prompt)
+            else self.config.search_simple_budget
         )
         self.search_budget = SearchBudget(limit)
         self.runtime.search_budget = self.search_budget
@@ -1131,11 +1179,16 @@ class AgentLoop:
     def _remaining_tools(self, tools: list[dict]) -> list[dict]:
         from aero.agent.search_budget import SEARCH_TOOLS
 
-        return [tool for tool in tools if self.search_budget.remaining or
-                tool.get("function", {}).get("name") not in SEARCH_TOOLS]
+        return [
+            tool
+            for tool in tools
+            if self.search_budget.remaining
+            or tool.get("function", {}).get("name") not in SEARCH_TOOLS
+        ]
 
     def _allowed_tools(self) -> list[dict]:
         from aero.data.modes import filter_tool_functions
+
         tools = filter_tool_functions(self.registry.list_functions(), self.config.mode)
         allowed_destructive_memo_tools = _destructive_memo_tools_for_text(
             self._current_user_message
@@ -1163,10 +1216,15 @@ class AgentLoop:
 
     def _external_web_search_block_reason(self, tool_name: str) -> str | None:
         """Keep official Relay search separate from client-managed search tools."""
-        if self.config.llm.provider == "official" and tool_name in {
-            "search_web",
-            "check_web_search_status",
-        } and tool_name not in self._official_mcp_tool_names:
+        if (
+            self.config.llm.provider == "official"
+            and tool_name
+            in {
+                "search_web",
+                "check_web_search_status",
+            }
+            and tool_name not in self._official_mcp_tool_names
+        ):
             return (
                 "当前使用 Aerolytica 官方模型，但本轮官方 MCP 未提供该工具；"
                 "客户端不会改用外部网页搜索服务。"
@@ -1218,6 +1276,49 @@ class AgentLoop:
             occurred_at=self.llm.last_request_started_at,
         )
 
+    async def _prepare_account_turn(self) -> None:
+        from aero.application.turn_context import current_turn_id
+        from aero.core.agent_preferences import begin_agent_question
+
+        turn_id = current_turn_id() or uuid.uuid4().hex
+        if getattr(self, "_prepared_turn_id", "") == turn_id:
+            return
+        self.llm.relay_turn_id = turn_id
+        self.llm.relay_purpose = "main"
+        self._main_rounds = 0
+        self._account_round_limit = None
+        self._account_preferences = None
+        if self.config.llm.provider == "official":
+            from aero.application.remote_command import current_command
+            from aero.core.agent_preferences import AgentPreferences
+
+            command = current_command()
+            snapshot = command.get("preferences")
+            if "max_rounds" in command:
+                snapshot = {
+                    "max_rounds": command["max_rounds"],
+                    "version": command.get("preference_version", 1),
+                }
+            if snapshot is not None:
+                if not isinstance(snapshot, dict):
+                    raise ValueError("invalid_command_preferences")
+                limit = snapshot.get("max_rounds", 999)
+                if limit is not None and (type(limit) is not int or limit < 1):
+                    raise ValueError("invalid_command_round_limit")
+                preferences = AgentPreferences(limit, snapshot.get("version", 0))
+            else:
+                preferences = await begin_agent_question(turn_id)
+            self._account_round_limit = preferences.max_rounds
+            self._account_preferences = preferences
+        self._prepared_turn_id = turn_id
+
+    def _begin_main_round(self) -> None:
+        limit = getattr(self, "_account_round_limit", None)
+        rounds = getattr(self, "_main_rounds", 0)
+        if limit is not None and rounds >= limit:
+            raise RuntimeError(f"本轮已达到账户模型轮次上限（{limit}），请在账户设置中调整。")
+        self._main_rounds = rounds + 1
+
     async def run(self, user_message: str) -> str:
         """Process a user message and return the agent's response (non-streaming)."""
         debug_log("agent.run_started", mode="non_stream", text_length=len(user_message))
@@ -1230,10 +1331,12 @@ class AgentLoop:
         self.messages = _sanitize_tool_message_sequence(self.messages)
         self._refresh_system_prompt_for_turn(user_message)
         self.messages.append(Message(role="user", content=user_message))
-        self.llm.relay_turn_id = uuid.uuid4().hex
+        await self._prepare_account_turn()
+        self.messages[-1].message_id = self.llm.relay_turn_id
         tools = await self._tools_for_turn()
 
         try:
+            self._begin_main_round()
             text, tool_calls = await self.llm.chat_with_tools(self.messages, tools)
             self._record_llm_references()
             self._record_llm_usage(self.llm.last_usage)
@@ -1249,9 +1352,7 @@ class AgentLoop:
                 debug_log("agent.run_completed", mode="non_stream", response_length=len(response))
                 return response
 
-            visible_text = _inject_refs_if_missing(
-                _sanitize_user_facing_text(text), self._ref_urls
-            )
+            visible_text = _inject_refs_if_missing(_sanitize_user_facing_text(text), self._ref_urls)
             self.messages.append(Message(role="assistant", content=visible_text))
             debug_log(
                 "agent.run_completed",
@@ -1267,10 +1368,11 @@ class AgentLoop:
             self.messages.append(Message(role="assistant", content=error_msg))
             return error_msg
 
-    async def run_stream(
-        self, user_message: str
-    ) -> AsyncGenerator[StreamEvent, None]:
+    async def run_stream(self, user_message: str) -> AsyncGenerator[StreamEvent, None]:
         """Process a user message with streaming output."""
+        from aero.application.request_timing import start_execution_timer
+
+        start_execution_timer()
         debug_log("agent.run_started", mode="stream", text_length=len(user_message))
         self._cancel_event = asyncio.Event()
         self._ref_urls.clear()
@@ -1283,7 +1385,8 @@ class AgentLoop:
         self._refresh_system_prompt_for_turn(user_message)
         message_start = len(self.messages)
         self.messages.append(Message(role="user", content=user_message))
-        self.llm.relay_turn_id = uuid.uuid4().hex
+        await self._prepare_account_turn()
+        self.messages[-1].message_id = self.llm.relay_turn_id
         tools = await self._tools_for_turn()
 
         try:
@@ -1291,6 +1394,7 @@ class AgentLoop:
             tool_calls: list[ToolCall] = []
             text_sanitizer = _StreamingTextSanitizer()
 
+            self._begin_main_round()
             async for event in self.llm.chat_with_tools_stream(
                 self.messages, self._remaining_tools(tools)
             ):
@@ -1323,7 +1427,7 @@ class AgentLoop:
             else:
                 injected = _inject_refs_if_missing(accumulated_text, self._ref_urls)
                 if injected != accumulated_text:
-                    extra = injected[len(accumulated_text):]
+                    extra = injected[len(accumulated_text) :]
                     yield StreamEvent(type="text", content=extra)
                     accumulated_text = injected
                 self.messages.append(Message(role="assistant", content=accumulated_text))
@@ -1421,32 +1525,30 @@ class AgentLoop:
                 self._successful_vision_images[resolved] = _image_fingerprint(Path(path))
 
     def _is_official_mcp_tool(self, tool_name: str) -> bool:
-        return (
-            self.config.llm.provider == "official"
-            and tool_name in self._official_mcp_tool_names
-        )
+        return self.config.llm.provider == "official" and tool_name in self._official_mcp_tool_names
 
     async def _call_official_mcp(self, tool_call: ToolCall) -> str:
         arguments = self._parse_tool_args(tool_call)
+
         async def execute():
             if self._official_mcp is None:
                 return {"status": "failed", "is_error": True, "content": "官方搜索客户端未初始化。"}
             return await self._official_mcp.call(
-                tool_call.name, arguments, turn_id=self.llm.relay_turn_id, call_id=tool_call.id,
+                tool_call.name,
+                arguments,
+                turn_id=self.llm.relay_turn_id,
+                call_id=tool_call.id,
             )
+
         result = await self.search_budget.execute(arguments, tool_call.id, execute)
         for url in _collect_ref_urls(result):
             if url not in self._ref_urls:
                 self._ref_urls.append(url)
         return json.dumps(result, ensure_ascii=False, default=str)
 
-    async def _handle_tool_calls(
-        self, tool_calls: list[ToolCall], text: str
-    ) -> str:
+    async def _handle_tool_calls(self, tool_calls: list[ToolCall], text: str) -> str:
         """Execute tool calls and feed results back to LLM for natural language response."""
-        self.messages.append(
-            Message(role="assistant", content=text or "", tool_calls=tool_calls)
-        )
+        self.messages.append(Message(role="assistant", content=text or "", tool_calls=tool_calls))
 
         groups: dict[str, list[ToolCall]] = {}
         for tc in tool_calls:
@@ -1456,9 +1558,7 @@ class AgentLoop:
             if self._is_official_mcp_tool(tool_name):
                 for tc in calls:
                     result = await self._call_official_mcp(tc)
-                    self.messages.append(
-                        Message(role="tool", content=result, tool_call_id=tc.id)
-                    )
+                    self.messages.append(Message(role="tool", content=result, tool_call_id=tc.id))
                 continue
             spec = self.registry.get(tool_name)
             if spec is None:
@@ -1485,8 +1585,7 @@ class AgentLoop:
             if spec.requires_confirmation and tool_name not in self.always_allow:
                 all_args = [self._parse_tool_args(tc) for tc in calls]
                 _needs_confirm = any(
-                    _tool_call_needs_confirmation(tool_name, args)
-                    for args in all_args
+                    _tool_call_needs_confirmation(tool_name, args) for args in all_args
                 )
                 if _needs_confirm:
                     if len(calls) == 1:
@@ -1499,11 +1598,16 @@ class AgentLoop:
                         for tc in calls:
                             if tool_name == "propose_execution":
                                 deny_msg = json.dumps(
-                                    {"approved": False, "message": "用户选择暂不执行，继续留在规划模式完善方案。"},
+                                    {
+                                        "approved": False,
+                                        "message": "用户选择暂不执行，继续留在规划模式完善方案。",
+                                    },
                                     ensure_ascii=False,
                                 )
                             else:
-                                deny_msg = json.dumps({"error": "用户拒绝执行此操作"}, ensure_ascii=False)
+                                deny_msg = json.dumps(
+                                    {"error": "用户拒绝执行此操作"}, ensure_ascii=False
+                                )
                             self.messages.append(
                                 Message(role="tool", content=deny_msg, tool_call_id=tc.id)
                             )
@@ -1511,12 +1615,16 @@ class AgentLoop:
 
             for tc in calls:
                 parsed_args = self._parse_tool_args(tc)
-                with use_token_tracker(self.tracker):
+                with (
+                    use_token_tracker(self.tracker),
+                    use_primary_model(self.config.llm.provider, self.config.llm.model),
+                ):
                     exec_result = await self.runtime.execute(spec.function, parsed_args)
                 if exec_result.success:
                     self._apply_runtime_config_update(tc.name, exec_result.result)
                     if self.config.mode == "execute" and tc.name in _BUILD_TOOLS:
                         from aero.data.plans import lock_current_plan
+
                         lock_current_plan(project_dir=self.config.output.data_dir)
                     direct_response = _direct_tool_response(tc.name, exec_result.result)
                     if direct_response:
@@ -1532,6 +1640,7 @@ class AgentLoop:
                 self.messages.append(Message(role="tool", content=result_str, tool_call_id=tc.id))
 
         from aero.toolbox.builtin_tools import get_vision_usage, reset_vision_usage
+
         vision_usage = get_vision_usage()
         if vision_usage:
             self.tracker.add_vision(
@@ -1546,6 +1655,7 @@ class AgentLoop:
             self.messages.append(Message(role="assistant", content=response))
             return response
 
+        self._begin_main_round()
         response = _sanitize_user_facing_text(await self.llm.chat(self.messages))
         self._record_llm_references()
         self._record_llm_usage(self.llm.last_usage)
@@ -1559,9 +1669,7 @@ class AgentLoop:
         text: str,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Execute tool calls while streaming progress events."""
-        self.messages.append(
-            Message(role="assistant", content=text or "", tool_calls=tool_calls)
-        )
+        self.messages.append(Message(role="assistant", content=text or "", tool_calls=tool_calls))
 
         pending_calls = tool_calls
         tools = self._allowed_tools() + self._official_mcp_tools
@@ -1576,6 +1684,7 @@ class AgentLoop:
                 yield event
 
             from aero.toolbox.builtin_tools import get_vision_usage, reset_vision_usage
+
             vision_usage = get_vision_usage()
             if vision_usage:
                 self.tracker.add_vision(
@@ -1600,6 +1709,7 @@ class AgentLoop:
             response = ""
             pending_calls = []
             text_sanitizer = _StreamingTextSanitizer()
+            self._begin_main_round()
             async for event in self.llm.chat_with_tools_stream(
                 self.messages, self._remaining_tools(tools)
             ):
@@ -1630,7 +1740,7 @@ class AgentLoop:
             if not pending_calls:
                 injected = _inject_refs_if_missing(response, self._ref_urls)
                 if injected != response:
-                    extra = injected[len(response):]
+                    extra = injected[len(response) :]
                     yield StreamEvent(type="text", content=extra)
                     response = injected
                 self.messages.append(Message(role="assistant", content=response))
@@ -1689,22 +1799,17 @@ class AgentLoop:
                             else "Aerolytica 官方网页搜索完成"
                         ),
                     )
-                    self.messages.append(
-                        Message(role="tool", content=result, tool_call_id=tc.id)
-                    )
+                    self.messages.append(Message(role="tool", content=result, tool_call_id=tc.id))
                 continue
-            if (
-                tool_name in {"delete_memo", "clear_memos"}
-                and tool_name
-                not in _destructive_memo_tools_for_text(self._current_user_message)
-            ):
+            if tool_name in {
+                "delete_memo",
+                "clear_memos",
+            } and tool_name not in _destructive_memo_tools_for_text(self._current_user_message):
                 err = "用户本轮没有明确要求删除备忘录，本次删除操作已阻止。"
                 debug_log("agent.memo_delete_blocked", tool_name=tool_name)
                 for tc in calls:
                     yield StreamEvent(type="status", content=err)
-                    self.messages.append(
-                        Message(role="tool", content=err, tool_call_id=tc.id)
-                    )
+                    self.messages.append(Message(role="tool", content=err, tool_call_id=tc.id))
                 continue
             spec = self.registry.get(tool_name)
             if spec is None:
@@ -1735,8 +1840,7 @@ class AgentLoop:
             if spec.requires_confirmation and tool_name not in self.always_allow:
                 all_args = [self._parse_tool_args(tc) for tc in calls]
                 _needs_confirm = any(
-                    _tool_call_needs_confirmation(tool_name, args)
-                    for args in all_args
+                    _tool_call_needs_confirmation(tool_name, args) for args in all_args
                 )
                 if _needs_confirm:
                     debug_log(
@@ -1767,16 +1871,23 @@ class AgentLoop:
                         self.confirm_future = None
                     if choice == "always":
                         self.always_allow.add(tool_name)
-                    debug_log("agent.tool_confirmation_answered", tool_name=tool_name, choice=choice)
+                    debug_log(
+                        "agent.tool_confirmation_answered", tool_name=tool_name, choice=choice
+                    )
                     if choice == "deny":
                         for tc in calls:
                             if tool_name == "propose_execution":
                                 deny_msg = json.dumps(
-                                    {"approved": False, "message": "用户选择暂不执行，继续留在规划模式完善方案。"},
+                                    {
+                                        "approved": False,
+                                        "message": "用户选择暂不执行，继续留在规划模式完善方案。",
+                                    },
                                     ensure_ascii=False,
                                 )
                             else:
-                                deny_msg = json.dumps({"error": "用户拒绝执行此操作"}, ensure_ascii=False)
+                                deny_msg = json.dumps(
+                                    {"error": "用户拒绝执行此操作"}, ensure_ascii=False
+                                )
                             self.messages.append(
                                 Message(role="tool", content=deny_msg, tool_call_id=tc.id)
                             )
@@ -1831,7 +1942,11 @@ class AgentLoop:
             queue,
             self._cancel_event,
         )
-        with use_progress_reporter(reporter), use_token_tracker(self.tracker):
+        with (
+            use_progress_reporter(reporter),
+            use_token_tracker(self.tracker),
+            use_primary_model(self.config.llm.provider, self.config.llm.model),
+        ):
             task = asyncio.create_task(self.runtime.execute(spec.function, parsed_args))
             while not task.done():
                 if self._cancel_event is not None and self._cancel_event.is_set():
@@ -1880,15 +1995,11 @@ class AgentLoop:
             debug_log("agent.tool_finished", tool_name=tc.name, success=True)
         elif exec_result.success:
             result_str = json.dumps(exec_result.result, ensure_ascii=False, default=str)
-            error_progress = _tool_error_progress_message(
-                tc.name, parsed_args, exec_result.result
-            )
+            error_progress = _tool_error_progress_message(tc.name, parsed_args, exec_result.result)
             error_message = ""
             if isinstance(exec_result.result, dict):
                 error_message = str(
-                    exec_result.result.get("message")
-                    or exec_result.result.get("error")
-                    or ""
+                    exec_result.result.get("message") or exec_result.result.get("error") or ""
                 )
                 if exec_result.result.get("setup_required"):
                     credential_request = exec_result.result.get("credential_request", {})
@@ -1905,10 +2016,7 @@ class AgentLoop:
             if error_message.startswith(error_progress):
                 content = _sanitize_progress_text(error_message)
             else:
-                content = (
-                    f"{error_progress}："
-                    f"{_sanitize_progress_text(error_message)}"
-                )
+                content = f"{error_progress}：{_sanitize_progress_text(error_message)}"
             yield StreamEvent(
                 type="status",
                 content=content,

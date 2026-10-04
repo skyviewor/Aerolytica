@@ -1,22 +1,20 @@
 """Tests for user instructions data layer and system prompt injection."""
 
 import tempfile
-from pathlib import Path
 
 import pytest
 
-from aero.data.instructions import (
-    GLOBAL_INSTRUCTIONS_PATH,
-    append_instruction,
-    clear_instructions,
-    load_instructions,
-    write_instructions,
-    _render_section,
-    _resolve_scope_path,
-)
 from aero.agent.system_prompt import (
     _instruction_section,
     build_system_prompt,
+)
+from aero.data import instructions
+from aero.data.instructions import (
+    _render_section,
+    _resolve_scope_path,
+    append_instruction,
+    clear_instructions,
+    load_instructions,
 )
 
 
@@ -80,6 +78,7 @@ class TestClearInstructions:
     def test_clear_nonexistent_is_noop(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             op = clear_instructions(scope="project", project_dir=tmpdir)
+            assert not op.exists()
 
 
 class TestResolveScopePath:
@@ -89,7 +88,7 @@ class TestResolveScopePath:
 
     def test_global_path(self):
         path = _resolve_scope_path("global")
-        assert path == GLOBAL_INSTRUCTIONS_PATH
+        assert path == instructions.GLOBAL_INSTRUCTIONS_PATH
 
 
 class TestInstructionSection:
@@ -114,7 +113,9 @@ class TestBuildSystemPromptWithInstructions:
 
         config = AeroConfig()
         result = build_system_prompt(
-            config, "zh", instructions_context="### 全局偏好\n- test",
+            config,
+            "zh",
+            instructions_context="### 全局偏好\n- test",
         )
         assert "用户指令" in result
         assert "test" in result

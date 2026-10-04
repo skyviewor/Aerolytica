@@ -20,6 +20,7 @@ from aero.core.official_account import (
     OfficialAccountSession,
     OfficialLoginRequiredError,
 )
+from aero.release_environment import user_home
 from aero.toolbox.secret_input import SecretInputRequest, get_credential_spec
 
 
@@ -39,12 +40,14 @@ class ChatPresence:
         restore_context: Callable[[dict], None] | None = None,
         is_idle: Callable[[], bool] | None = None,
         image_roots: Callable[[], list[Path]] | None = None,
+        on_remote_command: Callable[[dict], Awaitable[str]] | None = None,
     ) -> None:
         self.session = OfficialAccountSession()
         self.session_id = session_id
         self.title = title
         self.on_title = on_title
         self.on_command = on_command
+        self.on_remote_command = on_remote_command
         self.on_login_required = on_login_required
         self.on_quota_full = on_quota_full
         self.on_sync_error = on_sync_error or (lambda _message: None)
@@ -144,12 +147,17 @@ class ChatPresence:
                     response.raise_for_status()
                     data = response.json()
                     self.agent_id, self.token = data["agent_id"], data["token"]
+                    if self.on_remote_command:
+                        capability = await self._http.put(
+                            f"/v1/agents/{self.agent_id}/capabilities",
+                            headers={"Authorization": f"Bearer {self.token}"},
+                            json={"web_conversation_v2": True},
+                        )
+                        capability.raise_for_status()
                     self._context_version = int(data.get("context_version") or 0)
                     self._context_hash = ""
                     session_key = hashlib.sha256(current.encode()).hexdigest()
-                    self._pending_path = (
-                        Path.home() / ".aero" / "context-events" / f"{session_key}.json"
-                    )
+                    self._pending_path = user_home() / "context-events" / f"{session_key}.json"
                     self._load_pending()
                     self._select_message_queue(current)
                     self.context_sync_enabled = bool(data.get("context_sync_enabled"))
@@ -161,7 +169,11 @@ class ChatPresence:
                 heartbeat = await self.session.request(
                     "POST",
                     f"/v1/agents/{self.agent_id}/chat-heartbeat",
-                    json={"title": self.title()},
+                    json={
+                        "title": self.title(),
+                        "presence_token": self.token,
+                        "web_conversation_v2": self.on_remote_command is not None,
+                    },
                 )
                 if heartbeat.status_code == 404:
                     self._blocked_session_id = current
@@ -176,6 +188,7 @@ class ChatPresence:
                     continue
                 heartbeat.raise_for_status()
                 data = heartbeat.json()
+                self._reported_context_version = int(data.get("context_version") or 0)
                 was_enabled = self.context_sync_enabled
                 self.context_sync_enabled = bool(data.get("context_sync_enabled"))
                 if (
@@ -223,6 +236,7 @@ class ChatPresence:
             headers={"Authorization": f"Bearer {self.token}"},
         )
         if response.status_code == 404:
+            self._discard_pending_compactions()
             return
         response.raise_for_status()
         data = response.json()
@@ -236,6 +250,20 @@ class ChatPresence:
             return
         if not self.is_idle():
             return
+        reported = getattr(self, "_reported_context_version", self._context_version)
+        needs_reconcile = bool(self._pending_compactions) or reported != self._context_version
+        if needs_reconcile:
+            current = await self._http.get(
+                f"/v1/agents/{self.agent_id}/context",
+                headers={"Authorization": f"Bearer {self.token}"},
+            )
+            if current.status_code == 404:
+                self._discard_pending_compactions()
+                self._context_version = reported
+                self._context_hash = ""
+                self._sync_blocked_version = None
+            else:
+                current.raise_for_status()
         if manual_request_id:
             await self._flush_messages()
             if self._pending_messages or not self.is_idle():
@@ -290,6 +318,8 @@ class ChatPresence:
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest()
+        if not manual_request_id and not needs_reconcile and digest == self._context_hash:
+            return
         response = await self._http.put(
             f"/v1/agents/{self.agent_id}/context",
             json={
@@ -346,7 +376,7 @@ class ChatPresence:
 
     def queue_compaction(self, before: dict, after: dict) -> None:
         session_key = hashlib.sha256(self.session_id().encode()).hexdigest()
-        target = Path.home() / ".aero" / "context-events" / f"{session_key}.json"
+        target = user_home() / "context-events" / f"{session_key}.json"
         if self._pending_path != target:
             self._pending_path = target
             self._load_pending()
@@ -367,6 +397,11 @@ class ChatPresence:
             except (OSError, ValueError):
                 self._pending_compactions = []
 
+    def _discard_pending_compactions(self) -> None:
+        self._pending_compactions = []
+        if getattr(self, "_pending_path", None) is not None:
+            self._save_pending()
+
     def _save_pending(self) -> None:
         if self._pending_path is None:
             return
@@ -378,7 +413,7 @@ class ChatPresence:
     def _select_message_queue(self, session_id: str) -> None:
         user_id = self.session.data.user_id
         session_key = hashlib.sha256(f"{user_id}:{session_id}".encode()).hexdigest()
-        path = Path.home() / ".aero" / "context-events" / f"{session_key}.messages.json"
+        path = user_home() / "context-events" / f"{session_key}.messages.json"
         if self._messages_path == path:
             return
         self._messages_path = path
@@ -440,7 +475,13 @@ class ChatPresence:
             asyncio.create_task(self._flush_messages())
         return local_turn_id
 
-    def finish_local_turn(self, local_turn_id: str, status: str) -> None:
+    def finish_local_turn(
+        self,
+        local_turn_id: str,
+        status: str,
+        *,
+        execution_ms: int | None = None,
+    ) -> None:
         if not local_turn_id:
             return
         event = {
@@ -448,6 +489,7 @@ class ChatPresence:
             "local_turn_id": local_turn_id,
             "status": status,
             "client_event_id": uuid.uuid4().hex,
+            **({"execution_ms": execution_ms} if execution_ms is not None else {}),
         }
         self._pending_messages.append(event)
         try:
@@ -510,6 +552,7 @@ class ChatPresence:
             return
         if response.status_code in {401, 410}:
             # A revoked login or remotely stopped chat must not keep polling.
+            stopped_session_id = self._active_session_id
             if response.status_code == 410:
                 self._blocked_session_id = self._active_session_id
             await self._exit()
@@ -521,7 +564,7 @@ class ChatPresence:
                         self._prompted = True
                         await self.on_login_required()
                 else:
-                    self._blocked_session_id = self._active_session_id
+                    self._blocked_session_id = stopped_session_id
             return
         response.raise_for_status()
         command = response.json().get("command")
@@ -532,6 +575,8 @@ class ChatPresence:
         self._command_task = asyncio.create_task(self._execute_command(command))
 
     async def _execute_command(self, command: dict) -> None:
+        from aero.application.request_timing import timed_request
+
         command_id = command["command_id"]
         self._active_command_id = command_id
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -543,7 +588,13 @@ class ChatPresence:
                 headers=headers,
             )
             renewer = asyncio.create_task(self._renew_command(command_id, headers))
-            answer = await self.on_command(str(command.get("content") or ""))
+            from aero.application.turn_context import use_turn_id
+
+            with use_turn_id(command_id), timed_request() as timer:
+                if self.on_remote_command:
+                    answer = await self.on_remote_command(command)
+                else:
+                    answer = await self.on_command(str(command.get("content") or ""))
             event_id = uuid.uuid4().hex
             response = await self._http.post(
                 f"/v1/agents/{self.agent_id}/events",
@@ -553,14 +604,22 @@ class ChatPresence:
                     "in_reply_to": command_id,
                     "client_event_id": event_id,
                     "images": self._images_for(answer or "", event_id),
+                    **timer.payload(),
                 },
                 headers=headers,
             )
             response.raise_for_status()
+        except asyncio.CancelledError:
+            await self._http.post(
+                f"/v1/agents/{self.agent_id}/commands/{command_id}/status",
+                json={"status": "canceled", **(timer.payload() if "timer" in locals() else {})},
+                headers=headers,
+            )
+            raise
         except Exception:
             await self._http.post(
                 f"/v1/agents/{self.agent_id}/commands/{command_id}/status",
-                json={"status": "failed"},
+                json={"status": "failed", **(timer.payload() if "timer" in locals() else {})},
                 headers=headers,
             )
         finally:
@@ -595,6 +654,8 @@ class ChatPresence:
         return await request_remote_input(send, description)
 
     async def request_approval(self, payload: dict) -> str:
+        from aero.application.approval_details import approval_payload
+
         command_id = self._active_command_id
         if not command_id:
             return "deny"
@@ -602,7 +663,9 @@ class ChatPresence:
         headers = {"Authorization": f"Bearer {self.token}"}
         base = f"/v1/agents/{self.agent_id}/commands/{command_id}/approvals"
         response = await self._http.post(
-            base, headers=headers, json={"request_id": request_id, "payload": payload}
+            base,
+            headers=headers,
+            json={"request_id": request_id, "payload": approval_payload(payload)},
         )
         response.raise_for_status()
         while self._running and self._active_command_id == command_id:

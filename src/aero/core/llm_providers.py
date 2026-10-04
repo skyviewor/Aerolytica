@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # Expose the official-account provider and login flows in the client UI.
 OFFICIAL_ACCOUNT_UI_ENABLED = True
@@ -155,7 +155,9 @@ def model_alias_for_provider(provider: str) -> tuple[str, str] | None:
 def get_provider_preset(provider: str) -> LLMProviderPreset | None:
     provider_id = normalize_provider_id(provider)
     if provider_id == "official":
-        return OFFICIAL_LLM_PROVIDER
+        from aero.release_environment import official_url
+
+        return replace(OFFICIAL_LLM_PROVIDER, base_url=official_url("llm_url"))
     return BUILTIN_LLM_PROVIDERS.get(provider_id)
 
 
@@ -165,10 +167,7 @@ def provider_options() -> list[tuple[str, str]]:
     Model selection is a separate action, so showing a model here is
     misleading when a saved provider profile uses a different one.
     """
-    options = [
-        (preset.id, preset.name)
-        for preset in BUILTIN_LLM_PROVIDERS.values()
-    ]
+    options = [(preset.id, preset.name) for preset in BUILTIN_LLM_PROVIDERS.values()]
     if OFFICIAL_ACCOUNT_UI_ENABLED:
         options.insert(0, (OFFICIAL_LLM_PROVIDER.id, OFFICIAL_LLM_PROVIDER.name))
     return options

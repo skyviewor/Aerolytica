@@ -20,9 +20,7 @@ def _mirror_warning_to_debug_log(_logger, _method_name, event_dict):
             log_level=level,
             log_event=str(event_dict.get("event", "")),
             fields={
-                str(k): v
-                for k, v in event_dict.items()
-                if k not in {"event", "level", "timestamp"}
+                str(k): v for k, v in event_dict.items() if k not in {"event", "level", "timestamp"}
             },
         )
     except Exception:

@@ -58,6 +58,11 @@ def test_run_stream_emits_structured_events(tmp_path, monkeypatch):
     assert "assistant_delta" in response.text
     assert "run_completed" in response.text
 
+    status = client.get(f"/api/v1/runs/{run['run_id']}?session_id={session_id}")
+    assert status.status_code == 200
+    assert status.json()["state"] == "completed"
+    assert client.get(f"/api/v1/runs/missing?session_id={session_id}").status_code == 404
+
 
 def test_missing_vision_setup_does_not_wait_for_a_secret(tmp_path, monkeypatch):
     client, runtime = _client(tmp_path, monkeypatch)
@@ -117,7 +122,8 @@ def test_run_generates_and_persists_automatic_session_title(tmp_path, monkeypatc
     assert "session_title_updated" in response.text
     assert runtime.active_sessions[session_id].metadata()["name"] == "华北气温研究"
     assert runtime.sessions.load(session_id)[1].title_source == "auto"
-    assert title_clients[0].relay_turn_id == "session-title:turn-title-test"
+    assert title_clients[0].relay_turn_id == "turn-title-test"
+    assert title_clients[0].relay_purpose == "title"
 
 
 def test_settings_never_returns_secret(tmp_path, monkeypatch):
@@ -139,7 +145,7 @@ def test_session_can_be_deleted(tmp_path, monkeypatch):
     assert runtime.session(session_id) is None
 
 
-def test_primary_setup_tests_before_persisting(tmp_path, monkeypatch):
+def test_primary_setup_tests_before_persisting(tmp_path, monkeypatch, byok_ui):
     client, runtime = _client(tmp_path, monkeypatch)
     session_id = client.post("/api/v1/sessions").json()["id"]
     calls = []

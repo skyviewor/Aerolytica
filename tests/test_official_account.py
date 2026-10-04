@@ -117,11 +117,15 @@ async def test_authenticated_request_refreshes_once_after_401(secrets_path):
 
 @pytest.mark.asyncio
 async def test_repeated_401_clears_login_and_requests_reauthentication(secrets_path):
-    save_official_session(OfficialSessionData(
-        access_token="jwt-old", refresh_token="rfr-old",
-        access_expires_at=time.time() + 3600,
-        refresh_expires_at=time.time() + 7200, user_id="usr_1",
-    ))
+    save_official_session(
+        OfficialSessionData(
+            access_token="jwt-old",
+            refresh_token="rfr-old",
+            access_expires_at=time.time() + 3600,
+            refresh_expires_at=time.time() + 7200,
+            user_id="usr_1",
+        )
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/auth/refresh":
@@ -197,10 +201,15 @@ async def test_cloud_sync_boundary_uses_shared_session():
 
 @pytest.mark.asyncio
 async def test_multiple_session_instances_share_rotating_token(secrets_path):
-    save_official_session(OfficialSessionData(
-        access_token="old", refresh_token="old-refresh", access_expires_at=1,
-        refresh_expires_at=time.time() + 3600, user_id="usr_1",
-    ))
+    save_official_session(
+        OfficialSessionData(
+            access_token="old",
+            refresh_token="old-refresh",
+            access_expires_at=1,
+            refresh_expires_at=time.time() + 3600,
+            user_id="usr_1",
+        )
+    )
     calls = []
 
     async def handler(request):
@@ -216,13 +225,17 @@ async def test_multiple_session_instances_share_rotating_token(secrets_path):
 
 @pytest.mark.asyncio
 async def test_refresh_outage_does_not_log_user_out(secrets_path):
-    save_official_session(OfficialSessionData(
-        access_token="old", refresh_token="keep", access_expires_at=1,
-        refresh_expires_at=time.time() + 3600,
-    ))
-    async with httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda _: httpx.Response(503)
-    )) as client:
+    save_official_session(
+        OfficialSessionData(
+            access_token="old",
+            refresh_token="keep",
+            access_expires_at=1,
+            refresh_expires_at=time.time() + 3600,
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(503))
+    ) as client:
         with pytest.raises(OfficialAccountError, match="暂不可用"):
             await OfficialAccountSession(client=client).access_token()
     assert load_official_session().refresh_token == "keep"
@@ -230,9 +243,13 @@ async def test_refresh_outage_does_not_log_user_out(secrets_path):
 
 @pytest.mark.asyncio
 async def test_session_sees_logout_from_another_instance(secrets_path):
-    save_official_session(OfficialSessionData(
-        access_token="old", refresh_token="keep", access_expires_at=time.time() + 3600,
-    ))
+    save_official_session(
+        OfficialSessionData(
+            access_token="old",
+            refresh_token="keep",
+            access_expires_at=time.time() + 3600,
+        )
+    )
     session = OfficialAccountSession()
     clear_official_session()
     with pytest.raises(OfficialLoginRequiredError):
@@ -250,9 +267,13 @@ async def test_upload_streams_without_jwt_then_completes(tmp_path):
         async def request(self, method, endpoint, **kwargs):
             calls.append((endpoint, kwargs))
             if endpoint.endswith("upload-url"):
-                return httpx.Response(200, json={
-                    "object_id": "obj_1", "upload_url": "https://oss.test/file",
-                })
+                return httpx.Response(
+                    200,
+                    json={
+                        "object_id": "obj_1",
+                        "upload_url": "https://oss.test/file",
+                    },
+                )
             return httpx.Response(200, json={"status": "active", "etag": "etag"})
 
     async def put(request):
@@ -263,7 +284,9 @@ async def test_upload_streams_without_jwt_then_completes(tmp_path):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(put)) as transfer:
         result = await CloudSyncClient(Session(), transfer).upload_file(
-            path, project_id="p", directory_id="d",
+            path,
+            project_id="p",
+            directory_id="d",
         )
     assert result["status"] == "active"
     assert calls[0][1]["json"]["project_id"] == "p"
@@ -279,13 +302,17 @@ async def test_failed_put_releases_pending_upload(tmp_path):
     class Session:
         async def request(self, method, endpoint, **kwargs):
             endpoints.append(endpoint)
-            return httpx.Response(200, json={
-                "object_id": "obj_1", "upload_url": "https://oss.test/file",
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "object_id": "obj_1",
+                    "upload_url": "https://oss.test/file",
+                },
+            )
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda _: httpx.Response(403)
-    )) as transfer:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(403))
+    ) as transfer:
         with pytest.raises(OfficialAccountError, match="上传失败"):
             await CloudSyncClient(Session(), transfer).upload_file(path)
     assert endpoints[-1] == "/v1/storage/obj_1/fail"

@@ -226,18 +226,12 @@ class GFSAdapter:
         on_progress: Callable[[int, int], None] | None = None,
     ) -> int:
         try:
-            return GFSAdapter._download_ranges_httpx(
-                url, entries, dest, total_bytes, on_progress
-            )
+            return GFSAdapter._download_ranges_httpx(url, entries, dest, total_bytes, on_progress)
         except httpx.TransportError as exc:
             if not _is_tls_error(exc):
                 raise
-            emit_progress(
-                "Python TLS 连接失败，正在使用系统传输后端继续按 GFS 索引精确下载"
-            )
-            return GFSAdapter._download_ranges_curl(
-                url, entries, dest, total_bytes, on_progress
-            )
+            emit_progress("Python TLS 连接失败，正在使用系统传输后端继续按 GFS 索引精确下载")
+            return GFSAdapter._download_ranges_curl(url, entries, dest, total_bytes, on_progress)
 
     @staticmethod
     def _download_ranges_httpx(
@@ -354,9 +348,7 @@ def _curl_executable() -> str:
     """Resolve curl for the adapter-owned TLS fallback."""
     executable = shutil.which("curl")
     if not executable:
-        raise RuntimeError(
-            "Python TLS 连接失败，且系统未安装 curl，无法启用 GFS 安全传输兜底"
-        )
+        raise RuntimeError("Python TLS 连接失败，且系统未安装 curl，无法启用 GFS 安全传输兜底")
     return executable
 
 
@@ -512,8 +504,7 @@ def build_request_id(
     digest = hashlib.sha1(key.encode()).hexdigest()[:10]
     product_part = normalized_product.replace(".", "-")
     return (
-        f"gfs-{normalized_date}-{normalized_cycle}-{product_part}-"
-        f"f{normalized_hour:03d}-{digest}"
+        f"gfs-{normalized_date}-{normalized_cycle}-{product_part}-f{normalized_hour:03d}-{digest}"
     )
 
 

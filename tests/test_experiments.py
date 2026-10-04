@@ -3,6 +3,23 @@
 import pytest
 
 
+def test_title_scheduling_failure_does_not_create_unscheduled_coroutine():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from aero.cli.main import AeroApp
+
+    app = SimpleNamespace(
+        _session_title_workers=set(),
+        _generate_session_title=Mock(),
+        run_worker=Mock(side_effect=RuntimeError("UI is not running")),
+    )
+    AeroApp._schedule_session_title_generation(app, "session-1")
+
+    app._generate_session_title.assert_not_called()
+    assert app._session_title_workers == set()
+
+
 def test_create_experiment_builds_workspace_and_tracks_active(tmp_path):
     from aero.experiments import EXPERIMENT_DIRECTORIES, ExperimentManager
 
@@ -163,9 +180,7 @@ def test_finish_command_shows_progress_before_scheduling_worker():
     app._get_experiment_mgr = lambda: SimpleNamespace(active=lambda: experiment)
     shown = []
     footer = []
-    app._show_checkpoint_message = lambda message, **kwargs: shown.append(
-        (message, kwargs)
-    )
+    app._show_checkpoint_message = lambda message, **kwargs: shown.append((message, kwargs))
     app._set_footer_status = footer.append
 
     def schedule(coroutine, **kwargs):
@@ -176,9 +191,7 @@ def test_finish_command_shows_progress_before_scheduling_worker():
 
     app._start_finishing_active_experiment()
 
-    assert shown == [
-        ("正在总结实验 **臭氧实验** 并生成文字报告…", {"force_scroll": True})
-    ]
+    assert shown == [("正在总结实验 **臭氧实验** 并生成文字报告…", {"force_scroll": True})]
     assert footer == ["正在完成实验：臭氧实验"]
     assert app._experiment_finish_worker.is_running is True
 
@@ -218,9 +231,7 @@ def test_finish_creates_related_checkpoint_in_main_scope(tmp_path):
         vision=SimpleNamespace(model="vision"),
         mode="execute",
     )
-    app._get_experiment_session_mgr = lambda: SimpleNamespace(
-        snapshot=lambda _slot: None
-    )
+    app._get_experiment_session_mgr = lambda: SimpleNamespace(snapshot=lambda _slot: None)
 
     checkpoint = app._create_experiment_finish_checkpoint(
         {
@@ -254,9 +265,7 @@ def test_experiment_list_forces_chat_to_scroll_to_result():
     )
     app._get_experiment_mgr = lambda: manager
     shown = []
-    app._show_checkpoint_message = lambda message, **kwargs: shown.append(
-        (message, kwargs)
-    )
+    app._show_checkpoint_message = lambda message, **kwargs: shown.append((message, kwargs))
 
     app._show_experiment_list()
 
@@ -269,6 +278,7 @@ async def test_experiment_list_is_restored_with_continued_session(tmp_path):
     from aero.agent.session import SessionManager
     from aero.cli.main import AeroApp, ChatMarkdown
     from aero.core.config import AeroConfig
+    from aero.core.types import Message
     from aero.experiments import ExperimentManager
 
     experiment_manager = ExperimentManager(tmp_path)
@@ -281,6 +291,13 @@ async def test_experiment_list_is_restored_with_continued_session(tmp_path):
     first._experiment_mgr = experiment_manager
     first._session_mgr = session_manager
     async with first.run_test(size=(100, 30)) as pilot:
+        # Display-only interactions are intentionally not standalone persisted chats.
+        first.agent.messages.extend(
+            [
+                Message("user", "继续研究"),
+                Message("assistant", "好的，查看已有实验。"),
+            ]
+        )
         first._show_experiment_list()
         await pilot.pause(0.2)
         first._auto_save_session()
@@ -300,13 +317,9 @@ async def test_experiment_list_is_restored_with_continued_session(tmp_path):
     async with continued.run_test(size=(100, 30)) as pilot:
         await pilot.pause(0.2)
         markdown = "\n".join(
-            str(getattr(widget, "_markdown", ""))
-            for widget in continued.query(ChatMarkdown)
+            str(getattr(widget, "_markdown", "")) for widget in continued.query(ChatMarkdown)
         )
 
         assert continued._session_id == session_id
         assert "臭氧敏感性实验" in markdown
-        assert all(
-            "臭氧敏感性实验" not in message.content
-            for message in continued.agent.messages
-        )
+        assert all("臭氧敏感性实验" not in message.content for message in continued.agent.messages)

@@ -26,9 +26,7 @@ _TRANSIENT_HTTP_ERRORS = (
     httpx.WriteError,
 )
 _DASHSCOPE_GENERATION_PATH = "/api/v1/services/aigc/text-generation/generation"
-_DASHSCOPE_MULTIMODAL_GENERATION_PATH = (
-    "/api/v1/services/aigc/multimodal-generation/generation"
-)
+_DASHSCOPE_MULTIMODAL_GENERATION_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 
 
 def _first_choice(response: dict) -> dict:
@@ -121,6 +119,7 @@ class LLMClient:
         self._client = httpx.AsyncClient(timeout=120)
         self._official_session = None
         self.relay_turn_id = ""
+        self.relay_purpose = "main"
         self.last_usage: dict | None = None
         self.last_search_references: list[str] = []
         self.last_search_performed = False
@@ -140,7 +139,9 @@ class LLMClient:
 
             self._official_session = OfficialAccountSession()
         token = await self._official_session.access_token(force_refresh=force_refresh)
-        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        headers = self._headers()
+        headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def _identify_request(self, headers: dict[str, str]) -> None:
         if self.config.provider == "official":
@@ -206,9 +207,7 @@ class LLMClient:
                         data_str = line.removeprefix("data: ")
                         if data_str == "[DONE]":
                             if not emitted:
-                                raise RuntimeError(
-                                    "模型服务未返回有效正文，请稍后重试或切换模型。"
-                                )
+                                raise RuntimeError("模型服务未返回有效正文，请稍后重试或切换模型。")
                             self.last_usage = captured_usage
                             yield StreamEvent(type="done", usage=captured_usage)
                             return
@@ -361,9 +360,7 @@ class LLMClient:
                                     )
                                     content_sent = marker_start
                             elif not tool_calls_buffer:
-                                safe_end = _safe_content_stream_end(
-                                    content_buffer, content_sent
-                                )
+                                safe_end = _safe_content_stream_end(content_buffer, content_sent)
                                 if safe_end > content_sent:
                                     emitted = True
                                     yield StreamEvent(
@@ -400,13 +397,18 @@ class LLMClient:
                 raise _connection_error(e) from e
 
     def _headers(self) -> dict:
-        return {
+        headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
             # Some provider/CDN routes have returned invalid Brotli frames.  Model
             # responses are small enough that avoiding content encoding is safer.
             "Accept-Encoding": "identity",
         }
+        if self.config.provider == "official":
+            headers["x-relay-question-purpose"] = self.relay_purpose
+            if self.relay_turn_id:
+                headers["x-relay-turn-id"] = self.relay_turn_id
+        return headers
 
     def _dashscope_headers(self, *, stream: bool = False) -> dict:
         headers = self._headers()
@@ -433,9 +435,7 @@ class LLMClient:
             return self.config.dashscope_multimodal_generation_endpoint
         return self.config.dashscope_generation_endpoint
 
-    async def _send(
-        self, messages: list[Message], tools: list[dict] | None
-    ) -> dict:
+    async def _send(self, messages: list[Message], tools: list[dict] | None) -> dict:
         self.last_search_references = []
         self.last_search_performed = False
         headers = await self._request_headers()
@@ -453,9 +453,7 @@ class LLMClient:
                     if attempt < _TRANSIENT_RETRIES:
                         headers.update(await self._request_headers(force_refresh=True))
                         continue
-                    raise RuntimeError(
-                        "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
-                    )
+                    raise RuntimeError("Aerolytica 官方账户登录已失效，请使用 /login 重新登录。")
                 _raise_for_status(resp)
                 return resp.json()
             except _TRANSIENT_HTTP_ERRORS as e:
@@ -783,9 +781,7 @@ def _dashscope_search_performed(response: dict) -> bool:
     return isinstance(output, dict) and isinstance(output.get("search_info"), dict)
 
 
-def _merge_dashscope_tool_call(
-    buffer: dict[int, dict], index: int, raw_call: object
-) -> None:
+def _merge_dashscope_tool_call(buffer: dict[int, dict], index: int, raw_call: object) -> None:
     """Merge native streaming tool call chunks defensively."""
     if not isinstance(raw_call, dict):
         return
@@ -802,9 +798,7 @@ def _merge_dashscope_tool_call(
     arguments = function.get("arguments")
     if isinstance(name, str):
         current_name = current["function"]["name"]
-        current["function"]["name"] = (
-            name if name.startswith(current_name) else current_name + name
-        )
+        current["function"]["name"] = name if name.startswith(current_name) else current_name + name
     if isinstance(arguments, dict):
         arguments = json.dumps(arguments, ensure_ascii=False)
     if isinstance(arguments, str):
@@ -968,9 +962,7 @@ def _raise_for_stream_payload_error(payload: object) -> None:
         code = str(error.get("code") or "upstream_error")
         raise RuntimeError(f"模型服务请求失败（{code}）：{message}")
     if "choices" not in payload and payload.get("message") and payload.get("code"):
-        raise RuntimeError(
-            f"模型服务请求失败（{payload['code']}）：{payload['message']}"
-        )
+        raise RuntimeError(f"模型服务请求失败（{payload['code']}）：{payload['message']}")
 
 
 async def _raise_for_status_stream(response: httpx.Response) -> None:
@@ -1065,9 +1057,7 @@ def _parse_dsml_tool_calls(content: str) -> list[ToolCall]:
         for param in parameter_pattern.finditer(match.group("body")):
             value = param.group("value").strip()
             args[param.group("name")] = _parse_tool_value(value)
-        calls.append(
-            ToolCall(id=f"content_call_{index}", name=match.group("name"), arguments=args)
-        )
+        calls.append(ToolCall(id=f"content_call_{index}", name=match.group("name"), arguments=args))
     return calls
 
 
@@ -1089,9 +1079,7 @@ def _parse_deepseek_tool_calls(content: str) -> list[ToolCall]:
             re.DOTALL,
         )
         args = _parse_tool_value(json_match.group("json")) if json_match else {}
-        calls.append(
-            ToolCall(id=f"content_call_{index}", name=match.group("name"), arguments=args)
-        )
+        calls.append(ToolCall(id=f"content_call_{index}", name=match.group("name"), arguments=args))
     return calls
 
 

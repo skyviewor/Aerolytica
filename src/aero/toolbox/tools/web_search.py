@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from aero.core.config import resolved_vision_config
+from aero.core.llm_providers import normalize_provider_id
 from aero.data.web_search import (
     WEB_SEARCH_CONSOLE_URL,
     WEB_SEARCH_GUIDE_URL,
@@ -9,8 +11,6 @@ from aero.data.web_search import (
     search_bailian_web,
     search_zhipu_web,
 )
-from aero.core.config import resolved_vision_config
-from aero.core.llm_providers import normalize_provider_id
 from aero.toolbox.config_access import find_config
 from aero.toolbox.registry import register_tool
 
@@ -285,7 +285,8 @@ def _reuse_authorization_required(
         ),
         "action_required": (
             "展示百炼与智谱两种完整方案并等待用户选择；"
-            "若用户选择百炼且明确授权复用，调用 authorize_web_search_key_reuse(provider='bailian')；"
+            "若用户选择百炼且明确授权复用，调用 authorize_web_search_key_re"
+            "use(provider='bailian')；"
             "若用户选择智谱，说明获取 Key 的地址并等待其准备好后打开安全输入窗口。"
         ),
         "alternative_provider_available": "zhipu" if provider == "bailian" else "bailian",
@@ -330,8 +331,17 @@ def _search_error(error: str, *, credential_reused: bool, provider: str = "baili
     billing_error = any(
         marker in lowered
         for marker in (
-            "余额", "欠费", "充值", "quota", "insufficient", "credit", "billing",
-            "payment", "balance", "额度用尽", "配额",
+            "余额",
+            "欠费",
+            "充值",
+            "quota",
+            "insufficient",
+            "credit",
+            "billing",
+            "payment",
+            "balance",
+            "额度用尽",
+            "配额",
         )
     )
     if billing_error:
@@ -344,9 +354,8 @@ def _search_error(error: str, *, credential_reused: bool, provider: str = "baili
                 "登录百炼开放平台检查账户余额和搜索额度，并在 MCP 广场确认已开通 WebSearch"
             )
         else:
-            message = (
-                f"{_provider_label(provider)}联网搜索请求未完成，可能是账户余额不足、搜索额度用尽或服务未开通。"
-            )
+            message = f"{_provider_label(provider)}联网搜索请求未完成，可能是账户余额不足、搜索额\
+度用尽或服务未开通。"
             action_required = (
                 f"登录{_provider_label(provider)} 开放平台，检查账户余额、搜索额度和服务开通状态"
             )
@@ -359,8 +368,7 @@ def _search_error(error: str, *, credential_reused: bool, provider: str = "baili
             action_required = "在百炼 MCP 市场启用 WebSearch 并确认服务状态"
         else:
             message = (
-                f"{_provider_label(provider)}拒绝了联网搜索请求，"
-                "请检查 API Key、服务权限或余额。"
+                f"{_provider_label(provider)}拒绝了联网搜索请求，请检查 API Key、服务权限或余额。"
             )
             action_required = f"检查{_provider_label(provider)}的 API Key 和服务权限"
     elif "timeout" in lowered or "timed out" in lowered:

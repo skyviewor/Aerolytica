@@ -84,15 +84,11 @@ def prepare_image_for_vision(
             elif image.mode != "RGB":
                 image = image.convert("RGB")
 
-            image.thumbnail(
-                (max_dimension, max_dimension), Image.Resampling.LANCZOS
-            )
+            image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
             output = _next_output_path(source)
             while True:
                 for quality in (85, 75, 65, 55):
-                    image.save(
-                        output, "JPEG", quality=quality, optimize=True, progressive=True
-                    )
+                    image.save(output, "JPEG", quality=quality, optimize=True, progressive=True)
                     if output.stat().st_size <= target_bytes:
                         break
                 if output.stat().st_size <= target_bytes or max(image.size) <= _MIN_DIMENSION:

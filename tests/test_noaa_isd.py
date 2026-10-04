@@ -18,14 +18,20 @@ from aero.datasets.providers.noaa_isd import (
     parse_station_inventory,
 )
 
-HISTORY = """"USAF","WBAN","STATION NAME","CTRY","STATE","ICAO","LAT","LON","ELEV(M)","BEGIN","END"
-"725030","14732","LAGUARDIA AIRPORT","US","NY","KLGA","+40.779","-073.880","+0003.0","19480101","20250825"
-"725050","04781","ISLIP AIRPORT","US","NY","KISP","+40.795","-073.100","+0030.0","19600101","20250825"
-"999999","00001","DATELINE EAST","ZZ","","DLEE","+10.000","+179.000","+0001.0","20000101","20250825"
-"999999","00002","DATELINE WEST","ZZ","","DLEW","+10.000","-179.000","+0001.0","20000101","20250825"
+HISTORY = """"USAF","WBAN","STATION \
+NAME","CTRY","STATE","ICAO","LAT","LON","ELEV(M)","BEGIN","END"
+"725030","14732","LAGUARDIA \
+AIRPORT","US","NY","KLGA","+40.779","-073.880","+0003.0","19480101","20250825"
+"725050","04781","ISLIP \
+AIRPORT","US","NY","KISP","+40.795","-073.100","+0030.0","19600101","20250825"
+"999999","00001","DATELINE \
+EAST","ZZ","","DLEE","+10.000","+179.000","+0001.0","20000101","20250825"
+"999999","00002","DATELINE \
+WEST","ZZ","","DLEW","+10.000","-179.000","+0001.0","20000101","20250825"
 """
 
-INVENTORY = """"USAF","WBAN","YEAR","JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"
+INVENTORY = """"USAF","WBAN","YEAR","JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","N\
+OV","DEC"
 "725030","14732","2025","10","0","0","0","0","0","0","0","0","0","0","0"
 "725050","04781","2025","10","0","0","0","0","0","0","0","0","0","0","0"
 "999999","00001","2025","10","0","0","0","0","0","0","0","0","0","0","0"
@@ -129,10 +135,7 @@ def test_area_download_rejects_more_than_fifty_stations():
         )
         for index in range(MAX_AUTO_STATIONS + 1)
     )
-    inventory = {
-        station.station_id: {(2025, 1): 1}
-        for station in stations
-    }
+    inventory = {station.station_id: {(2025, 1): 1} for station in stations}
 
     with pytest.raises(ValueError, match="超过自动下载上限"):
         provider._select_stations(
@@ -212,7 +215,9 @@ async def test_download_falls_back_to_yearly_archive_and_local_subset(tmp_path):
         if request.url.path.endswith("/2025/72503014732.csv"):
             range_header = request.headers.get("range", "")
             ranges.append(range_header)
-            offset = int(range_header.removeprefix("bytes=").removesuffix("-")) if range_header else 0
+            offset = (
+                int(range_header.removeprefix("bytes=").removesuffix("-")) if range_header else 0
+            )
             return httpx.Response(
                 206 if offset else 200,
                 content=archive[offset:],
@@ -224,14 +229,7 @@ async def test_download_falls_back_to_yearly_archive_and_local_subset(tmp_path):
         cache_dir=tmp_path / "cache",
         transport=httpx.MockTransport(handler),
     )
-    part = (
-        tmp_path
-        / "output"
-        / ".aero-cache"
-        / "isd"
-        / "2025"
-        / "72503014732.csv.part"
-    )
+    part = tmp_path / "output" / ".aero-cache" / "isd" / "2025" / "72503014732.csv.part"
     part.parent.mkdir(parents=True)
     part.write_bytes(archive[:20])
     result = await provider.download(

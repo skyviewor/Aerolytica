@@ -163,11 +163,7 @@ async def _fetch_aws_availability() -> IFSAvailabilitySummary:
     try:
         prefixes = await _list_aws_common_prefixes(prefix="", delimiter="/")
         dates = sorted(
-            {
-                match.group(1)
-                for prefix in prefixes
-                if (match := re.fullmatch(r"(\d{8})/", prefix))
-            }
+            {match.group(1) for prefix in prefixes if (match := re.fullmatch(r"(\d{8})/", prefix))}
         )
         if not dates:
             return IFSAvailabilitySummary(
@@ -202,9 +198,7 @@ async def _fetch_aws_availability() -> IFSAvailabilitySummary:
         )
 
 
-async def _fetch_ecmwf_cycles(
-    client: httpx.AsyncClient, date: str
-) -> list[str]:
+async def _fetch_ecmwf_cycles(client: httpx.AsyncClient, date: str) -> list[str]:
     try:
         resp = await client.get(f"{ECMWF_IFS_BASE}/{date}/")
         resp.raise_for_status()
@@ -385,7 +379,6 @@ async def resolve_ifs_source(
     )
 
 
-
 async def _check_ifs_object(
     *,
     source: str,
@@ -400,9 +393,11 @@ async def _check_ifs_object(
     grib_url = _build_grib_url(base_url, date, cycle, step, stream, typ, model)
     index_url = _build_index_url(grib_url)
     source_url = (
-        ECMWF_LIST_URL if source == "ecmwf" else
-        GOOGLE_IFS_BASE if source == "google" else
-        AWS_IFS_BASE
+        ECMWF_LIST_URL
+        if source == "ecmwf"
+        else GOOGLE_IFS_BASE
+        if source == "google"
+        else AWS_IFS_BASE
     )
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -443,9 +438,7 @@ async def _check_ifs_object(
     )
 
 
-async def _list_aws_common_prefixes(
-    prefix: str, delimiter: str = "/"
-) -> list[str]:
+async def _list_aws_common_prefixes(prefix: str, delimiter: str = "/") -> list[str]:
     prefixes: list[str] = []
     token: str | None = None
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
@@ -482,15 +475,9 @@ def _parse_s3_list_bucket(xml_text: str) -> dict:
     root = ET.fromstring(xml_text)
     ns = {"s3": "http://s3.amazonaws.com/doc/2006-03-01/"}
     common_prefixes = [
-        elem.text or ""
-        for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns)
-        if elem.text
+        elem.text or "" for elem in root.findall("s3:CommonPrefixes/s3:Prefix", ns) if elem.text
     ]
-    contents = [
-        elem.text or ""
-        for elem in root.findall("s3:Contents/s3:Key", ns)
-        if elem.text
-    ]
+    contents = [elem.text or "" for elem in root.findall("s3:Contents/s3:Key", ns) if elem.text]
     token = root.findtext("s3:NextContinuationToken", default=None, namespaces=ns)
     return {
         "common_prefixes": common_prefixes,

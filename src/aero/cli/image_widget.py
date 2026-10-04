@@ -29,11 +29,7 @@ def extract_image_paths(text: str) -> list[str]:
             r"\b([\w./-]+\.(?:png|jpe?g|gif|svg|webp))\b", text, re.IGNORECASE
         ):
             path = match.group(1)
-            if (
-                path
-                and "://" not in path
-                and not re.match(r"^[\w.-]+\.[a-z]{2,}/", path)
-            ):
+            if path and "://" not in path and not re.match(r"^[\w.-]+\.[a-z]{2,}/", path):
                 paths.append(path)
 
     return paths

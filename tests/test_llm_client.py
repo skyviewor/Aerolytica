@@ -64,10 +64,8 @@ def test_parse_spaced_dsml_content_tool_calls():
             '<｜ | DSML | | invoke name="download_era5">',
             '<｜ | DSML | | parameter name="variables" string="false">'
             '["2m_temperature"]</｜ | DSML | | parameter>',
-            '<｜ | DSML | | parameter name="year" string="false">'
-            "2026</｜ | DSML | | parameter>",
-            '<｜ | DSML | | parameter name="month" string="false">'
-            "1</｜ | DSML | | parameter>",
+            '<｜ | DSML | | parameter name="year" string="false">2026</｜ | DSML | | parameter>',
+            '<｜ | DSML | | parameter name="month" string="false">1</｜ | DSML | | parameter>',
             '<｜ | DSML | | parameter name="area" string="false">'
             "[20.5,110.0,19.5,110.8]</｜ | DSML | | parameter>",
             "</｜ | DSML | | invoke>",
@@ -128,7 +126,7 @@ def test_parse_deepseek_content_tool_calls():
 
 
 def test_find_tool_call_marker_start():
-    text = "先下载数据。\n<｜DSML｜tool_calls><｜DSML｜invoke name=\"download_era5\">"
+    text = '先下载数据。\n<｜DSML｜tool_calls><｜DSML｜invoke name="download_era5">'
 
     assert _find_tool_call_marker_start(text) == len("先下载数据。\n")
     assert _find_tool_call_marker_start("普通回复，没有工具调用。") is None
@@ -159,10 +157,7 @@ def test_llm_config_endpoint():
     assert cfg.endpoint == "https://api.moonshot.cn/v1/chat/completions"
 
     cfg = LLMConfig(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-    assert (
-        cfg.endpoint
-        == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    )
+    assert cfg.endpoint == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     assert (
         cfg.dashscope_generation_endpoint
         == "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -209,6 +204,7 @@ def test_official_request_body_includes_stable_relay_turn_id():
 @pytest.mark.asyncio
 async def test_official_relay_uses_jwt_and_refreshes_once_after_401(monkeypatch):
     token_requests: list[bool] = []
+    wire_requests = []
 
     class StubOfficialSession:
         async def access_token(self, *, force_refresh=False):
@@ -224,6 +220,7 @@ async def test_official_relay_uses_jwt_and_refreshes_once_after_401(monkeypatch)
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
+        wire_requests.append(request)
         if request.headers["Authorization"] == "Bearer jwt-initial":
             return httpx.Response(401, json={"detail": "expired"}, request=request)
         return httpx.Response(
@@ -241,8 +238,16 @@ async def test_official_relay_uses_jwt_and_refreshes_once_after_401(monkeypatch)
     )
     await client._client.aclose()
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client.relay_turn_id = "stable-retry-turn"
 
     result = await client.chat([Message(role="user", content="Hi")])
+    assert len(wire_requests) == 2
+    assert (
+        wire_requests[0].headers["Idempotency-Key"] == wire_requests[1].headers["Idempotency-Key"]
+    )
+    assert all(
+        request.headers["x-relay-turn-id"] == "stable-retry-turn" for request in wire_requests
+    )
 
     assert result == "ok"
     assert token_requests == [False, True]
@@ -281,9 +286,7 @@ def obsolete_dashscope_multimodal_native_search_body_is_used_for_qwen37_flash():
         == client.config.dashscope_multimodal_generation_endpoint
     )
 
-    body = client._dashscope_request_body(
-        [Message(role="user", content="最新天气")], stream=True
-    )
+    body = client._dashscope_request_body([Message(role="user", content="最新天气")], stream=True)
 
     assert body["parameters"]["enable_search"] is True
     assert body["parameters"]["search_options"] == {
@@ -311,9 +314,7 @@ def obsolete_dashscope_multimodal_native_search_body_is_used_for_qwen35_plus():
         == client.config.dashscope_multimodal_generation_endpoint
     )
 
-    body = client._dashscope_request_body(
-        [Message(role="user", content="最新天气")], stream=True
-    )
+    body = client._dashscope_request_body([Message(role="user", content="最新天气")], stream=True)
 
     assert body["parameters"]["search_options"] == {
         "search_strategy": "agent",
@@ -619,10 +620,7 @@ async def obsolete_dashscope_native_stream_returns_text_and_sources():
     assert [event.type for event in events] == ["references", "text", "text", "done"]
     assert events[0].references == ["https://example.com/source"]
     assert "".join(event.content for event in events if event.type == "text") == "最新结果"
-    assert (
-        stream.call_args.args[1]
-        == client.config.dashscope_multimodal_generation_endpoint
-    )
+    assert stream.call_args.args[1] == client.config.dashscope_multimodal_generation_endpoint
     assert stream.call_args.kwargs["headers"]["X-DashScope-SSE"] == "enable"
     body = stream.call_args.kwargs["json"]
     assert body["parameters"]["incremental_output"] is True
@@ -703,8 +701,7 @@ async def obsolete_dashscope_native_json_error_body_is_not_silently_completed():
     with patch.object(client._client, "stream", return_value=FakeStream()):
         with pytest.raises(RuntimeError, match="bad search option"):
             _ = [
-                event
-                async for event in client.chat_stream([Message(role="user", content="天气")])
+                event async for event in client.chat_stream([Message(role="user", content="天气")])
             ]
     await client.close()
 

@@ -170,7 +170,11 @@ def parse_catalog_xml(xml: str, root: str) -> tuple[tuple[CatalogEntry, ...], tu
         tag = element.tag.rsplit("}", 1)[-1]
         if tag == "catalogRef":
             href = next(
-                (value for key, value in element.attrib.items() if key.rsplit("}", 1)[-1] == "href"),
+                (
+                    value
+                    for key, value in element.attrib.items()
+                    if key.rsplit("}", 1)[-1] == "href"
+                ),
                 "",
             )
             if href:
@@ -302,15 +306,11 @@ class NcepReanalysisProvider:
             category, variable = requested.rsplit("/", 1) if "/" in requested else ("", requested)
             exact = [entry for entry in eligible if entry.variable.casefold() == variable]
             candidates = exact or [
-                entry
-                for entry in eligible
-                if entry.variable.casefold().startswith(f"{variable}.")
+                entry for entry in eligible if entry.variable.casefold().startswith(f"{variable}.")
             ]
             if category:
                 exact_category_matches = [
-                    entry
-                    for entry in candidates
-                    if entry.category.casefold() == category
+                    entry for entry in candidates if entry.category.casefold() == category
                 ]
                 suffix_category_matches = [
                     entry
@@ -327,7 +327,9 @@ class NcepReanalysisProvider:
                 suggestions = get_close_matches(requested, available, n=6, cutoff=0.25)
                 if not suggestions:
                     suggestions = get_close_matches(variable, available, n=6, cutoff=0.25)
-                suggestion_text = f"；接近的可用变量: {', '.join(suggestions)}" if suggestions else ""
+                suggestion_text = (
+                    f"；接近的可用变量: {', '.join(suggestions)}" if suggestions else ""
+                )
                 raise ValueError(
                     f"未找到变量 {requested}{suggestion_text}。"
                     "请先查询数据集变量，或使用 category/variable 形式。"
@@ -388,11 +390,15 @@ class NcepReanalysisProvider:
                         reused.append(destination)
                         continue
                     if on_progress:
-                        on_progress(f"正在获取 NCEP Reanalysis 子集：{entry.category}/{entry.variable}")
+                        on_progress(
+                            f"正在获取 NCEP Reanalysis 子集：{entry.category}/{entry.variable}"
+                        )
                     try:
                         await self._download_stream(client, ncss_url, destination, on_progress)
                     except (httpx.HTTPError, OSError, RuntimeError) as exc:
-                        destination.with_suffix(destination.suffix + ".part").unlink(missing_ok=True)
+                        destination.with_suffix(destination.suffix + ".part").unlink(
+                            missing_ok=True
+                        )
                         fallback_url = urljoin(self._file_base, entry.url_path)
                         cache = (
                             request.output_dir
@@ -402,7 +408,9 @@ class NcepReanalysisProvider:
                             / entry.category
                             / Path(entry.url_path).name
                         )
-                        await self._download_stream(client, fallback_url, cache, on_progress, resume=True)
+                        await self._download_stream(
+                            client, fallback_url, cache, on_progress, resume=True
+                        )
                         _subset_netcdf_file(
                             input_path=cache,
                             output_path=destination,

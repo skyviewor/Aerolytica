@@ -113,17 +113,11 @@ def test_subagent_text_helpers_extract_artifacts_and_titles():
         "data/era5/sample.nc",
         "data/cds_era5-single-levels_total_precipitation_sfc_20190704.nc",
     ]
-    assert (
-        _subagent_title_from_text("下载 ERA5 后计算月均值并画图", max_len=8)
-        == "下载 ERA5 …"
-    )
+    assert _subagent_title_from_text("下载 ERA5 后计算月均值并画图", max_len=8) == "下载 ERA5 …"
 
 
 def test_background_execution_detection_ignores_status_queries():
-    assert (
-        _requests_background_execution("帮我查文献并生成报告，在后台运行。")
-        is True
-    )
+    assert _requests_background_execution("帮我查文献并生成报告，在后台运行。") is True
     assert _requests_background_execution("交给后台处理") is True
     assert _requests_background_execution("后台任务现在是什么状态？") is False
     assert _requests_background_execution("取消后台任务 3") is False

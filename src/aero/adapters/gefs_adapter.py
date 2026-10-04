@@ -36,7 +36,8 @@ _PRODUCT_MAP = {
         "dir": "pgrb2ap5",
         "code": "pgrb2a",
         "resolution": "0p50",
-        "description": "0.5° pressure-level + surface fields (TMP at 2m/500mb, HGT, UGRD, VGRD, etc.)",
+        "description": "0.5° pressure-level + surface fields (TMP at "
+        "2m/500mb, HGT, UGRD, VGRD, etc.)",
     },
     "gefs.0p50b": {
         "dir": "pgrb2bp5",
@@ -196,9 +197,7 @@ class GEFSAdapter:
             total_bytes,
             on_progress,
         )
-        emit_progress(
-            f"GEFS 文件下载完成：{dest_path} ({_fmt_size(downloaded)})"
-        )
+        emit_progress(f"GEFS 文件下载完成：{dest_path} ({_fmt_size(downloaded)})")
         return GEFSDownloadFile(
             member=member,
             forecast_hour=forecast_hour,
@@ -276,9 +275,7 @@ class GEFSAdapter:
 def _get_product_info(product: str) -> dict:
     info = _PRODUCT_MAP.get(product)
     if info is None:
-        raise ValueError(
-            f"不支持的产品: {product}。可用: {', '.join(_PRODUCT_MAP)}"
-        )
+        raise ValueError(f"不支持的产品: {product}。可用: {', '.join(_PRODUCT_MAP)}")
     return info
 
 
@@ -303,7 +300,7 @@ def _summarize_available(entries: list[GEFSIndexEntry]) -> dict:
 
 def parse_gefs_idx(text: str) -> list[GEFSIndexEntry]:
     """Parse a GEFS .idx file. Same col1:col2:... format as GFS .idx.
-    
+
     GEFS .idx files are already member-specific (one file per member).
     The member column is not needed for filtering — set to empty string.
     """
@@ -372,8 +369,8 @@ def select_gefs_entries(
     levels: list[str] | None = None,
     member: str = "c00",
 ) -> tuple[list[GEFSIndexEntry], list[dict]]:
-    """Select GEFS index entries by variable and level. 
-    
+    """Select GEFS index entries by variable and level.
+
     Note: GEFS .idx files are already member-specific (one file per member).
     The member parameter is accepted for API compatibility but not used for filtering.
     """
@@ -416,8 +413,7 @@ def build_dest_path(
         vars_part = f"{vars_part}_{level_hash}"
     product_part = product.replace(".", "_")
     return dest_dir / (
-        f"gefs_{date}_{cycle}z_{product_part}_{member}_"
-        f"f{forecast_hour:03d}_{vars_part}.grib2"
+        f"gefs_{date}_{cycle}z_{product_part}_{member}_f{forecast_hour:03d}_{vars_part}.grib2"
     )
 
 

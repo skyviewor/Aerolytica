@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "aero"
+name = "aerolytica"
 version = "0.1.0"
 description = "Aero — 气象科研 AI Agent IDE"
 readme = "README.md"
@@ -26,6 +26,7 @@ dependencies = [
     "uvicorn>=0.49,<1",
     "sse-starlette>=3.4,<4",
     "python-multipart>=0.0.20,<1",
+    "packaging>=24.2",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,17 @@ dev = [
 ]
 
 [project.scripts]
-aero = "aero.cli.main:main"
+aero = "aero.cli.entrypoint:main"
+
+[project.urls]
+Homepage = "https://aerolytica.skyviewor.team/"
+Repository = "https://github.com/skyviewor/Aerolytica"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aero"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/webui", "/scripts/release", "/tests", "/docs", "/install.sh", "/uv.lock", "/README.md", "/LICENSE"]
 
 [tool.ruff]
 target-version = "py312"

@@ -20,6 +20,8 @@ from aero.core.llm_providers import BUILTIN_LLM_PROVIDERS
 from aero.data.pricing import TokenTracker, context_window_for
 from aero.toolbox.secret_input import SecretInputRequest
 
+pytestmark = pytest.mark.usefixtures("byok_ui")
+
 
 def test_parse_qwen_setup_uses_bailian():
     config = AeroConfig.create_default()
@@ -63,10 +65,7 @@ async def test_multiline_secret_input_enter_submits_without_adding_newline():
     app = AeroApp(AeroConfig.create_default(), persist_config=False)
     result: list[str | None] = []
     request = SecretInputRequest("cds", "输入 CDS API 凭证", "instructions", True)
-    credentials = (
-        "url: https://cds.climate.copernicus.eu/api\n"
-        "key: ee3a1234-5678-9012"
-    )
+    credentials = "url: https://cds.climate.copernicus.eu/api\nkey: ee3a1234-5678-9012"
 
     async with app.run_test(size=(100, 30)) as pilot:
         app.push_screen(SecretInputScreen(request), callback=result.append)

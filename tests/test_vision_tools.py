@@ -21,9 +21,7 @@ async def test_vision_client_does_not_accept_brotli_response(tmp_path):
             json={"choices": [{"message": {"content": "图片分析结果"}}]},
         )
 
-    client = VisionClient(
-        VisionConfig(api_key="sk-test", base_url="https://example.test")
-    )
+    client = VisionClient(VisionConfig(api_key="sk-test", base_url="https://example.test"))
     await client._client.aclose()
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
@@ -45,9 +43,7 @@ def test_prepare_image_for_vision_creates_smaller_copy_without_changing_source(
     Image.effect_noise((3200, 2200), 100).convert("RGB").save(source)
     original_bytes = source.read_bytes()
 
-    result = prepare_image_for_vision(
-        "figures/large.png", max_dimension=1200, target_size_kb=300
-    )
+    result = prepare_image_for_vision("figures/large.png", max_dimension=1200, target_size_kb=300)
 
     assert result["status"] == "success"
     output = tmp_path / result["output_path"]

@@ -1,5 +1,4 @@
 import numpy as np
-
 from cnmaps import get_adm_maps
 from cnmaps.sample import load_temp
 

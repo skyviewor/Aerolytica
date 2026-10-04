@@ -18,7 +18,7 @@ from pathlib import Path
 import structlog
 
 from aero.core.types import Message, ToolCall
-from aero.data.pricing import TokenTracker
+from aero.release_environment import user_home
 
 logger = structlog.get_logger()
 
@@ -42,7 +42,7 @@ _SECRET_FIELD_NAMES = {
 
 
 def _fernet_key_path() -> Path:
-    return Path.home() / ".aero" / ".session_key"
+    return user_home() / ".session_key"
 
 
 def _load_or_create_key() -> bytes:
@@ -129,7 +129,7 @@ class SessionMeta:
 class SessionManager:
     def __init__(self, storage_dir: Path | None = None):
         if storage_dir is None:
-            storage_dir = Path.home() / ".aero" / "sessions"
+            storage_dir = user_home() / "sessions"
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 

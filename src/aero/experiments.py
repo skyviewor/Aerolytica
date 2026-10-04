@@ -10,7 +10,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-
 EXPERIMENT_DIRECTORIES = (
     "scripts",
     "figures",

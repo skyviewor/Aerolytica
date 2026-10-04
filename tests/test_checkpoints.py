@@ -1,5 +1,4 @@
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -212,9 +211,7 @@ def test_experiment_checkpoint_is_scoped_to_experiment_workspace(tmp_path):
 
     assert checkpoint["scope"] == "experiment"
     assert checkpoint["experiment_id"] == "exp-1"
-    assert {item["path"] for item in checkpoint["files"]} == {
-        "scripts/analyze.py"
-    }
+    assert {item["path"] for item in checkpoint["files"]} == {"scripts/analyze.py"}
     assert manager.checkpoints_dir == workspace / ".aero" / "checkpoints"
 
 

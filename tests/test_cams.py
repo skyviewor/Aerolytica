@@ -405,8 +405,7 @@ async def test_download_cams_submission_error_includes_direct_terms_url(tmp_path
 
     assert result["status"] == "error"
     assert result["terms_url"] == (
-        "https://ads.atmosphere.copernicus.eu/datasets/"
-        "cams-global-reanalysis-eac4?tab=download"
+        "https://ads.atmosphere.copernicus.eu/datasets/cams-global-reanalysis-eac4?tab=download"
     )
     assert result["terms_url"] in result["message"]
 

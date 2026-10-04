@@ -180,8 +180,6 @@ def _inspect_grib2_with_cfgrib(path: Path) -> dict:
         ds.close()
 
 
-
-
 @register_tool(
     name="inspect_grib2",
     description=(
@@ -249,4 +247,3 @@ async def inspect_grib2(file_path: str) -> dict:
     info["download_record"] = _lookup_download_record_for_file(path)
     info["cfgrib"] = _inspect_grib2_with_cfgrib(path)
     return info
-

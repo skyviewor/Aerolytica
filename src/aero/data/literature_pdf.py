@@ -17,7 +17,12 @@ _PDF_LOOKUP_TIMEOUT = 10
 
 
 def _normalize_doi(doi: str) -> str:
-    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/"):
+    for prefix in (
+        "https://doi.org/",
+        "http://doi.org/",
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+    ):
         if doi.startswith(prefix):
             return doi[len(prefix) :]
     return doi
@@ -57,7 +62,9 @@ async def _try_unpaywall_pdf(doi: str) -> dict[str, Any]:
     clean_doi = _normalize_doi(doi)
     url = f"https://api.unpaywall.org/v2/{clean_doi}?email=dev@aero.example"
     try:
-        async with httpx.AsyncClient(timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(
+            timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -83,7 +90,9 @@ async def _try_semantic_scholar_pdf(doi: str) -> dict[str, Any]:
     lookup = f"DOI:{_normalize_doi(doi)}"
     url = f"https://api.semanticscholar.org/graph/v1/paper/{lookup}?fields=openAccessPdf"
     try:
-        async with httpx.AsyncClient(timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(
+            timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -106,7 +115,9 @@ async def _try_europe_pmc_pdf(doi: str) -> dict[str, Any]:
         f"?query=DOI:{quote(clean_doi)}&format=json&pageSize=5"
     )
     try:
-        async with httpx.AsyncClient(timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(
+            timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -131,7 +142,9 @@ async def _try_crossref_pdf(doi: str) -> dict[str, Any]:
     clean_doi = _normalize_doi(doi)
     url = f"https://api.crossref.org/works/{quote(clean_doi, safe='')}"
     try:
-        async with httpx.AsyncClient(timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(
+            timeout=_PDF_LOOKUP_TIMEOUT, headers={"User-Agent": USER_AGENT}
+        ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
@@ -158,11 +171,7 @@ async def resolve_pdf_urls(work: dict) -> dict[str, Any]:
         _try_crossref_pdf(doi),
     )
     candidates = _deduplicate_candidates(
-        [
-            candidate
-            for lookup in lookup_results
-            for candidate in lookup.get("candidates", [])
-        ]
+        [candidate for lookup in lookup_results for candidate in lookup.get("candidates", [])]
     )
     tried_sources = [
         {

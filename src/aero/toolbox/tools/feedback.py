@@ -87,9 +87,7 @@ async def prepare_issue_link(
     clean_expected = _redact_issue_text(expected)
     clean_actual = _redact_issue_text(actual)
     clean_steps = [
-        _redact_issue_text(step)
-        for step in (reproduction_steps or [])
-        if _redact_issue_text(step)
+        _redact_issue_text(step) for step in (reproduction_steps or []) if _redact_issue_text(step)
     ]
     clean_context = _redact_issue_text(context)
     if not clean_title or not clean_problem or not clean_expected:

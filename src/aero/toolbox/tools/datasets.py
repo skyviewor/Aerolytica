@@ -140,10 +140,7 @@ async def search_dataset_variables(dataset_id: str, query: str = "") -> dict:
                 "query": query,
                 "count": len(variables),
                 "variables": [
-                    (
-                        f"{item['name']}: {item['label']} "
-                        f"({item['level_type']} level)"
-                    )
+                    (f"{item['name']}: {item['label']} ({item['level_type']} level)")
                     for item in variables
                 ],
             }

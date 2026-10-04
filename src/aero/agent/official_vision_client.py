@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import uuid
 from pathlib import Path
 
 import httpx
@@ -64,15 +65,24 @@ class OfficialVisionClient:
                         "image_url": {"url": signed["image_url"], "detail": detail},
                     }
                 )
+        from aero.application.turn_context import current_turn_id
+
+        turn_id = current_turn_id() or uuid.uuid4().hex
         response = await self._session.request_to(
             relay_llm_url(),
             "POST",
             "/chat/completions",
             timeout=120,
+            headers={
+                "x-relay-turn-id": turn_id,
+                "x-relay-question-purpose": "vision",
+                "Idempotency-Key": uuid.uuid4().hex,
+            },
             json={
                 "model": self._config.model or "default",
                 "messages": [{"role": "user", "content": parts}],
                 "stream": False,
+                "relay_turn_id": turn_id,
             },
         )
         if response.status_code >= 400:

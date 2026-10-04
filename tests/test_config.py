@@ -276,10 +276,7 @@ def test_llm_provider_presets():
     assert preset.default_model
     assert preset.base_url.endswith("/v1")
     for provider_id, provider_preset in BUILTIN_LLM_PROVIDERS.items():
-        assert all(
-            model_summary(provider_id, model) != "文本"
-            for model in provider_preset.models
-        )
+        assert all(model_summary(provider_id, model) != "文本" for model in provider_preset.models)
     assert model_summary("bailian", "qwen3.7-plus").startswith("多模态")
     assert model_supports_vision("bailian", "qwen3.7-plus") is True
     assert model_supports_vision("bailian", "qwen3.7-flash") is True
@@ -383,8 +380,7 @@ def test_configure_cds_key_accepts_official_two_line_format(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
 
     result = configure_cds_key(
-        "url: https://cds.climate.copernicus.eu/api\n"
-        "key: ee3a913f-03e7-4c83-bbbb-ed422aa0e091"
+        "url: https://cds.climate.copernicus.eu/api\nkey: ee3a913f-03e7-4c83-bbbb-ed422aa0e091"
     )
 
     assert result["status"] == "success"
@@ -394,9 +390,7 @@ def test_configure_cds_key_accepts_official_two_line_format(tmp_path, monkeypatc
     assert "ee3a913f-03e7-4c83-bbbb-ed422aa0e091" not in config_path.read_text()
 
 
-def test_configure_ads_key_accepts_token_and_keeps_it_out_of_project_config(
-    tmp_path, monkeypatch
-):
+def test_configure_ads_key_accepts_token_and_keeps_it_out_of_project_config(tmp_path, monkeypatch):
     from aero.toolbox.builtin_tools import check_ads_config, configure_ads_key
 
     secrets_path = tmp_path / "secrets.yaml"
@@ -426,8 +420,7 @@ def test_check_ads_config_lists_direct_cams_terms_urls(tmp_path, monkeypatch):
 
     assert result["status"] == "not_configured"
     assert (
-        "https://ads.atmosphere.copernicus.eu/datasets/"
-        "cams-global-reanalysis-eac4?tab=download"
+        "https://ads.atmosphere.copernicus.eu/datasets/cams-global-reanalysis-eac4?tab=download"
     ) in result["message"]
     assert (
         "https://ads.atmosphere.copernicus.eu/datasets/"
@@ -470,9 +463,7 @@ def test_check_earthdata_config_uses_current_profile_labels(tmp_path, monkeypatc
     assert "Create Token" not in result["message"]
 
 
-def test_check_web_search_config_explains_both_provider_flows(
-    tmp_path, monkeypatch
-):
+def test_check_web_search_config_explains_both_provider_flows(tmp_path, monkeypatch):
     from aero.toolbox.builtin_tools import check_web_search_config
 
     monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))
@@ -513,9 +504,7 @@ def test_check_web_search_config_explains_both_provider_flows(
     }
 
 
-def test_web_search_config_offers_explicit_bailian_key_reuse(
-    tmp_path, monkeypatch
-):
+def test_web_search_config_offers_explicit_bailian_key_reuse(tmp_path, monkeypatch):
     from aero.core.config import save_llm_profile
     from aero.toolbox.builtin_tools import (
         authorize_web_search_key_reuse,
@@ -575,9 +564,7 @@ def test_web_search_config_recognizes_historical_bailian_provider_aliases(
                         historical_provider: {
                             "api_key": "sk-historical-bailian",
                             "model": "qwen3.7-plus",
-                            "base_url": (
-                                "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                            ),
+                            "base_url": ("https://dashscope.aliyuncs.com/compatible-mode/v1"),
                         }
                     },
                 }
@@ -644,9 +631,7 @@ def test_reused_vision_snapshot_survives_text_model_switch(tmp_path, monkeypatch
     assert resolved.api_key == "sk-bailian"
 
 
-def test_vision_provider_profile_overrides_stale_cross_provider_base_url(
-    tmp_path, monkeypatch
-):
+def test_vision_provider_profile_overrides_stale_cross_provider_base_url(tmp_path, monkeypatch):
     from aero.core.config import resolved_vision_config
 
     monkeypatch.setenv("AERO_SECRETS_PATH", str(tmp_path / "secrets.yaml"))

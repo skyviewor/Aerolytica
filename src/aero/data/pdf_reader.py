@@ -120,9 +120,11 @@ def extract_tables(pdf_path: Path) -> list[dict]:
                     continue
                 header = [str(c) if c is not None else "" for c in t[0]]
                 rows = [[str(c) if c is not None else "" for c in row] for row in t[1:]]
-                all_tables.append({
-                    "page": i,
-                    "header": header,
-                    "rows": rows,
-                })
+                all_tables.append(
+                    {
+                        "page": i,
+                        "header": header,
+                        "rows": rows,
+                    }
+                )
     return all_tables

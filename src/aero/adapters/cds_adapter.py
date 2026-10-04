@@ -53,8 +53,17 @@ class CDSAdapter:
         if data_format not in ("netcdf", "grib"):
             raise ValueError(f"不支持的格式: {data_format}，仅支持 netcdf 和 grib")
 
-        request = self._build_request(dataset_id, variables, year, month, day,
-                                      pressure_level, area, data_format, request_overrides)
+        request = self._build_request(
+            dataset_id,
+            variables,
+            year,
+            month,
+            day,
+            pressure_level,
+            area,
+            data_format,
+            request_overrides,
+        )
         dest_path = dest_path or self._build_dest_path(
             dataset_id,
             variables,
@@ -152,9 +161,7 @@ class CDSAdapter:
             _normalize_downloaded_file(dest_path)
             file_size = dest_path.stat().st_size
             if file_size == total_bytes:
-                emit_progress(
-                    f"本地文件已完整，无需重复下载：{dest_path} ({_fmt_size(file_size)})"
-                )
+                emit_progress(f"本地文件已完整，无需重复下载：{dest_path} ({_fmt_size(file_size)})")
                 return file_size
 
         if total_bytes > 0 and existing_size > total_bytes:
@@ -174,7 +181,12 @@ class CDSAdapter:
                 dest_path.unlink()
 
         await asyncio.to_thread(
-            self._download_file, download_url, dest_path, resume_from, on_progress, total_bytes,
+            self._download_file,
+            download_url,
+            dest_path,
+            resume_from,
+            on_progress,
+            total_bytes,
         )
 
         _normalize_downloaded_file(dest_path)
@@ -251,8 +263,13 @@ class CDSAdapter:
 
     @staticmethod
     def _build_dest_path(
-        dataset_id: str, variables: list[str], year: int, month: int,
-        day: int | None, pressure_level: int | list[int] | None, data_format: str,
+        dataset_id: str,
+        variables: list[str],
+        year: int,
+        month: int,
+        day: int | None,
+        pressure_level: int | list[int] | None,
+        data_format: str,
         *,
         area: list[float] | None = None,
         time: list[str] | None = None,
@@ -277,9 +294,16 @@ class CDSAdapter:
         return Path(config_output_dir()) / filename
 
     def _build_request(
-        self, dataset_id: str, variables: list[str], year: int, month: int,
-        day: int | None, pressure_level: int | list[int] | None, area: list[float] | None,
-        data_format: str, request_overrides: dict | None,
+        self,
+        dataset_id: str,
+        variables: list[str],
+        year: int,
+        month: int,
+        day: int | None,
+        pressure_level: int | list[int] | None,
+        area: list[float] | None,
+        data_format: str,
+        request_overrides: dict | None,
     ) -> dict:
         request: dict = {}
         if request_overrides:
@@ -438,8 +462,10 @@ class CDSAdapter:
 
 def config_output_dir() -> Path:
     from pathlib import Path as _Path
+
     cwd = _Path.cwd()
     from aero.core.config import AeroConfig
+
     config_path = cwd / "aero.yaml"
     cfg = AeroConfig.load(config_path) if config_path.exists() else AeroConfig.create_default()
     return cwd / cfg.output.data_dir
@@ -453,6 +479,7 @@ def _path_number(value: float) -> str:
 
 
 # ── static helpers ─────────────────────────────────────────────────────
+
 
 def _head_url(url: str) -> dict:
     try:
@@ -553,10 +580,7 @@ def _normalize_downloaded_file(dest_path: Path) -> None:
     with zipfile.ZipFile(dest_path) as archive:
         archive.extractall(extract_dir)
 
-    data_files = sorted(
-        p for p in extract_dir.rglob("*")
-        if p.is_file() and _is_data_like_name(p)
-    )
+    data_files = sorted(p for p in extract_dir.rglob("*") if p.is_file() and _is_data_like_name(p))
     if not data_files:
         raise RuntimeError("CDS 返回 ZIP 包，但其中没有数据文件")
 

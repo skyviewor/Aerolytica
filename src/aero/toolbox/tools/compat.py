@@ -12,7 +12,7 @@ from aero.toolbox.download_progress import (
 )
 from aero.toolbox.paths import find_project_dir, short_path
 from aero.toolbox.runtime_manager import get_runtime_tool_manager
-from aero.toolbox.tools.local_data import scan_local_files
+from aero.toolbox.tools.local_data import scan_local_files as scan_local_files
 
 
 def _find_config():

@@ -8,8 +8,8 @@ from contextlib import contextmanager
 
 CheckpointCreator = Callable[[str], dict]
 
-_CHECKPOINT_CREATOR: contextvars.ContextVar[CheckpointCreator | None] = (
-    contextvars.ContextVar("aero_checkpoint_creator", default=None)
+_CHECKPOINT_CREATOR: contextvars.ContextVar[CheckpointCreator | None] = contextvars.ContextVar(
+    "aero_checkpoint_creator", default=None
 )
 
 

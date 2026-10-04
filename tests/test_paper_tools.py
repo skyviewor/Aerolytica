@@ -54,9 +54,7 @@ async def test_paper_slash_commands_initialize_save_list_and_diff(tmp_path):
     app = AeroApp.__new__(AeroApp)
     app._project_dir = tmp_path
     shown: list[tuple[str, dict]] = []
-    app._show_checkpoint_message = lambda message, **kwargs: shown.append(
-        (message, kwargs)
-    )
+    app._show_checkpoint_message = lambda message, **kwargs: shown.append((message, kwargs))
 
     await app._handle_paper_command("/paper init")
     paper = tmp_path / "paper" / "main.md"

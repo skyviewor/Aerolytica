@@ -19,18 +19,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yaml
-
-# Textual's enhanced Kitty keyboard protocol can interfere with Chinese IME
-# commits in some terminal / macOS combinations, turning committed text into
-# modifier events or spaces. Keep it disabled by default for TUI chat input.
-if os.environ.get("AERO_ENABLE_KITTY_KEY") != "1":
-    os.environ["TEXTUAL_DISABLE_KITTY_KEY"] = "1"
-
-# The Web server never renders terminal images. Avoid probing terminal escape
-# sequences when ``aero serve`` is invoked from a non-interactive process.
-if len(sys.argv) > 1 and sys.argv[1] == "serve":
-    os.environ["AERO_TEXTUAL_IMAGE_PROTOCOL"] = "0"
-
 from rich.markup import escape
 from rich.table import Table
 from textual import events, on, work
@@ -42,35 +30,17 @@ from textual.screen import ModalScreen
 from textual.scrollbar import ScrollBarRender
 from textual.widgets import (
     Button,
-    Checkbox,
     Input,
     ListItem,
     ListView,
     Markdown,
     OptionList,
-    Select,
-    SelectionList,
     Static,
     TextArea,
 )
 from textual.widgets._markdown import MarkdownBullet, MarkdownBulletList, MarkdownListItem
 from textual.widgets._option_list import Option
 from textual.worker import Worker, WorkerCancelled
-
-TerminalImage = None
-if os.environ.get("AERO_TEXTUAL_IMAGE_PROTOCOL") != "0":
-    try:
-        from textual_image.widget import Image as _TerminalImage
-
-        renderable_module = getattr(
-            getattr(_TerminalImage, "_Renderable", None),
-            "__module__",
-            "",
-        )
-        if not renderable_module.endswith(".unicode"):
-            TerminalImage = _TerminalImage
-    except Exception:
-        TerminalImage = None
 
 from aero.agent.checkpoint_context import use_checkpoint_creator
 from aero.agent.subagent import (
@@ -95,6 +65,8 @@ from aero.cli.image_widget import (
     terminal_half_block_preview,
     terminal_image_preview,
 )
+from aero.cli.input_dialog import InputAlignedScreen
+from aero.cli.question_screen import UserQuestionScreen
 from aero.core.config import (
     AeroConfig,
     clear_llm_api_key,
@@ -126,6 +98,7 @@ from aero.data.pricing import TokenTracker, context_window_for, format_cost, for
 from aero.i18n import is_supported_language, language_label, language_options, t
 from aero.paper_export import PaperExportError, export_paper
 from aero.paper_versions import PaperVersionManager
+from aero.release_environment import user_home
 from aero.toolbox.approval_input import use_approval_provider
 from aero.toolbox.paths import use_workspace
 from aero.toolbox.secret_input import (
@@ -134,6 +107,17 @@ from aero.toolbox.secret_input import (
     use_secret_input_provider,
 )
 from aero.toolbox.user_input import use_user_input_provider
+
+TerminalImage = None
+if os.environ.get("AERO_TEXTUAL_IMAGE_PROTOCOL") != "0":
+    try:
+        from textual_image.widget import Image as _TerminalImage
+
+        renderable_module = getattr(getattr(_TerminalImage, "_Renderable", None), "__module__", "")
+        if not renderable_module.endswith(".unicode"):
+            TerminalImage = _TerminalImage
+    except Exception:
+        TerminalImage = None
 
 DEEPSEEK_MODEL_ALIASES = {
     "flash": "deepseek-v4-flash",
@@ -181,8 +165,10 @@ def _strip_markup(text: str) -> str:
     return re.sub(r"\[/?[^\]]+\]", "", text)
 
 
-class ExecutionApprovalScreen(ModalScreen[str]):
+class ExecutionApprovalScreen(InputAlignedScreen[str]):
     """Approval dialog for switching from plan mode to execute mode."""
+
+    DIALOG_SELECTOR = "#exec-dialog"
 
     CSS = """
     ExecutionApprovalScreen {
@@ -192,7 +178,6 @@ class ExecutionApprovalScreen(ModalScreen[str]):
 
     #exec-dialog {
         width: 1fr;
-        max-width: 140;
         height: auto;
         max-height: 22;
         border: solid #5dade2;
@@ -264,6 +249,7 @@ class ExecutionApprovalScreen(ModalScreen[str]):
         self._selected_button = 0
 
     def on_mount(self) -> None:
+        self.setup_input_alignment()
         self._sync_selected_button()
 
     def compose(self) -> ComposeResult:
@@ -332,8 +318,10 @@ class ExecutionApprovalScreen(ModalScreen[str]):
                 btn.remove_class("exec-selected")
 
 
-class ConfirmScreen(ModalScreen[str]):
+class ConfirmScreen(InputAlignedScreen[str]):
     """Modal confirmation dialog for dangerous tool operations."""
+
+    DIALOG_SELECTOR = "#confirm-dialog"
 
     CSS = """
     ConfirmScreen {
@@ -342,7 +330,6 @@ class ConfirmScreen(ModalScreen[str]):
 
     #confirm-dialog {
         width: 1fr;
-        max-width: 140;
         height: auto;
         max-height: 22;
         border: solid $warning;
@@ -429,6 +416,7 @@ class ConfirmScreen(ModalScreen[str]):
         allow_label: str | None = None,
         deny_label: str | None = None,
         show_always: bool = True,
+        always_label: str | None = None,
     ):
         super().__init__()
         self._message = message
@@ -437,6 +425,7 @@ class ConfirmScreen(ModalScreen[str]):
         self._allow_label = allow_label or t("confirm.allow_once", lang)
         self._deny_label = deny_label or t("confirm.reject", lang)
         self._show_always = show_always
+        self._always_label = always_label or t("confirm.allow_always", lang)
         self._button_ids = (
             ("#btn-allow", "#btn-always", "#btn-deny")
             if show_always
@@ -445,6 +434,7 @@ class ConfirmScreen(ModalScreen[str]):
         self._selected_button = 0
 
     def on_mount(self) -> None:
+        self.setup_input_alignment()
         self._sync_selected_button()
 
     def compose(self) -> ComposeResult:
@@ -456,7 +446,7 @@ class ConfirmScreen(ModalScreen[str]):
                 yield Static(self._allow_label, id="btn-allow", classes="confirm-option")
                 if self._show_always:
                     yield Static(
-                        t("confirm.allow_always", self._lang),
+                        self._always_label,
                         id="btn-always",
                         classes="confirm-option",
                     )
@@ -745,97 +735,8 @@ class SecretInputScreen(ModalScreen[str | None]):
             self.action_cancel()
 
 
-class UserInputScreen(ModalScreen[dict | None]):
-    """Local parameter form with validation before dismissing."""
-
-    CSS = """
-    UserInputScreen { align: center middle; }
-    #user-form {
-        width: 80%; max-width: 100; height: auto; max-height: 85%;
-        padding: 1 2; background: $surface;
-    }
-    #user-form TextArea { height: 6; }
-    #user-form SelectionList { height: auto; max-height: 8; }
-    #user-form-error { color: $error; }
-    """
-    BINDINGS = [
-        Binding("escape", "cancel", "取消", priority=True),
-        Binding("tab", "focus_next", show=False, priority=True),
-        Binding("shift+tab", "focus_previous", show=False, priority=True),
-    ]
-
-    def __init__(self, description: dict):
-        super().__init__()
-        self.description = description
-
-    def compose(self) -> ComposeResult:
-        from textual.containers import VerticalScroll
-
-        with VerticalScroll(id="user-form"):
-            yield Static(self.description["title"])
-            yield Static(self.description.get("instructions", ""))
-            for index, field in enumerate(self.description["fields"]):
-                yield Static(field.get("label", field["name"]))
-                if field.get("description"):
-                    yield Static(field["description"])
-                widget_id = f"user-field-{index}"
-                kind = field["type"]
-                if kind == "multiline":
-                    yield TextArea(id=widget_id)
-                elif kind == "boolean":
-                    yield Checkbox("是", id=widget_id)
-                elif kind == "single_choice":
-                    yield Select(
-                        [(option, option) for option in field["options"]], id=widget_id
-                    )
-                elif kind == "multiple_choice":
-                    yield SelectionList(
-                        *[(option, option) for option in field["options"]], id=widget_id
-                    )
-                else:
-                    yield Input(id=widget_id, type="number" if kind == "number" else "text")
-            yield Static("", id="user-form-error")
-            with Horizontal():
-                yield Button("提交", id="user-form-submit", variant="primary")
-                yield Button("取消任务", id="user-form-cancel")
-
-    def action_focus_next(self) -> None:
-        self.focus_next()
-
-    def action_focus_previous(self) -> None:
-        self.focus_previous()
-
-    @on(Button.Pressed, "#user-form-submit")
-    def submit(self) -> None:
-        from aero.toolbox.user_input import validate_values
-
-        values = {}
-        try:
-            for index, field in enumerate(self.description["fields"]):
-                widget = self.query_one(f"#user-field-{index}")
-                if field["type"] == "multiline":
-                    value = widget.text
-                elif field["type"] == "multiple_choice":
-                    value = list(widget.selected)
-                else:
-                    value = widget.value
-                if field["type"] == "single_choice" and value is Select.BLANK:
-                    value = None
-                if field["type"] == "number" and value:
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        raise ValueError(f"{field.get('label', field['name'])}需要填写数字") from None
-                values[field["name"]] = value
-            self.dismiss(validate_values(self.description, values))
-        except ValueError as exc:
-            self.query_one("#user-form-error", Static).update(str(exc))
-        except TypeError:
-            self.query_one("#user-form-error", Static).update("请检查字段类型。")
-
-    @on(Button.Pressed, "#user-form-cancel")
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+class UserInputScreen(UserQuestionScreen):
+    """Compatibility name for the shared compact question dialog."""
 
 
 class OfficialLoginScreen(ModalScreen[dict[str, str] | None]):
@@ -1402,8 +1303,7 @@ class ChatMarkdownBulletList(MarkdownBulletList):
             bullet = MarkdownBullet()
             bullet.symbol = block.bullet
             is_safety = any(
-                "恢复前安全检查点：" in child._content.plain
-                or "恢复保护 ·" in child._content.plain
+                "恢复前安全检查点：" in child._content.plain or "恢复保护 ·" in child._content.plain
                 for child in block._blocks
             )
             yield Horizontal(
@@ -1538,8 +1438,10 @@ class AgentRunState:
     background_task: SubAgentTask | None = None
 
 
-class AeroApp(App):
-    """Aero Textual TUI."""
+class ChatTuiApp(App):
+    """Shared chat presentation, independent of local or resident execution."""
+
+    CHAT_INPUT_CLASS = ChatTextArea
 
     ENABLE_COMMAND_PALETTE = False
 
@@ -1855,6 +1757,25 @@ class AeroApp(App):
 
     """
 
+    def compose(self) -> ComposeResult:
+        yield ChatScroll(id="chat-area")
+        with Horizontal(id="command-row"):
+            yield ListView(id="command-list")
+        with Vertical(id="input-panel"):
+            yield Static(STARTUP_LOGO, id="startup-logo")
+            with Horizontal(id="input-row"):
+                with Vertical(id="input-box"):
+                    yield self.CHAT_INPUT_CLASS(id="user-input", show_line_numbers=False)
+                    with Horizontal(id="input-meta-row"):
+                        yield Static("", id="input-meta")
+                        yield Static("", id="mode-label")
+        with Horizontal(id="footer-bar"):
+            yield Static("", id="footer-status")
+
+
+class AeroApp(ChatTuiApp):
+    """Normal chat presentation with local execution."""
+
     BINDINGS = [
         ("ctrl+q", "quit", "退出"),
         ("ctrl+s", "save_log", "保存日志"),
@@ -1867,6 +1788,7 @@ class AeroApp(App):
         config: AeroConfig,
         persist_config: bool = True,
         resume_last_session: bool = False,
+        resume_session_id: str | None = None,
     ):
         super().__init__()
         from aero.core.config import apply_client_inference_policy
@@ -1875,6 +1797,7 @@ class AeroApp(App):
         self.config = config
         self.persist_config = persist_config
         self._resume_last_session = resume_last_session
+        self._resume_session_id = resume_session_id
         self.agent = None
         self.last_error = ""
         self._agent_msg: Markdown | None = None
@@ -1936,20 +1859,7 @@ class AeroApp(App):
                 self.theme = theme
 
     def compose(self) -> ComposeResult:
-        lang = self.config.language
-        yield ChatScroll(id="chat-area")
-        with Horizontal(id="command-row"):
-            yield ListView(id="command-list")
-        with Vertical(id="input-panel"):
-            yield Static(STARTUP_LOGO, id="startup-logo")
-            with Horizontal(id="input-row"):
-                with Vertical(id="input-box"):
-                    yield ChatTextArea(id="user-input", show_line_numbers=False)
-                    with Horizontal(id="input-meta-row"):
-                        yield Static("", id="input-meta")
-                        yield Static("", id="mode-label")
-        with Horizontal(id="footer-bar"):
-            yield Static("", id="footer-status")
+        yield from super().compose()
 
     def on_mount(self) -> None:
         debug_log("tui.mount", language=self.config.language)
@@ -1957,7 +1867,6 @@ class AeroApp(App):
         self.screen.add_class("startup")
 
         lang = self.config.language
-        chat = self.query_one("#chat-area", VerticalScroll)
         self._mount_chat_title()
         self._chat_log = [
             t("app.title", lang),
@@ -1979,7 +1888,13 @@ class AeroApp(App):
         if self.config.llm.provider == "official":
             self.run_worker(self._refresh_official_credits(), exclusive=False)
         active_experiment = self._get_experiment_mgr().active()
-        if active_experiment is not None:
+        if self._resume_session_id:
+            saved = self._get_session_mgr().load(self._resume_session_id)
+            if saved and Path(saved[1].project_dir).resolve() == self._project_dir:
+                self._do_load_session(self._resume_session_id)
+            else:
+                self.notify("更新前的会话无法恢复，请使用 /session 查找。", severity="warning")
+        elif active_experiment is not None:
             self._load_experiment_slot(active_experiment["id"])
             self._set_footer_status(f"当前实验：{active_experiment['name']}")
         elif self._resume_last_session:
@@ -1992,14 +1907,16 @@ class AeroApp(App):
             title=self._cloud_chat_title,
             on_title=self._apply_cloud_chat_title,
             on_command=self._run_cloud_chat_command,
+            on_remote_command=self._run_cloud_remote_command,
             on_login_required=self._handle_official_login,
             export_context=self._export_cloud_chat_context,
             restore_context=self._restore_cloud_chat_context,
-            is_idle=lambda: self._agent_worker is None or not self._agent_worker.is_running,
-            image_roots=self._cloud_image_roots,
-            on_quota_full=lambda: self.notify(
-                "智能体在线名额已满，新聊天无法上线。", severity="warning", timeout=5
+            is_idle=lambda: (
+                not getattr(self, "_updating", False)
+                and (self._agent_worker is None or not self._agent_worker.is_running)
             ),
+            image_roots=self._cloud_image_roots,
+            on_quota_full=self._handle_chat_presence_quota_full,
             on_sync_error=lambda message: self.notify(message, severity="warning", timeout=10),
             on_taken_over=lambda: self.notify(
                 "当前聊天已在其他设备接管；请开启新会话。", severity="warning", timeout=8
@@ -2009,6 +1926,13 @@ class AeroApp(App):
 
         if self.persist_config and _config_needs_llm_setup(self.config):
             self.call_after_refresh(self._open_first_run_setup)
+        from aero.cli.update_ui import start_update_checks
+
+        start_update_checks(self)
+
+    def _handle_chat_presence_quota_full(self) -> None:
+        # Optional cloud presence must not interrupt local chat with quota toasts.
+        debug_log("chat_presence.quota_full")
 
     def _open_first_run_setup(self) -> None:
         from aero.cli.setup_wizard import FirstRunSetupScreen
@@ -2019,83 +1943,7 @@ class AeroApp(App):
         if result is None:
             self.exit(message="未完成主模型配置，已退出。")
             return
-        primary = result["primary"]
-        self.config.llm.provider = str(primary["provider"])
-        self.config.llm.model = str(primary["model"])
-        self.config.llm.base_url = str(primary["base_url"])
-        self.config.llm.supports_vision = bool(result["primary_supports_vision"])
-        self.config.llm.set_active_api_key(str(primary["api_key"]))
-        save_llm_profile(
-            self.config.llm.provider,
-            str(primary["api_key"]),
-            self.config.llm.model,
-            self.config.llm.base_url,
-        )
-
-        vision = result["vision"]
-        self.config.vision.mode = str(vision["mode"])
-        if self.config.vision.mode == "separate":
-            self.config.vision.provider = str(vision["provider"])
-            self.config.vision.model = str(vision["model"])
-            self.config.vision.base_url = str(vision["base_url"])
-            self.config.vision.api_key = str(vision["api_key"])
-            from aero.core.config import save_vision_api_key
-
-            save_vision_api_key(
-                self.config.vision.api_key,
-                self.config.vision.base_url,
-                provider=self.config.vision.provider,
-                model=self.config.vision.model,
-                mode="separate",
-            )
-        elif self.config.vision.mode == "reuse_primary":
-            self._reuse_primary_vision_model(persist=False)
-
-        web_search = result.get("web_search", {})
-        if web_search.get("configured"):
-            ws_api_key = web_search.get("api_key", "").strip()
-            if ws_api_key:
-                self.config.web_search.provider = str(web_search.get("provider", "bailian"))
-                self.config.web_search.api_key = ws_api_key
-                self.config.web_search.base_url = str(
-                    web_search.get(
-                        "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                    )
-                )
-                self.config.web_search.model = str(web_search.get("model", "qwen-turbo"))
-                self.config.web_search.enabled = True
-                self.config.web_search.mcp_verified = bool(web_search.get("mcp_verified", True))
-                self.config.web_search.mcp_verified_provider = self.config.web_search.provider
-                self.config.web_search.mcp_verified_at = time.time()
-                save_web_search_api_key(
-                    ws_api_key,
-                    self.config.web_search.base_url,
-                    provider=self.config.web_search.provider,
-                    model=self.config.web_search.model,
-                )
-                save_web_search_state(
-                    enabled=True,
-                    mcp_verified=self.config.web_search.mcp_verified,
-                    mcp_verified_provider=self.config.web_search.provider,
-                    mcp_verified_at=self.config.web_search.mcp_verified_at,
-                )
-        else:
-            # “暂不配置” is an explicit choice.  Do not inherit a stale
-            # user-level enabled flag or reuse the primary/vision key as a
-            # search credential on this initialization.
-            self.config.web_search.enabled = False
-            self.config.web_search.api_key = ""
-            self.config.web_search.mcp_verified = False
-            self.config.web_search.mcp_verified_provider = ""
-            self.config.web_search.mcp_verified_at = 0.0
-            save_web_search_state(
-                enabled=False,
-                mcp_verified=False,
-                mcp_verified_provider="",
-                mcp_verified_at=0.0,
-            )
-
-        _save_config(self.config)
+        persist_first_run_setup(self.config, result)
         self._init_agent()
         self._chat_log = [
             t("app.title", self.config.language),
@@ -2277,9 +2125,7 @@ class AeroApp(App):
             immediate=True,
         )
 
-    def on_markdown_table_of_contents_updated(
-        self, event: Markdown.TableOfContentsUpdated
-    ) -> None:
+    def on_markdown_table_of_contents_updated(self, event: Markdown.TableOfContentsUpdated) -> None:
         markdown = event.markdown
         if not isinstance(markdown, ChatMarkdown) or not markdown.force_scroll_on_ready:
             return
@@ -2378,9 +2224,7 @@ class AeroApp(App):
             else:
                 compact_prefix = "[上下文压缩总结]\n"
                 if entry.startswith(compact_prefix):
-                    transcript.append(
-                        {"role": "summary", "content": entry[len(compact_prefix) :]}
-                    )
+                    transcript.append({"role": "summary", "content": entry[len(compact_prefix) :]})
         return transcript
 
     def _ready_subtitle(self) -> str:
@@ -2388,14 +2232,11 @@ class AeroApp(App):
 
     def _model_status_text(self, markup: bool = True) -> str:
         lang = self.config.language
-        text = (
-            t("app.model_line", lang).format(
-                provider=self.config.llm.provider,
-                model=self.config.llm.model,
-            )
-            + t("app.effort_line", lang).format(
-                effort=self.config.llm.reasoning_effort or "auto",
-            )
+        text = t("app.model_line", lang).format(
+            provider=self.config.llm.provider,
+            model=self.config.llm.model,
+        ) + t("app.effort_line", lang).format(
+            effort=self.config.llm.reasoning_effort or "auto",
         )
         vision_config = resolved_vision_config(self.config)
         if vision_config is not None and not self._vision_matches_primary(vision_config):
@@ -2418,7 +2259,11 @@ class AeroApp(App):
         if self.config.llm.provider != "official":
             text += f" [dim]{escape(provider)}[/dim]"
         effort_labels = {
-            "low": "低", "medium": "中", "high": "高", "xhigh": "极高", "max": "最高",
+            "low": "低",
+            "medium": "中",
+            "high": "高",
+            "xhigh": "极高",
+            "max": "最高",
         }
         if effort in effort_labels:
             text += f" [dim]·[/dim] 思考强度 [bold warning]{effort_labels[effort]}[/bold warning]"
@@ -2439,13 +2284,9 @@ class AeroApp(App):
                 self.config.llm.model,
                 include_cost=self.config.llm.provider != "official",
             )
-        if (
-            self.config.llm.provider == "official"
-            and self._official_available_credits is not None
-        ):
+        if self.config.llm.provider == "official" and self._official_available_credits is not None:
             text += (
-                " [dim]|[/dim] [dim]剩余额度[/dim] "
-                f"{escape(self._official_available_credits)} 点"
+                f" [dim]|[/dim] [dim]剩余额度[/dim] {escape(self._official_available_credits)} 点"
             )
         return text
 
@@ -2454,8 +2295,7 @@ class AeroApp(App):
         return (
             normalize_provider_id(vision_config.provider)
             == normalize_provider_id(self.config.llm.provider)
-            and vision_config.model.strip().lower()
-            == self.config.llm.model.strip().lower()
+            and vision_config.model.strip().lower() == self.config.llm.model.strip().lower()
         )
 
     _COMMANDS = None  # Replaced by instance-level _commands_list for i18n
@@ -2704,6 +2544,23 @@ class AeroApp(App):
             self._pending_session_title = title
         self._set_footer_status(f"云端已重命名当前智能体：{title}")
 
+    async def _run_cloud_remote_command(self, command: dict) -> str:
+        from aero.application.incoming_attachments import stage_command
+        from aero.application.remote_command import command_settings, use_remote_command
+
+        while self._agent_worker is not None and self._agent_worker.is_running:
+            await asyncio.sleep(0.2)
+        if self._chat_presence is None:
+            raise RuntimeError("chat_offline")
+        prompt = await stage_command(
+            command,
+            self._chat_presence._image_request,
+            self._project_dir / ".aero" / "attachments",
+            self._session_id or "current",
+        )
+        with use_remote_command(command), command_settings(self.agent):
+            return await self._run_cloud_chat_command(prompt)
+
     async def _run_cloud_chat_command(self, content: str) -> str:
         with use_request_origin("web"):
             while self._agent_worker is not None and self._agent_worker.is_running:
@@ -2714,6 +2571,58 @@ class AeroApp(App):
             if worker is not None:
                 await worker.wait()
             return self._last_reply_text or "指令已处理。"
+
+    async def _host_current_chat(self, text: str) -> None:
+        from aero.agent.session import SessionMeta
+        from aero.cli.chat_host import HostLaunchError, host_chat, parse_host_command
+
+        try:
+            name = parse_host_command(text)
+        except ValueError as exc:
+            self.notify(str(exc), timeout=8)
+            return
+        if (
+            self.agent is None
+            or self._agent_worker
+            and self._agent_worker.is_running
+            or any(worker.is_running for worker in self._subagent_workers.values())
+        ):
+            self.notify("请先完成或取消当前任务，再切换后台托管。", severity="warning")
+            return
+        try:
+            if self._get_experiment_mgr().active() is not None:
+                raise ValueError("请先退出当前实验，再托管普通聊天会话。")
+            sid = self._cloud_chat_session_id()
+            self._auto_save_session()
+            manager = self._get_session_mgr()
+            if manager.load(sid) is None:
+                manager.save(
+                    sid,
+                    self.agent.messages,
+                    SessionMeta(
+                        id=sid,
+                        name=self._cloud_chat_title(),
+                        project_dir=str(self._project_dir),
+                        mode=self.config.mode,
+                        model=self.config.llm.model,
+                        provider=self.config.llm.provider,
+                    ),
+                )
+            result = await host_chat(self._chat_presence, name, self._project_dir, sid)
+        except HostLaunchError as exc:
+            self._chat_presence = None
+            self._session_saved_on_exit = True
+            self.exit(message=str(exc))
+            return
+        except Exception as exc:
+            self.notify(str(exc), severity="error", timeout=15)
+            return
+        self._chat_presence = None
+        self._session_saved_on_exit = True
+        self.exit(
+            message=f"已托管到后台：{name}（PID {result['pid']}）。"
+            f"关闭终端不影响运行。日志：{result['log']}"
+        )
 
     def _save_session_on_exit(self) -> None:
         if self._session_saved_on_exit:
@@ -2728,7 +2637,7 @@ class AeroApp(App):
         chat = self.query_one("#chat-area", VerticalScroll)
         lines = self._chat_log or self._collect_log_lines(chat)
         text = "\n".join(lines)
-        save_dir = Path.home() / ".aero"
+        save_dir = user_home()
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / "chat.log"
         save_path.write_text(text)
@@ -2744,10 +2653,14 @@ class AeroApp(App):
                 content = str(child._renderable)
             if content:
                 content = (
-                    content.replace("[dim bold]", "").replace("[/dim bold]", "")
-                    .replace("[bold cyan]", "").replace("[/bold cyan]", "")
-                    .replace("[dim]", "").replace("[/dim]", "")
-                    .replace("[error]", "").replace("[/error]", "")
+                    content.replace("[dim bold]", "")
+                    .replace("[/dim bold]", "")
+                    .replace("[bold cyan]", "")
+                    .replace("[/bold cyan]", "")
+                    .replace("[dim]", "")
+                    .replace("[/dim]", "")
+                    .replace("[error]", "")
+                    .replace("[/error]", "")
                 )
                 lines.append(content)
             if child.children:
@@ -2755,13 +2668,26 @@ class AeroApp(App):
         return lines
 
     async def _process(self, text: str, *, from_cloud: bool = False) -> None:
+        if getattr(self, "_updating", False):
+            self.notify("客户端正在更新，请稍候。")
+            return
+        if text == "/update":
+            if from_cloud:
+                self.notify("请在本机执行 /update 或 aero update。")
+                return
+            from aero.cli.update_ui import offer_update
+
+            await offer_update(self, explicit=True)
+            return
         if (
             self._chat_presence is not None
             and self._session_id
             and self._chat_presence._blocked_session_id == self._session_id
             and not text.startswith(("/new", "/session", "/clear", "/quit"))
         ):
-            self.notify("此会话已下线或已在其他设备接管，请开启新会话。", severity="warning", timeout=5)
+            self.notify(
+                "此会话已下线或已在其他设备接管，请开启新会话。", severity="warning", timeout=5
+            )
             return
         chat = self.query_one("#chat-area", VerticalScroll)
         debug_log(
@@ -2773,6 +2699,10 @@ class AeroApp(App):
         if text == "/quit":
             self._save_session_on_exit()
             self._do_cleanup_exit()
+            return
+
+        if text.partition(" ")[0] in {"/host", "/agent"}:
+            await self._host_current_chat(text)
             return
 
         if text == "/clear":
@@ -2819,9 +2749,7 @@ class AeroApp(App):
             self.query_one("#user-input", TextArea).focus()
             return
 
-        if not BYOK_UI_ENABLED and text.partition(" ")[0] in {
-            "/provider", "/ai-mode", "/vision"
-        }:
+        if not BYOK_UI_ENABLED and text.partition(" ")[0] in {"/provider", "/ai-mode", "/vision"}:
             self._set_footer_status("当前使用官方账号；视觉能力由官方接口自动提供。")
             self.query_one("#user-input", TextArea).focus()
             return
@@ -2980,28 +2908,12 @@ class AeroApp(App):
             choice = text.split(maxsplit=1)[1].strip().lower() if " " in text else ""
             if not choice:
                 enabled = bool(self._chat_presence and self._chat_presence.context_sync_enabled)
-                self.notify(f"当前智能体自动同步上下文：{'开启' if enabled else '关闭'}。用 /context-sync on|off 修改。", timeout=6)
-            elif choice not in {"on", "off"}:
-                self.notify("用法：/context-sync on|off", timeout=5)
-            elif self._chat_presence is None or not self._chat_presence.agent_id:
-                self.notify("请先发送一条消息，使当前聊天在云端登记。", severity="warning", timeout=5)
+                self.notify(
+                    f"当前上下文同步：{'开启' if enabled else '尚未连接'}（官方账户强制同步）。",
+                    timeout=6,
+                )
             else:
-                try:
-                    await self._chat_presence.set_context_sync(choice == "on")
-                    self.notify(f"当前智能体自动同步上下文已{'开启' if choice == 'on' else '关闭'}。", timeout=5)
-                except Exception as exc:
-                    response = getattr(exc, "response", None)
-                    detail = None
-                    if response is not None:
-                        try:
-                            detail = response.json().get("detail")
-                        except (ValueError, AttributeError):
-                            pass
-                    self.notify(
-                        f"修改同步设置失败：{detail or type(exc).__name__}",
-                        severity="error",
-                        timeout=5,
-                    )
+                self.notify("官方账户强制同步上下文，不支持 /context-sync on|off。", timeout=6)
             return
 
         if text == "/instructions" or text.startswith("/instructions "):
@@ -3077,9 +2989,7 @@ class AeroApp(App):
         self._maybe_scroll_to_end()
 
         if self.agent is None:
-            error_text = t("app.agent_error", self.config.language).format(
-                error=self.last_error
-            )
+            error_text = t("app.agent_error", self.config.language).format(error=self.last_error)
             await self._agent_msg.update(f"**{error_text}**")
             self.query_one("#user-input", TextArea).focus()
             return
@@ -3124,9 +3034,7 @@ class AeroApp(App):
         self._chat_log.append(f"Aero:\n{message}")
         self._set_footer_status(message)
 
-    async def _handle_local_cds_credentials(
-        self, text: str, url: str, key: str
-    ) -> None:
+    async def _handle_local_cds_credentials(self, text: str, url: str, key: str) -> None:
         """Store the official CDS two-line credential without sending it to the model."""
         self._enter_chat_mode()
         masked_text = _mask_cds_credentials(text)
@@ -3142,8 +3050,7 @@ class AeroApp(App):
         self._record_local_credential_saved("cds")
 
         message = (
-            "CDS API 凭证已在本地保存，未发送给模型。"
-            "现在可以重新发送刚才的 ERA5 下载与绘图任务。"
+            "CDS API 凭证已在本地保存，未发送给模型。现在可以重新发送刚才的 ERA5 下载与绘图任务。"
         )
         agent_msg = await self._mount_agent_message()
         await agent_msg.update(message)
@@ -3182,9 +3089,7 @@ class AeroApp(App):
         key = _extract_llm_api_key(text)
         if not key:
             return False
-        await self._handle_local_cds_credentials(
-            text, self.config.credentials.cds.url, key
-        )
+        await self._handle_local_cds_credentials(text, self.config.credentials.cds.url, key)
         return True
 
     async def _handle_local_vision_key_setup(self, text: str, api_key: str) -> None:
@@ -3197,16 +3102,11 @@ class AeroApp(App):
         self.config.vision.mode = "separate"
         self.config.vision.provider = "bailian"
         self.config.vision.api_key = normalized_key
-        save_vision_api_key(
-            normalized_key, self.config.vision.base_url, mode="separate"
-        )
+        save_vision_api_key(normalized_key, self.config.vision.base_url, mode="separate")
         if self.persist_config:
             _save_config(self.config)
 
-        message = (
-            "百炼 API Key 已在本地更新。主聊天模型没有切换；"
-            "联网搜索会自动使用该凭证。"
-        )
+        message = "百炼 API Key 已在本地更新。主聊天模型没有切换；联网搜索会自动使用该凭证。"
         agent_msg = await self._mount_agent_message()
         await agent_msg.update(message)
         self._chat_log.append(f"Aero:\n{message}")
@@ -3447,11 +3347,14 @@ class AeroApp(App):
             self._set_footer_status(_strip_markup(t("error.max_tool_rounds_range", lang)))
             return
         if self.agent is None:
-            self._set_footer_status(_strip_markup(t("error.agent_init", lang).format(error=self.last_error)))
+            self._set_footer_status(
+                _strip_markup(t("error.agent_init", lang).format(error=self.last_error))
+            )
             return
         self.agent.max_tool_rounds = value
         self.config.max_tool_rounds = value
         from aero.toolbox.builtin_tools import set_max_tool_rounds
+
         set_max_tool_rounds(value)
         if getattr(self, "persist_config", False):
             _save_config(self.config)
@@ -3520,6 +3423,8 @@ class AeroApp(App):
             ("/clear", t("cmd.clear", self.config.language)),
             ("/copy", t("cmd.copy", self.config.language)),
             ("/help", t("cmd.help", self.config.language)),
+            ("/host ", "把当前对话转为后台常驻，例如 /host my_agent"),
+            ("/agent background ", "把当前对话转为后台常驻，例如 /agent background my_agent"),
             ("/language", t("cmd.language", self.config.language)),
             ("/model", t("cmd.model", self.config.language)),
             ("/new", t("cmd.new", self.config.language)),
@@ -3527,6 +3432,7 @@ class AeroApp(App):
             ("/provider", t("cmd.provider", self.config.language)),
             ("/ai-mode official|byok", "整体切换官方 / BYOK 推理模式"),
             ("/quit", t("cmd.quit", self.config.language)),
+            ("/update", "检查客户端更新，经确认后原地升级"),
             ("/revoke", t("cmd.revoke", self.config.language)),
             ("/set", t("cmd.set", self.config.language)),
             ("/theme", t("cmd.theme", self.config.language)),
@@ -3556,7 +3462,8 @@ class AeroApp(App):
             self._commands_list.sort(key=lambda command: command[0])
         if not BYOK_UI_ENABLED:
             self._commands_list = [
-                item for item in self._commands_list
+                item
+                for item in self._commands_list
                 if item[0].split()[0] not in {"/provider", "/ai-mode", "/vision"}
             ]
         self._secondary_commands_list = [
@@ -3781,9 +3688,15 @@ class AeroApp(App):
         secrets = load_user_secrets()
         remembered = str(secrets.get("last_byok_provider") or "").strip()
         candidates = [remembered, self.config.llm.provider]
-        candidates.extend(provider for provider, profile in self.config.llm.providers.items() if profile.api_key)
+        candidates.extend(
+            provider for provider, profile in self.config.llm.providers.items() if profile.api_key
+        )
         provider = next(
-            (item for item in candidates if item and item != "official" and self.config.llm.provider_config(item).api_key),
+            (
+                item
+                for item in candidates
+                if item and item != "official" and self.config.llm.provider_config(item).api_key
+            ),
             "",
         )
         if not provider:
@@ -3830,9 +3743,7 @@ class AeroApp(App):
         self._set_ai_mode("official")
         await self._refresh_official_credits()
         self._refresh_model_info()
-        self._set_footer_status(
-            f"已登录 {account.email}，当前使用 Aerolytica 官方模型。"
-        )
+        self._set_footer_status(f"已登录 {account.email}，当前使用 Aerolytica 官方模型。")
 
     async def _handle_official_logout(self) -> None:
         from aero.core.official_account import OfficialAccountSession
@@ -3854,10 +3765,7 @@ class AeroApp(App):
             else "已清除本地登录；服务端会话撤销状态未确认。"
         )
         if self.config.llm.provider == "official":
-            message += (
-                " 当前仍选择官方模型，请重新登录，"
-                "即可继续使用。"
-            )
+            message += " 当前仍选择官方模型，请重新登录，即可继续使用。"
         self._official_available_credits = None
         self._refresh_model_info()
         self._set_footer_status(message)
@@ -3916,9 +3824,7 @@ class AeroApp(App):
             return
         finally:
             await session.close()
-        self._official_available_credits = _format_credit_balance(
-            credits.get("available_credits")
-        )
+        self._official_available_credits = _format_credit_balance(credits.get("available_credits"))
         self._refresh_model_info()
 
     def _handle_variants_command(self, text: str) -> None:
@@ -4034,10 +3940,11 @@ class AeroApp(App):
                 ),
                 self.config.vision.model,
                 self.config.language,
-                hint="视觉模型来自当前账户的官方视觉模型池。",
+                hint="可手动选择全部官方视觉模型；自动模式使用账户设置的候选模型池。",
             ),
-            callback=lambda selected: self._set_official_vision_model(selected)
-            if selected is not None else None,
+            callback=lambda selected: (
+                self._set_official_vision_model(selected) if selected is not None else None
+            ),
         )
 
     def _set_official_vision_model(self, value: str) -> None:
@@ -4048,7 +3955,7 @@ class AeroApp(App):
             cached = self._official_models().preferences
             allowed = {item.id for item in cached.vision_models} if cached else set()
             if value not in allowed:
-                self._set_footer_status("该模型不在当前官方视觉模型池中。")
+                self._set_footer_status("该模型当前不可用或不支持视觉，请刷新模型列表。")
                 return
         self._official_vision_override = "" if value == "default" else value
         self.config.vision.mode = "official"
@@ -4056,7 +3963,10 @@ class AeroApp(App):
         self.config.vision.model = value
         self.config.vision.api_key = ""
         save_vision_profile(
-            "official", provider="official", model=value, base_url=relay_llm_url(),
+            "official",
+            provider="official",
+            model=value,
+            base_url=relay_llm_url(),
         )
         self._refresh_model_info()
         self._set_footer_status(f"官方视觉模型已切换为 {value}。")
@@ -4115,16 +4025,13 @@ class AeroApp(App):
         if self.persist_config:
             _save_config(self.config)
         self._refresh_model_info()
-        self._set_footer_status(
-            t("app.vision_switched", lang).format(model=model)
-        )
+        self._set_footer_status(t("app.vision_switched", lang).format(model=model))
 
     async def _handle_websearch_command(self, text: str) -> None:
         """Toggle the explicitly configured external search service."""
         if self.config.llm.provider == "official":
             self._set_footer_status(
-                "Aerolytica 官方渠道使用 Relay 托管的 MCP 联网搜索，"
-                "无需配置客户端搜索 API Key。"
+                "Aerolytica 官方渠道使用 Relay 托管的 MCP 联网搜索，无需配置客户端搜索 API Key。"
             )
             return
         from aero.data.web_search import (
@@ -4346,7 +4253,8 @@ class AeroApp(App):
         )
         detail = (
             f"当前：**已开启**\n\n外部搜索服务：`{provider}`\n"
-            f"API Key：{'已配置' if self.config.web_search.api_key else '未单独配置（可能复用视觉 Key）'}\n"
+            "API Key："
+            f"{'已配置' if self.config.web_search.api_key else '未单独配置（可能复用视觉 Key）'}\n"
             f"连通性测试：{'已通过' if verified else '未通过或未测试'}"
         )
         self._show_checkpoint_message("### 网页搜索状态\n\n" + detail, force_scroll=True)
@@ -4406,12 +4314,14 @@ class AeroApp(App):
             self.agent.reset_system_prompt(lang)
         self._refresh_mode_ui()
         from aero.data.modes import MODE_LABELS
+
         self._set_footer_status(
             t("app.mode_switched", lang).format(mode=MODE_LABELS.get(mode, mode))
         )
 
     def action_cycle_mode(self) -> None:
         from aero.data.modes import MODE_ORDER
+
         current = self.config.mode
         try:
             idx = MODE_ORDER.index(current)
@@ -4436,6 +4346,7 @@ class AeroApp(App):
     def _get_session_mgr(self):
         if self._session_mgr is None:
             from aero.agent.session import SessionManager
+
             self._session_mgr = SessionManager()
         return self._session_mgr
 
@@ -4535,10 +4446,7 @@ class AeroApp(App):
             if action == "save":
                 version = manager.save(argument)
                 if version.get("created"):
-                    message = (
-                        "### 论文版本已保存\n\n"
-                        f"`{version['id']}`  **{version['title']}**"
-                    )
+                    message = f"### 论文版本已保存\n\n`{version['id']}`  **{version['title']}**"
                 else:
                     message = (
                         "论文正文没有变化，未重复创建版本。\n\n"
@@ -4566,16 +4474,18 @@ class AeroApp(App):
                         f"- `{item['id']}`  **{item['title']}** · "
                         f"{created.strftime('%Y-%m-%d %H:%M:%S')}{safety}"
                     )
-                lines.extend(["", "使用 `/paper diff 版本ID` 查看变化，或 `/paper restore 版本ID` 恢复正文。"])
+                lines.extend(
+                    [
+                        "",
+                        "使用 `/paper diff 版本ID` 查看变化，或 `/paper restore 版本ID` 恢复正文。",
+                    ]
+                )
                 self._show_checkpoint_message("\n".join(lines), force_scroll=True)
                 return
             if action == "diff":
                 difference = manager.diff(argument or None)
                 if not difference.changed:
-                    message = (
-                        "论文正文与所选版本一致。\n\n"
-                        f"版本：`{difference.version_id}`"
-                    )
+                    message = f"论文正文与所选版本一致。\n\n版本：`{difference.version_id}`"
                 else:
                     diff_text = difference.unified_diff
                     if len(diff_text) > 24000:
@@ -4601,7 +4511,8 @@ class AeroApp(App):
                 message = (
                     f"将把 `{difference.document}` 恢复到：\n\n"
                     f"`{target['id']}`  **{target['title']}**\n\n"
-                    f"当前正文将变化：新增 {difference.added_lines} 行，删除 {difference.removed_lines} 行。\n\n"
+                    f"当前正文将变化：新增 {difference.added_lines} 行，"
+                    f"删除 {difference.removed_lines} 行。\n\n"
                     "只会覆盖这份 Markdown 正文，其他文件不会改变。"
                     "当前正文若含未保存变化，会先自动保存为恢复保护版本。"
                 )
@@ -4626,9 +4537,7 @@ class AeroApp(App):
                 restored = result["restored"]
                 protection = result.get("protection_version")
                 protection_text = (
-                    f"\n\n恢复前内容已保存为保护版本：`{protection['id']}`"
-                    if protection
-                    else ""
+                    f"\n\n恢复前内容已保存为保护版本：`{protection['id']}`" if protection else ""
                 )
                 self._show_checkpoint_message(
                     "### 论文版本已恢复\n\n"
@@ -4664,9 +4573,7 @@ class AeroApp(App):
                 except PaperExportError as exc:
                     if not exc.missing_tools:
                         raise
-                    tools_label = "、".join(
-                        tool.title() for tool in exc.missing_tools
-                    )
+                    tools_label = "、".join(tool.title() for tool in exc.missing_tools)
                     self.screen.add_class("confirming")
                     try:
                         choice = await self.push_screen_wait(
@@ -4687,9 +4594,7 @@ class AeroApp(App):
                         "allow",
                         "always",
                     }:
-                        self._show_checkpoint_message(
-                            "已取消 LaTeX 导出。", force_scroll=True
-                        )
+                        self._show_checkpoint_message("已取消 LaTeX 导出。", force_scroll=True)
                         return
                     from aero.toolbox.tools.runtime import ensure_runtime_tools
 
@@ -4744,14 +4649,10 @@ class AeroApp(App):
             checkpoint = self._create_checkpoint(name=name, kind="manual")
             exact = sum(1 for item in checkpoint["files"] if item["restore"] == "exact")
             references = len(checkpoint["files"]) - exact
-            capability = (
-                "支持文件恢复" if checkpoint["exact_restore"] else "仅保存数据清单"
-            )
+            capability = "支持文件恢复" if checkpoint["exact_restore"] else "仅保存数据清单"
             active_experiment = self._get_experiment_mgr().active()
             owner = (
-                f"实验：{active_experiment['name']}"
-                if active_experiment is not None
-                else "主流程"
+                f"实验：{active_experiment['name']}" if active_experiment is not None else "主流程"
             )
             message = (
                 "### 检查点已创建\n\n"
@@ -4782,6 +4683,12 @@ class AeroApp(App):
             )
             client = LLMClient(llm_cfg)
             prompt = _checkpoint_title_prompt(messages, self.config.language)
+            client.relay_purpose = "title"
+            from aero.application.turn_context import current_turn_id
+
+            client.relay_turn_id = current_turn_id() or getattr(
+                getattr(self.agent, "llm", None), "relay_turn_id", ""
+            )
             title = await client.chat([Message(role="user", content=prompt)])
             return _normalize_checkpoint_title(title) or fallback
         except Exception as exc:
@@ -4802,28 +4709,21 @@ class AeroApp(App):
         all_checkpoints = self._get_checkpoint_mgr().list()
         active_experiment = self._get_experiment_mgr().active()
         scope_name = (
-            f"实验“{active_experiment['name']}”"
-            if active_experiment is not None
-            else "主流程"
+            f"实验“{active_experiment['name']}”" if active_experiment is not None else "主流程"
         )
         safety = [item for item in all_checkpoints if item.get("kind") == "pre-restore"]
-        checkpoints = all_checkpoints if argument == "all" else [
-            item for item in all_checkpoints if item.get("kind") != "pre-restore"
-        ]
+        checkpoints = (
+            all_checkpoints
+            if argument == "all"
+            else [item for item in all_checkpoints if item.get("kind") != "pre-restore"]
+        )
         if not checkpoints:
-            message = (
-                f"{scope_name}还没有用户创建的检查点。"
-                "使用 `/checkpoint 名称` 创建一个。"
-            )
+            message = f"{scope_name}还没有用户创建的检查点。使用 `/checkpoint 名称` 创建一个。"
             if safety:
                 message += f"\n\n另有 {len(safety)} 条恢复保护记录，可用 `/checkpoints all` 查看。"
             self._show_checkpoint_message(message)
             return
-        title = (
-            f"{scope_name}全部检查点"
-            if argument == "all"
-            else f"{scope_name}检查点"
-        )
+        title = f"{scope_name}全部检查点" if argument == "all" else f"{scope_name}检查点"
         lines = [f"### {title}", ""]
         for item in checkpoints:
             lines.append(_format_checkpoint_list_entry(item))
@@ -4847,9 +4747,7 @@ class AeroApp(App):
             self._show_checkpoint_message("当前没有可清理的检查点。")
             return
 
-        safety_count = sum(
-            1 for item in checkpoints if item.get("kind") == "pre-restore"
-        )
+        safety_count = sum(1 for item in checkpoints if item.get("kind") == "pre-restore")
         manual_count = len(checkpoints) - safety_count
         confirmation_message = (
             "清理全部检查点后：\n\n"
@@ -4942,8 +4840,7 @@ class AeroApp(App):
         new_name = parts[3].strip() if len(parts) > 3 else ""
         if not checkpoint_id or not new_name:
             self._show_checkpoint_message(
-                "用法：`/checkpoint rename 检查点ID 新名称`。"
-                "先用 `/checkpoints all` 查看列表。"
+                "用法：`/checkpoint rename 检查点ID 新名称`。先用 `/checkpoints all` 查看列表。"
             )
             return
         try:
@@ -5029,11 +4926,7 @@ class AeroApp(App):
             target = parts[2].strip() if len(parts) > 2 else ""
             await self._delete_experiment(target)
             return
-        name = (
-            parts[2].strip()
-            if action == "new" and len(parts) > 2
-            else " ".join(parts[1:])
-        )
+        name = parts[2].strip() if action == "new" and len(parts) > 2 else " ".join(parts[1:])
         if not name:
             self._show_checkpoint_message("请输入实验名称，例如：`/experiment new 臭氧敏感性`。")
             return
@@ -5060,10 +4953,7 @@ class AeroApp(App):
         if experiment is None:
             self._show_checkpoint_message("当前没有正在进行的实验。")
             return
-        if (
-            self._experiment_finish_worker is not None
-            and self._experiment_finish_worker.is_running
-        ):
+        if self._experiment_finish_worker is not None and self._experiment_finish_worker.is_running:
             self._show_checkpoint_message(
                 f"正在总结实验 **{experiment['name']}**，请稍候。",
                 force_scroll=True,
@@ -5101,9 +4991,7 @@ class AeroApp(App):
             from aero.checkpoints import CheckpointManager
 
             checkpoint_count = len(
-                CheckpointManager(
-                    workspace, experiment_id=experiment["id"]
-                ).list()
+                CheckpointManager(workspace, experiment_id=experiment["id"]).list()
             )
         except Exception as exc:
             self._show_checkpoint_message(f"无法读取实验：{exc}")
@@ -5131,9 +5019,7 @@ class AeroApp(App):
             self._get_experiment_session_mgr().delete(experiment["id"])
             if deleting_active:
                 next_active = manager.active()
-                self._load_experiment_slot(
-                    next_active["id"] if next_active else "__main__"
-                )
+                self._load_experiment_slot(next_active["id"] if next_active else "__main__")
                 if self.agent is not None:
                     self.agent.reset_system_prompt(self.config.language)
             self._show_checkpoint_message(f"已删除实验 **{deleted['name']}**。")
@@ -5150,11 +5036,7 @@ class AeroApp(App):
         from aero.checkpoints import CheckpointManager
 
         checkpoint_count = sum(
-            len(
-                CheckpointManager(
-                    manager.workspace_path(item), experiment_id=item["id"]
-                ).list()
-            )
+            len(CheckpointManager(manager.workspace_path(item), experiment_id=item["id"]).list())
             for item in experiments
         )
         message = (
@@ -5207,17 +5089,13 @@ class AeroApp(App):
             manager = self._get_experiment_mgr()
             current = manager.active()
             source_slot = current["id"] if current else "__main__"
-            self._save_experiment_slot(
-                source_slot, current["name"] if current else "主项目"
-            )
+            self._save_experiment_slot(source_slot, current["name"] if current else "主项目")
             base_messages = copy.deepcopy(self.agent.messages) if self.agent is not None else []
             experiment = manager.create(
                 name,
                 base_checkpoint=self._get_checkpoint_mgr().current_checkpoint_id(),
             )
-            self._save_experiment_slot(
-                experiment["id"], experiment["name"], messages=base_messages
-            )
+            self._save_experiment_slot(experiment["id"], experiment["name"], messages=base_messages)
             if self.agent is not None:
                 self.agent.reset_system_prompt(self.config.language)
             workspace = manager.workspace_path(experiment).relative_to(self._project_dir)
@@ -5243,12 +5121,8 @@ class AeroApp(App):
         for item in experiments:
             marker = " **当前**" if active and item["id"] == active["id"] else ""
             status = "已完成" if item.get("status") == "completed" else "进行中"
-            timestamp = datetime.fromtimestamp(item["updated_at"]).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-            lines.append(
-                f"- `{item['id']}`  **{item['name']}** · {status} · {timestamp}{marker}"
-            )
+            timestamp = datetime.fromtimestamp(item["updated_at"]).strftime("%Y-%m-%d %H:%M")
+            lines.append(f"- `{item['id']}`  **{item['name']}** · {status} · {timestamp}{marker}")
         lines.extend(
             [
                 "",
@@ -5263,9 +5137,7 @@ class AeroApp(App):
             manager = self._get_experiment_mgr()
             current = manager.active()
             source_slot = current["id"] if current else "__main__"
-            self._save_experiment_slot(
-                source_slot, current["name"] if current else "主项目"
-            )
+            self._save_experiment_slot(source_slot, current["name"] if current else "主项目")
             if target.lower() in {"main", "主项目"}:
                 manager.leave()
                 selected = None
@@ -5291,13 +5163,9 @@ class AeroApp(App):
                 )
                 return
             self._save_experiment_slot(experiment["id"], experiment["name"])
-            messages = (
-                copy.deepcopy(self.agent.messages) if self.agent is not None else []
-            )
+            messages = copy.deepcopy(self.agent.messages) if self.agent is not None else []
             artifacts = manager.artifacts(experiment)
-            report = await self._generate_experiment_report(
-                experiment, messages, artifacts
-            )
+            report = await self._generate_experiment_report(experiment, messages, artifacts)
             completed = manager.complete(experiment["id"], report)
             finish_checkpoint = None
             finish_checkpoint_error = ""
@@ -5341,9 +5209,7 @@ class AeroApp(App):
             self._show_checkpoint_message(completion_message, force_scroll=True)
         except Exception as exc:
             debug_log("tui.experiment_finish_failed", error=repr(exc))
-            self._show_checkpoint_message(
-                f"无法完成实验：{exc}", force_scroll=True
-            )
+            self._show_checkpoint_message(f"无法完成实验：{exc}", force_scroll=True)
         finally:
             self._experiment_finish_worker = None
             self._refresh_model_info()
@@ -5472,9 +5338,7 @@ class AeroApp(App):
         checkpoint_session_id = self._session_id
         if active_experiment is not None:
             checkpoint_session_id = active_experiment["id"]
-            session_snapshot = self._get_experiment_session_mgr().snapshot(
-                active_experiment["id"]
-            )
+            session_snapshot = self._get_experiment_session_mgr().snapshot(active_experiment["id"])
         elif self._session_id:
             session_snapshot = self._get_session_mgr().snapshot(self._session_id)
         model = {
@@ -5505,10 +5369,14 @@ class AeroApp(App):
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
-            self._official_vision_override = (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
+            self._official_vision_override = (
+                (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
+            )
             self.config.llm.model = self._official_text_override or "default"
-            if (self._official_vision_override
-                    and self.config.vision.mode in {"unconfigured", "official"}):
+            if self._official_vision_override and self.config.vision.mode in {
+                "unconfigured",
+                "official",
+            }:
                 self.config.vision.mode = "official"
                 self.config.vision.provider = "official"
                 self.config.vision.model = self._official_vision_override
@@ -5522,9 +5390,7 @@ class AeroApp(App):
         self._mount_chat_title()
         self._render_loaded_session_messages(messages, meta.transcript)
 
-    def _show_checkpoint_message(
-        self, message: str, *, force_scroll: bool = False
-    ) -> None:
+    def _show_checkpoint_message(self, message: str, *, force_scroll: bool = False) -> None:
         if force_scroll:
             self._user_scrolled_up = False
         self._enter_chat_mode()
@@ -5602,6 +5468,7 @@ class AeroApp(App):
         import uuid
 
         from aero.agent.session import SessionMeta
+
         sid = self._session_id or uuid.uuid4().hex[:12]
         existing = mgr.load(sid)
         self._session_id = sid
@@ -5636,9 +5503,7 @@ class AeroApp(App):
         mgr.save(sid, self.agent.messages, meta)
         if self._pending_session_title and meta.title_source == "manual":
             self._pending_session_title = ""
-        if meta.title_source == "pending" and has_successful_first_exchange(
-            self.agent.messages
-        ):
+        if meta.title_source == "pending" and has_successful_first_exchange(self.agent.messages):
             self._schedule_session_title_generation(
                 sid,
                 relay_turn_id=self.agent.llm.relay_turn_id,
@@ -5652,13 +5517,12 @@ class AeroApp(App):
     ) -> None:
         if session_id in self._session_title_workers:
             return
+        from functools import partial
+
         self._session_title_workers.add(session_id)
         try:
             self.run_worker(
-                self._generate_session_title(
-                    session_id,
-                    relay_turn_id=relay_turn_id,
-                ),
+                partial(self._generate_session_title, session_id, relay_turn_id=relay_turn_id),
                 exclusive=False,
                 group="session-title",
             )
@@ -5692,11 +5556,14 @@ class AeroApp(App):
                 )
                 client = LLMClient(llm_cfg)
                 title_source_id = relay_turn_id or secrets.token_hex(16)
-                client.relay_turn_id = f"session-title:{title_source_id}"[:64]
+                client.relay_turn_id = title_source_id
+                client.relay_purpose = "title"
                 prompt = _session_title_prompt(messages, self.config.language)
                 title = await client.chat([Message(role="user", content=prompt)])
             except Exception as e:
-                debug_log("tui.session_title_generation_failed", session_id=session_id, error=str(e))
+                debug_log(
+                    "tui.session_title_generation_failed", session_id=session_id, error=str(e)
+                )
                 return
             finally:
                 if client is not None:
@@ -5815,10 +5682,14 @@ class AeroApp(App):
         self.agent.tracker = TokenTracker.from_dict(meta.tracker)
         if self.config.llm.provider == "official":
             self._official_text_override = meta.official_text_model or ""
-            self._official_vision_override = (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
+            self._official_vision_override = (
+                (meta.official_vision_model or "") if BYOK_UI_ENABLED else ""
+            )
             self.config.llm.model = self._official_text_override or "default"
-            if (self._official_vision_override
-                    and self.config.vision.mode in {"unconfigured", "official"}):
+            if self._official_vision_override and self.config.vision.mode in {
+                "unconfigured",
+                "official",
+            }:
                 self.config.vision.mode = "official"
                 self.config.vision.provider = "official"
                 self.config.vision.model = self._official_vision_override
@@ -5839,9 +5710,7 @@ class AeroApp(App):
         self._image_attachments.clear()
         self._refresh_model_info()
         self._refresh_mode_ui()
-        self._set_footer_status(
-            t("app.session_loaded", lang).format(name=meta.name, id=session_id)
-        )
+        self._set_footer_status(t("app.session_loaded", lang).format(name=meta.name, id=session_id))
         self.query_one("#user-input", TextArea).focus()
 
     def _render_loaded_session_messages(
@@ -5876,7 +5745,10 @@ class AeroApp(App):
 
             if skip_next_ack and msg.role == "assistant":
                 stripped = msg.content.strip()
-                if stripped in ("OK, I understand the context above.", "OK, I understand the context above。"):
+                if stripped in (
+                    "OK, I understand the context above.",
+                    "OK, I understand the context above。",
+                ):
                     skip_next_ack = False
                     continue
             skip_next_ack = False
@@ -6042,9 +5914,7 @@ class AeroApp(App):
         if not task.active:
             return {
                 "status": "not_running",
-                "message": (
-                    f"后台任务 #{task.id} 当前状态为 {task.status}，无需取消。"
-                ),
+                "message": (f"后台任务 #{task.id} 当前状态为 {task.status}，无需取消。"),
                 "task": self._subagents.snapshot(task.id)["tasks"][0],
             }
         self._subagents.cancel(task.id)
@@ -6158,9 +6028,7 @@ class AeroApp(App):
                 return
             lines = []
             for task in tasks:
-                lines.append(
-                    f"#{task.id} {task.status} · {task.title} · {task.latest_status}"
-                )
+                lines.append(f"#{task.id} {task.status} · {task.title} · {task.latest_status}")
             chat.mount(Static("\n".join(lines), classes="divider"))
             return
 
@@ -6187,7 +6055,9 @@ class AeroApp(App):
         if action in {"allow", "deny"}:
             future = getattr(task.agent, "confirm_future", None)
             if future is None or future.done():
-                chat.mount(Static(f"[dim]后台任务 #{task_id} 当前不需要确认。[/dim]", classes="divider"))
+                chat.mount(
+                    Static(f"[dim]后台任务 #{task_id} 当前不需要确认。[/dim]", classes="divider")
+                )
                 return
             future.set_result("allow" if action == "allow" else "deny")
             task.status = "running" if action == "allow" else "cancelled"
@@ -6196,25 +6066,31 @@ class AeroApp(App):
             chat.mount(Static(f"[dim]已处理后台任务 #{task_id}。[/dim]", classes="divider"))
             return
 
-        chat.mount(Static("[dim]用法：/subagent list|cancel|allow|deny <id>[/dim]", classes="divider"))
+        chat.mount(
+            Static("[dim]用法：/subagent list|cancel|allow|deny <id>[/dim]", classes="divider")
+        )
 
     async def _handle_compact_command(self, text: str) -> None:
         lang = self.config.language
         chat = self.query_one("#chat-area", VerticalScroll)
         if self.agent is None or len(self.agent.messages) <= 2:
-            chat.mount(Static(
-                f"[dim]{t('app.compact_nothing', lang)}[/dim]",
-                classes="divider",
-            ))
+            chat.mount(
+                Static(
+                    f"[dim]{t('app.compact_nothing', lang)}[/dim]",
+                    classes="divider",
+                )
+            )
             return
 
         messages = self.agent.messages
         system_msg = messages[0]
         if len(messages) <= 3:
-            chat.mount(Static(
-                f"[dim]{t('app.compact_short', lang)}[/dim]",
-                classes="divider",
-            ))
+            chat.mount(
+                Static(
+                    f"[dim]{t('app.compact_short', lang)}[/dim]",
+                    classes="divider",
+                )
+            )
             return
 
         before_tokens = _estimate_context_tokens(messages)
@@ -6222,6 +6098,7 @@ class AeroApp(App):
         before_context = self._export_cloud_chat_context()
 
         from aero.application.context_compaction import summary_prompt_for
+
         summary_prompt = summary_prompt_for(messages)
 
         loading = Static("", classes="divider")
@@ -6232,7 +6109,8 @@ class AeroApp(App):
             frame = 0
             while True:
                 loading.update(
-                    f"[#8bdcff]{_activity_indicator(frame)} {t('app.compact_running', lang)}[/#8bdcff]"
+                    f"[#8bdcff]{_activity_indicator(frame)} "
+                    f"{t('app.compact_running', lang)}[/#8bdcff]"
                 )
                 self._scroll_chat_to_end()
                 frame += 1
@@ -6247,6 +6125,7 @@ class AeroApp(App):
 
         try:
             from aero.agent.llm_client import LLMClient, LLMConfig
+
             llm_cfg = LLMConfig(
                 provider=self.config.llm.provider,
                 model=self.config.llm.model,
@@ -6254,9 +6133,9 @@ class AeroApp(App):
                 base_url=self.config.llm.base_url,
             )
             client = LLMClient(llm_cfg)
-            summary_lines = await client.chat([
-                Message(role="user", content=summary_prompt)
-            ])
+            client.relay_purpose = "compact"
+            client.relay_turn_id = self.agent.llm.relay_turn_id
+            summary_lines = await client.chat([Message(role="user", content=summary_prompt)])
             await client.close()
         except Exception as e:
             await stop_loading()
@@ -6289,9 +6168,12 @@ class AeroApp(App):
         ratio = (1 - after_tokens / max(before_tokens, 1)) * 100
 
         await stop_loading()
-        loading.update(
-            f"[#8bdcff]{t('app.compact_done', lang).format(before=format_token_count(before_tokens), after=format_token_count(after_tokens), ratio=ratio)}[/#8bdcff]",
+        done_text = t("app.compact_done", lang).format(
+            before=format_token_count(before_tokens),
+            after=format_token_count(after_tokens),
+            ratio=ratio,
         )
+        loading.update(f"[#8bdcff]{done_text}[/#8bdcff]")
         self._mount_compact_summary_block(summary_text)
         self._scroll_chat_to_end()
         self._refresh_model_info()
@@ -6299,7 +6181,6 @@ class AeroApp(App):
 
     async def _handle_instructions_command(self, text: str) -> None:
         from aero.data.instructions import (
-            GLOBAL_INSTRUCTIONS_PATH,
             clear_instructions,
             load_instructions,
         )
@@ -6310,10 +6191,12 @@ class AeroApp(App):
 
         if text.strip() == "/instructions clear":
             clear_instructions(scope="project", project_dir=project_dir)
-            chat.mount(Static(
-                f"[dim]{t('app.instructions_cleared', lang)}[/dim]",
-                classes="divider",
-            ))
+            chat.mount(
+                Static(
+                    f"[dim]{t('app.instructions_cleared', lang)}[/dim]",
+                    classes="divider",
+                )
+            )
             return
 
         instructions = load_instructions(project_dir=project_dir)
@@ -6321,16 +6204,18 @@ class AeroApp(App):
             lines = [
                 f"[dim]{t('app.instructions_empty', lang)}[/dim]\n",
                 "[dim]",
-                t('app.instructions_hint', lang),
+                t("app.instructions_hint", lang),
                 "[/dim]",
             ]
             chat.mount(Static("".join(lines), classes="divider"))
             return
 
-        chat.mount(Static(
-            f"[bold]{t('app.instructions_title', lang)}[/bold]\n\n{instructions}",
-            classes="divider",
-        ))
+        chat.mount(
+            Static(
+                f"[bold]{t('app.instructions_title', lang)}[/bold]\n\n{instructions}",
+                classes="divider",
+            )
+        )
 
     async def _select_official_text_model(self, value: str) -> None:
         from aero.core.official_account import OfficialAccountError
@@ -6381,8 +6266,9 @@ class AeroApp(App):
             )
             _save_config(self.config)
         self._refresh_model_info()
-        self._set_footer_status(t("app.model_switched", lang).format(
-            provider=self.config.llm.provider, model=model))
+        self._set_footer_status(
+            t("app.model_switched", lang).format(provider=self.config.llm.provider, model=model)
+        )
 
     def _set_provider(self, value: str) -> None:
         lang = self.config.language
@@ -6648,12 +6534,17 @@ class AeroApp(App):
 
     @work(exclusive=False)
     async def _run_agent(
-        self, text: str, state: AgentRunState, *, from_cloud: bool = False,
+        self,
+        text: str,
+        state: AgentRunState,
+        *,
+        from_cloud: bool = False,
         local_turn_id: str = "",
     ) -> None:
         chat = self.query_one("#chat-area", VerticalScroll)
         lang = self.config.language
         debug_log("tui.agent_worker_started", text_length=len(text))
+        execution_started = time.monotonic()
         agent_msg = state.agent_msg
 
         # Ensure session_id is assigned before the agent runs, so that any
@@ -6661,6 +6552,7 @@ class AeroApp(App):
         # under the correct plans/<session_id>/ subdirectory.
         if self._session_id is None:
             import uuid
+
             self._session_id = uuid.uuid4().hex[:12]
         set_session_id(self._session_id)
         experiment = self._get_experiment_mgr().active()
@@ -6683,7 +6575,7 @@ class AeroApp(App):
                 fallback = "\n".join(f"    {line}" for line in message.splitlines()) or "    "
                 await agent_msg.update(fallback)
 
-        _THINKING_SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        thinking_spinner = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
         self._thinking_frame = 0
         thinking_active = True
         thought = ""
@@ -6691,15 +6583,13 @@ class AeroApp(App):
         def _tick_thinking() -> None:
             if not thinking_active or state.background_task is not None:
                 return
-            spinner = _THINKING_SPINNER[self._thinking_frame % len(_THINKING_SPINNER)]
+            spinner = thinking_spinner[self._thinking_frame % len(thinking_spinner)]
             self._thinking_frame += 1
             nonlocal thought
             suffix = ""
             if thought:
                 suffix = f"  *{escape(thought)}*"
-            agent_msg.update(
-                f"*{spinner} {t('app.thinking', lang)}{suffix}*"
-            )
+            agent_msg.update(f"*{spinner} {t('app.thinking', lang)}{suffix}*")
             self._maybe_scroll_to_end()
             if thinking_active:
                 self.set_timer(0.15, _tick_thinking)
@@ -6723,7 +6613,10 @@ class AeroApp(App):
                 self._handoff_main_run_to_background()
                 return state.background_task is not None
 
+            from aero.application.turn_context import current_turn_id, use_turn_id
+
             with (
+                use_turn_id(local_turn_id or current_turn_id() or secrets.token_hex(16)),
                 use_request_origin("web" if from_cloud else "client"),
                 use_user_input_provider(self._request_user_input),
                 use_approval_provider(self._request_approval),
@@ -6759,19 +6652,14 @@ class AeroApp(App):
                         ):
                             self._collapse_status(done=True)
                             status_auto_collapsed = True
-                        await safe_update(
-                            _sanitize_user_facing_text(response_text)
-                        )
+                        await safe_update(_sanitize_user_facing_text(response_text))
                         self._maybe_scroll_to_end()
                     elif event.type == "status":
                         state.phase = "tool"
                         credential_scope = _credential_setup_scope(event.content)
                         if credential_scope is not None:
                             self._pending_credential_scope = credential_scope
-                        if (
-                            not vision_setup_requested
-                            and _vision_setup_required(event.content)
-                        ):
+                        if not vision_setup_requested and _vision_setup_required(event.content):
                             vision_setup_requested = True
                             await self._open_vision_setup_for_current_task()
                         maybe_handoff_claimed_background(event.content)
@@ -6796,7 +6684,9 @@ class AeroApp(App):
                                 and not state.background_task.agent.confirm_future.done()
                             ):
                                 state.background_task.agent.confirm_future.set_result(choice)
-                            self._subagents.update(state.background_task.id, "已处理确认", status="running")
+                            self._subagents.update(
+                                state.background_task.id, "已处理确认", status="running"
+                            )
                         else:
                             await self._handle_confirm(event.content)
                     elif event.type == "content_blocked":
@@ -6807,9 +6697,7 @@ class AeroApp(App):
                             response_text = ""
                             continue
                         self._strike_last_user_message()
-                        await safe_update(
-                            f"**内容被拦截**\n\n{event.content}"
-                        )
+                        await safe_update(f"**内容被拦截**\n\n{event.content}")
                         self._maybe_scroll_to_end()
                         response_text = ""
 
@@ -6826,7 +6714,8 @@ class AeroApp(App):
                 if local_turn_id and self._chat_presence is not None:
                     if response_text.strip():
                         self._chat_presence.queue_local_message(
-                            "assistant", _sanitize_user_facing_text(response_text),
+                            "assistant",
+                            _sanitize_user_facing_text(response_text),
                             local_turn_id=local_turn_id,
                         )
                     local_turn_status = "completed"
@@ -6911,7 +6800,11 @@ class AeroApp(App):
 
         finally:
             if local_turn_id and self._chat_presence is not None:
-                self._chat_presence.finish_local_turn(local_turn_id, local_turn_status)
+                self._chat_presence.finish_local_turn(
+                    local_turn_id,
+                    local_turn_status,
+                    execution_ms=max(0, round((time.monotonic() - execution_started) * 1000)),
+                )
             if state.background_task is not None:
                 self._subagent_workers.pop(state.background_task.id, None)
                 self._render_footer_status()
@@ -7000,11 +6893,7 @@ class AeroApp(App):
             return True
 
         insert_at = next(
-            (
-                index
-                for index, line in enumerate(panel.lines)
-                if _is_replaceable_status(line)
-            ),
+            (index for index, line in enumerate(panel.lines) if _is_replaceable_status(line)),
             len(panel.lines),
         )
         panel.lines.insert(insert_at, text)
@@ -7146,7 +7035,8 @@ class AeroApp(App):
             values = await self.push_screen_wait(UserInputScreen(description))
             result = (
                 {"status": "submitted", "values": values}
-                if values is not None else {"status": "canceled"}
+                if values is not None
+                else {"status": "canceled"}
             )
         if result["status"] != "submitted":
             raise asyncio.CancelledError()
@@ -7163,8 +7053,12 @@ class AeroApp(App):
             return result
         handle = secrets.token_urlsafe(24)
         self._secret_handles[handle] = {"scope": result["scope"], "result": result["result"]}
-        return {"status": "submitted", "scope": result["scope"], "secret_handle": handle,
-                "message": "凭据已在当前 Agent 电脑保存；请通过句柄取得保存结果并继续任务。"}
+        return {
+            "status": "submitted",
+            "scope": result["scope"],
+            "secret_handle": handle,
+            "message": "凭据已在当前 Agent 电脑保存；请通过句柄取得保存结果并继续任务。",
+        }
 
     async def _request_secret_input(self, request: SecretInputRequest) -> dict:
         value = await self.push_screen_wait(SecretInputScreen(request))
@@ -7202,7 +7096,9 @@ class AeroApp(App):
             "tui.confirm_setting_future",
             final_choice=choice,
             has_agent=self.agent is not None,
-            has_future=self.agent is not None and self.agent.confirm_future is not None if self.agent else False,
+            has_future=self.agent is not None and self.agent.confirm_future is not None
+            if self.agent
+            else False,
         )
         if has_future:
             self.agent.confirm_future.set_result(choice)
@@ -7421,7 +7317,7 @@ def _preferences_path() -> Path:
     override = os.environ.get("AERO_PREFERENCES_PATH")
     if override:
         return Path(override)
-    return Path.home() / ".aero" / "preferences.yaml"
+    return user_home() / "preferences.yaml"
 
 
 def _load_user_preferences() -> dict:
@@ -7457,6 +7353,88 @@ def _save_user_theme(theme: str) -> None:
     ui["theme"] = theme
     data["ui"] = ui
     _save_user_preferences(data)
+
+
+def persist_first_run_setup(
+    config: AeroConfig, result: dict, *, save_workspace: bool = True
+) -> None:
+    """Persist the same onboarding result for setup and first chat."""
+    primary = result["primary"]
+    config.llm.provider = str(primary["provider"])
+    config.llm.model = str(primary["model"])
+    config.llm.base_url = str(primary["base_url"])
+    config.llm.supports_vision = bool(result["primary_supports_vision"])
+    config.llm.set_active_api_key(str(primary["api_key"]))
+    save_llm_profile(
+        config.llm.provider, str(primary["api_key"]), config.llm.model, config.llm.base_url
+    )
+    vision = result["vision"]
+    config.vision.mode = str(vision["mode"])
+    if config.vision.mode == "separate":
+        config.vision.provider = str(vision["provider"])
+        config.vision.model = str(vision["model"])
+        config.vision.base_url = str(vision["base_url"])
+        config.vision.api_key = str(vision["api_key"])
+        from aero.core.config import save_vision_api_key
+
+        save_vision_api_key(
+            config.vision.api_key,
+            config.vision.base_url,
+            provider=config.vision.provider,
+            model=config.vision.model,
+            mode="separate",
+        )
+    elif config.vision.mode == "reuse_primary":
+        config.vision.provider = config.llm.provider
+        config.vision.model = config.llm.model
+        config.vision.base_url = config.llm.base_url
+        config.vision.api_key = ""
+        save_vision_profile(
+            "reuse_primary",
+            provider=config.vision.provider,
+            model=config.vision.model,
+            base_url=config.vision.base_url,
+        )
+    web_search = result.get("web_search", {})
+    if web_search.get("configured"):
+        ws_api_key = web_search.get("api_key", "").strip()
+        if ws_api_key:
+            config.web_search.provider = str(web_search.get("provider", "bailian"))
+            config.web_search.api_key = ws_api_key
+            config.web_search.base_url = str(
+                web_search.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            )
+            config.web_search.model = str(web_search.get("model", "qwen-turbo"))
+            config.web_search.enabled = True
+            config.web_search.mcp_verified = bool(web_search.get("mcp_verified", True))
+            config.web_search.mcp_verified_provider = config.web_search.provider
+            config.web_search.mcp_verified_at = time.time()
+            save_web_search_api_key(
+                ws_api_key,
+                config.web_search.base_url,
+                provider=config.web_search.provider,
+                model=config.web_search.model,
+            )
+            save_web_search_state(
+                enabled=True,
+                mcp_verified=config.web_search.mcp_verified,
+                mcp_verified_provider=config.web_search.provider,
+                mcp_verified_at=config.web_search.mcp_verified_at,
+            )
+    else:
+        config.web_search.enabled = False
+        config.web_search.api_key = ""
+        config.web_search.mcp_verified = False
+        config.web_search.mcp_verified_provider = ""
+        config.web_search.mcp_verified_at = 0.0
+        save_web_search_state(
+            enabled=False,
+            mcp_verified=False,
+            mcp_verified_provider="",
+            mcp_verified_at=0.0,
+        )
+    if save_workspace:
+        _save_config(config)
 
 
 def _config_needs_llm_setup(config: AeroConfig) -> bool:
@@ -7554,16 +7532,9 @@ def _mentions_vision_model(text: str) -> bool:
 
 def _requests_primary_vision_reuse(text: str) -> bool:
     lowered = text.lower()
-    reuse_requested = any(
-        marker in lowered for marker in ("复用", "共用", "使用已有", "直接用")
-    )
-    return (
-        reuse_requested
-        and (
-            _mentions_vision_model(text)
-            or "复用主模型" in lowered
-            or "共用主模型" in lowered
-        )
+    reuse_requested = any(marker in lowered for marker in ("复用", "共用", "使用已有", "直接用"))
+    return reuse_requested and (
+        _mentions_vision_model(text) or "复用主模型" in lowered or "共用主模型" in lowered
     )
 
 
@@ -7765,9 +7736,8 @@ def _apply_llm_setup(config: AeroConfig, setup: dict) -> None:
     provider_config.model = setup.get("model") or (
         preset.default_model if preset else config.llm.model
     )
-    provider_config.base_url = (
-        setup.get("base_url")
-        or (preset.base_url if preset else config.llm.base_url)
+    provider_config.base_url = setup.get("base_url") or (
+        preset.base_url if preset else config.llm.base_url
     )
     if setup.get("api_key"):
         api_key = _normalize_pasted_api_key(setup["api_key"])
@@ -7798,9 +7768,7 @@ def _llm_setup_success_message(config: AeroConfig) -> str:
     return f"模型服务已配置完成：{provider_name} / {config.llm.model}"
 
 
-def _llm_clear_success_message(
-    config: AeroConfig, *, reset_provider: bool = False
-) -> str:
+def _llm_clear_success_message(config: AeroConfig, *, reset_provider: bool = False) -> str:
     provider_name = _display_provider_name(config.llm.provider)
     if reset_provider:
         return (
@@ -7818,10 +7786,7 @@ def _llm_clear_success_message(
 def _is_llm_auth_error(error: Exception) -> bool:
     text = str(error).lower()
     return "401" in text and (
-        "unauthorized" in text
-        or "未授权" in text
-        or "api" in text
-        or "llm" in text
+        "unauthorized" in text or "未授权" in text or "api" in text or "llm" in text
     )
 
 
@@ -8042,11 +8007,7 @@ def _billing_markdown(tracker: TokenTracker, language: str = "zh") -> str:
     zh = language == "zh"
     title = "会话账单" if zh else "Session bill"
     if not items:
-        empty = (
-            "当前会话尚未产生可计费调用。"
-            if zh
-            else "No billable usage in this session."
-        )
+        empty = "当前会话尚未产生可计费调用。" if zh else "No billable usage in this session."
         return f"## {title}\n\n{empty}"
 
     headers = (
@@ -8081,8 +8042,7 @@ def _billing_markdown(tracker: TokenTracker, language: str = "zh") -> str:
             f"**{'总计' if zh else 'Total'}：{_format_bill_cost(total)}**",
             "",
             (
-                "金额按当前目录价估算；供应商免费额度、套餐抵扣与活动优惠"
-                "不在本地可见。"
+                "金额按当前目录价估算；供应商免费额度、套餐抵扣与活动优惠不在本地可见。"
                 if zh
                 else (
                     "Estimated at current list prices; provider free quotas, "
@@ -8228,18 +8188,25 @@ def _estimate_context_tokens(messages: list[Message]) -> int:
     for msg in messages:
         total_chars += len(msg.role) + len(msg.content)
         if msg.tool_calls:
-            total_chars += sum(len(tc.name) + len(_tool_call_arguments_text(tc)) for tc in msg.tool_calls)
+            total_chars += sum(
+                len(tc.name) + len(_tool_call_arguments_text(tc)) for tc in msg.tool_calls
+            )
     return max(1, (total_chars + 2) // 3)
 
 
 def _compacted_context_messages(system_msg: Message, summary_text: str) -> list[Message]:
     from aero.application.context_compaction import compacted_messages
+
     return compacted_messages(system_msg, summary_text)
 
 
 def _is_compact_summary_message(msg: Message) -> bool:
-    return msg.role == "user" and (msg.content or "").startswith("[compact_summary]") or \
-           msg.role == "user" and (msg.content or "").startswith("[Previous conversation summary]")
+    return (
+        msg.role == "user"
+        and (msg.content or "").startswith("[compact_summary]")
+        or msg.role == "user"
+        and (msg.content or "").startswith("[Previous conversation summary]")
+    )
 
 
 def _subagent_task_prompt(task: SubAgentTask) -> str:
@@ -8604,9 +8571,14 @@ def _help_text(lang: str) -> str:
         t("help.slash_language", lang),
         t("help.slash_model", lang),
         t("help.slash_preview", lang),
-        *([t("help.slash_provider", lang),
-           "  /ai-mode official|byok  整体切换官方或 BYOK 推理模式"]
-          if BYOK_UI_ENABLED else []),
+        *(
+            [
+                t("help.slash_provider", lang),
+                "  /ai-mode official|byok  整体切换官方或 BYOK 推理模式",
+            ]
+            if BYOK_UI_ENABLED
+            else []
+        ),
         t("help.slash_theme", lang),
         t("help.slash_variants", lang),
         *([t("help.slash_vision", lang)] if BYOK_UI_ENABLED else []),
@@ -9122,7 +9094,9 @@ def _run_llm_setup_wizard(config: AeroConfig) -> bool:
         },
     )
     print(_llm_setup_success_message(config))
-    print("API key 已保存到 ~/.aero/secrets.yaml")
+    from aero.core.config import user_secrets_path
+
+    print(f"API key 已保存到 {user_secrets_path()}")
     print()
     return True
 
@@ -9138,6 +9112,12 @@ def main():
 
     cmd = sys.argv[1]
 
+    if cmd in {"setup", "update", "version", "--version", "-v"}:
+        from aero.cli.entrypoint import main as maintenance_main
+
+        maintenance_main()
+        return
+
     if cmd in {"service", "daemon", "web"}:
         from aero.cli.daemon import main as daemon_main
 
@@ -9145,12 +9125,17 @@ def main():
         return
 
     if cmd == "chat":
-        chat_args = sys.argv[2:]
+        from aero.cli.resident_chat import ResidentChatApp, chat_agent_args
+        from aero.core.remote_agent import RemoteAgentError
+
+        try:
+            agent_selector, chat_args = chat_agent_args(sys.argv[2:])
+        except ValueError as exc:
+            print(f"错误：{exc}")
+            sys.exit(2)
         removed_modes = [arg for arg in chat_args if arg in {"--simple", "--no-tui"}]
         if removed_modes:
-            print(
-                f"参数 {removed_modes[0]} 已移除；aero chat 现在只提供 Textual TUI 模式。"
-            )
+            print(f"参数 {removed_modes[0]} 已移除；aero chat 现在只提供 Textual TUI 模式。")
             sys.exit(2)
         allowed_args = {"--mouse", "--no-mouse", "--continue", "-c", "--service", "--attach"}
         unknown_args = [arg for arg in chat_args if arg not in allowed_args]
@@ -9169,18 +9154,37 @@ def main():
             standard_log_path=str(standard_log_path),
         )
 
-        if "--service" in chat_args or "--attach" in chat_args:
+        if agent_selector is not None:
+            try:
+                app = ResidentChatApp(agent_selector)
+                app.run(mouse=mouse_mode)
+            except RemoteAgentError as exc:
+                print(f"错误：{exc}")
+                sys.exit(1)
+        elif "--service" in chat_args or "--attach" in chat_args:
             from aero.cli.attached_chat import AttachedChatApp
             from aero.core.daemon import DaemonManager
 
             manager = DaemonManager(Path.cwd())
             manager.start()
             info = manager.connection_info()
-            AttachedChatApp(info["base_url"], info["token"]).run(mouse=mouse_mode)
+            app = AttachedChatApp(info["base_url"], info["token"])
+            app.run(mouse=mouse_mode)
         else:
             config = _load_config()
-            app = AeroApp(config, resume_last_session=resume_last_session)
+            resume_session_id = os.environ.pop("AERO_UPDATE_RESUME_SESSION", None)
+            resume_options = {"resume_session_id": resume_session_id} if resume_session_id else {}
+            app = AeroApp(config, resume_last_session=resume_last_session, **resume_options)
             app.run(mouse=mouse_mode)
+        if getattr(app, "_restart_for_update", False) is True:
+            if agent_selector is None and isinstance(getattr(app, "_session_id", None), str):
+                os.environ["AERO_UPDATE_RESUME_SESSION"] = app._session_id
+            arguments = list(sys.argv[1:])
+            if agent_selector is None and not any(
+                arg in arguments for arg in ("--service", "--attach", "--continue", "-c")
+            ):
+                arguments.append("--continue")
+            return arguments
 
     elif cmd == "login":
         if sys.argv[2:]:
@@ -9230,9 +9234,7 @@ def main():
 
         setup_args = sys.argv[2:]
         unknown = [
-            arg
-            for arg in setup_args
-            if arg not in {"--full", "--yes", "-y", "--china-mirror"}
+            arg for arg in setup_args if arg not in {"--full", "--yes", "-y", "--china-mirror"}
         ]
         if unknown:
             print(f"未知参数: {unknown[0]}")
@@ -9274,7 +9276,9 @@ def main():
         if exit_code:
             sys.exit(exit_code)
     elif cmd in ("-v", "--version", "version"):
-        print("Aero 0.1.0")
+        from aero.version import title
+
+        print(title())
     elif cmd in ("-h", "--help", "help"):
         _print_usage()
     else:
@@ -9289,22 +9293,29 @@ Aero — 气象科研 AI Agent IDE
 
 命令:
   aero init            初始化当前目录的项目配置与工作目录
-  aero setup           安装独立的基础科学运行时（Python 3.12）
+  aero setup           配置账号/模型并准备私有科学运行时（Python 3.12）
+  aero setup --runtime-only  仅准备运行时，不修改账号或项目
   aero setup --full    预装完整科学计算工具集
   aero setup --full --china-mirror  强制使用国内 Conda/PyPI 镜像
+  aero update --check  检查稳定版更新
+  aero update         经确认后安全更新官方托管安装
+  aero update --rollback  回滚到上一版本
   aero doctor          检查 Aero 私有运行时
   aero runtime clean   删除 Aero 私有运行时（不影响项目和用户 Conda）
   aero agent register --name ocean [--description "备注"]  注册远程 Agent
   aero agent list       列出本地 Agent 及在线状态
   aero agent run [智能体名称或智能体 ID]  前台常驻并等待云端指令
+  aero agent start 智能体名称 [--background]  一步注册并启动；可直接后台运行
+  aero agent stop 智能体名称或 ID  停止本机后台进程，保留注册和历史
+  aero agent delete 智能体名称或 ID  确认后删除云端智能体及本机注册
   aero agent snapshot [名称或 ID] [--output 文件.zip] [--upload]  导出审计快照
   aero agent takeover 智能体名称或 ID  在空目录接管离线智能体
-  aero agent clone 智能体名称或 ID     在空目录克隆智能体
   aero agent resume 智能体名称或 ID    网页下线后在原工作区恢复授权
   aero agent status [Agent 名称或 Agent ID]  查询指定 Agent 状态
   aero login           弹出官方账户登录窗口并启用官方模型
   aero chat            启动 Textual TUI 对话（支持中文输入和流式输出）
   aero chat --service 通过本机常驻服务续接会话，关闭 TUI 不会终止任务
+  aero chat --agent 名称或ID  打开常驻 Agent 原对话，关闭 TUI 不停止 Agent
   aero chat --continue 续接当前目录上一次保存的会话（短参数: -c）
   aero serve           启动本地 Web Agent 工作台（默认端口 8765）
   aero serve --port N  使用指定端口启动本地 Web 工作台
@@ -9324,8 +9335,6 @@ Aero — 气象科研 AI Agent IDE
   aero version         显示版本号
   aero help            显示此帮助信息
 """)
-
-
 
 
 def _init():

@@ -1,6 +1,6 @@
-from types import SimpleNamespace
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -13,40 +13,40 @@ from aero.cli.main import (
     AeroApp,
     ChatMarkdown,
     ConfirmScreen,
+    _assistant_claims_background_handoff,
+    _billing_markdown,
     _checkpoint_title_from_messages,
     _checkpoint_title_prompt,
-    _command_suggestions,
     _command_requires_input,
+    _command_suggestions,
     _compacted_context_messages,
     _estimate_context_tokens,
     _format_checkpoint_list_entry,
+    _has_persistable_session_messages,
+    _help_text,
+    _is_billing_query,
+    _is_subagent_tool_status,
     _load_saved_theme,
+    _normalize_checkpoint_title,
+    _normalize_confirm_choice,
+    _normalize_generated_session_title,
     _render_status_lines,
     _render_terminal_math,
     _resolve_theme_name,
     _restore_confirmation_message,
     _save_user_theme,
-    _help_text,
-    _has_persistable_session_messages,
-    _assistant_claims_background_handoff,
-    _billing_markdown,
-    _is_subagent_tool_status,
-    _is_billing_query,
-    _normalize_checkpoint_title,
-    _normalize_generated_session_title,
-    _normalize_confirm_choice,
-    _status_progress_slot,
-    _should_queue_input_during_run,
+    _session_option_label,
     _session_title_from_messages,
     _session_title_prompt,
-    _session_option_label,
+    _should_queue_input_during_run,
+    _status_progress_slot,
     _theme_options,
     _usage_meta_text,
 )
-from aero.data import pricing
-from aero.data.pricing import ModelPrice, ModelUsage, TokenTracker
 from aero.core.config import AeroConfig
 from aero.core.types import Message, ToolCall
+from aero.data import pricing
+from aero.data.pricing import ModelPrice, ModelUsage, TokenTracker
 from aero.i18n import t
 
 
@@ -136,9 +136,7 @@ def test_chat_markdown_renders_cjk_adjacent_strong_emphasis():
 
     assert "**" not in paragraph._content.plain
     assert [span.style for span in paragraph._content.spans] == [".strong", ".strong"]
-    assert paragraph._content.plain == (
-        "一天中 午后（14:00） 气温最高， 凌晨（02:00） 最低。"
-    )
+    assert paragraph._content.plain == ("一天中 午后（14:00） 气温最高， 凌晨（02:00） 最低。")
 
 
 def test_cjk_emphasis_normalization_leaves_inline_and_fenced_code_unchanged():
@@ -342,9 +340,7 @@ def test_command_suggestions_include_set_subcommands_after_space():
     assert _command_suggestions("/checkpoint ren", primary, secondary) == [
         ("/checkpoint rename ", "修改检查点名称")
     ]
-    assert _command_suggestions("/exp", primary, secondary) == [
-        ("/experiment", "开始新的实验分支")
-    ]
+    assert _command_suggestions("/exp", primary, secondary) == [("/experiment", "开始新的实验分支")]
 
 
 def test_commands_with_required_followup_are_completed_before_execution():
@@ -397,9 +393,7 @@ async def test_confirm_scroll_keys_do_not_reach_background_chat():
         def on_key(self, event: events.Key) -> None:
             if event.key == "up":
                 self.background_key_events += 1
-                self.query_one("#background-chat", VerticalScroll).scroll_up(
-                    animate=False
-                )
+                self.query_one("#background-chat", VerticalScroll).scroll_up(animate=False)
 
     app = ConfirmHost()
     async with app.run_test(size=(100, 30)) as pilot:
@@ -574,7 +568,11 @@ def test_token_tracker_from_dict_defaults_missing_cached_tokens():
 def test_token_tracker_from_dict_roundtrip_preserves_per_model_usage():
     original = TokenTracker()
     original.add_llm(
-        {"prompt_tokens": 100, "completion_tokens": 50, "prompt_tokens_details": {"cached_tokens": 30}},
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "prompt_tokens_details": {"cached_tokens": 30},
+        },
         "deepseek-v4-pro",
     )
     original.add_llm(
@@ -738,9 +736,7 @@ def test_auto_save_ignores_display_only_local_interactions():
 
 
 @pytest.mark.parametrize("continue_flag", ["--continue", "-c"])
-def test_chat_continue_flag_resumes_last_tui_session(
-    monkeypatch, tmp_path, continue_flag
-):
+def test_chat_continue_flag_resumes_last_tui_session(monkeypatch, tmp_path, continue_flag):
     import importlib
     import sys
 
@@ -755,9 +751,7 @@ def test_chat_continue_flag_resumes_last_tui_session(
             captured.update(kwargs)
 
     monkeypatch.setattr(sys, "argv", ["aero", "chat", continue_flag])
-    monkeypatch.setattr(
-        cli_main, "configure_debug_logging", lambda: Path(tmp_path) / "debug.log"
-    )
+    monkeypatch.setattr(cli_main, "configure_debug_logging", lambda: Path(tmp_path) / "debug.log")
     monkeypatch.setattr(cli_main, "configure_logging", lambda **_kwargs: None)
     monkeypatch.setattr(cli_main, "_load_config", lambda: SimpleNamespace())
     monkeypatch.setattr(cli_main, "_config_needs_llm_setup", lambda _config: False)
@@ -770,17 +764,13 @@ def test_chat_continue_flag_resumes_last_tui_session(
 
 
 @pytest.mark.parametrize("removed_flag", ["--simple", "--no-tui"])
-def test_removed_non_tui_flags_fail_explicitly(
-    monkeypatch, tmp_path, capsys, removed_flag
-):
+def test_removed_non_tui_flags_fail_explicitly(monkeypatch, tmp_path, capsys, removed_flag):
     import importlib
     import sys
 
     cli_main = importlib.import_module("aero.cli.main")
     monkeypatch.setattr(sys, "argv", ["aero", "chat", removed_flag])
-    monkeypatch.setattr(
-        cli_main, "configure_debug_logging", lambda: Path(tmp_path) / "debug.log"
-    )
+    monkeypatch.setattr(cli_main, "configure_debug_logging", lambda: Path(tmp_path) / "debug.log")
     monkeypatch.setattr(cli_main, "configure_logging", lambda **_kwargs: None)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -801,7 +791,7 @@ def test_cli_usage_only_advertises_tui_chat(capsys):
     assert "--no-tui" not in output
 
 
-def test_help_text_includes_current_commands():
+def test_help_text_includes_current_commands(byok_ui):
     text = _help_text("zh")
 
     assert "/vision" in text
@@ -828,8 +818,7 @@ def test_help_text_includes_current_commands():
 def test_restore_protection_checkpoint_list_item_has_distinct_style():
     markdown = ChatMarkdown()
     [checkpoint_list] = markdown._build_from_source(
-        "- `manual` 普通检查点\n"
-        "- **恢复前安全检查点：基线** · 2026-07-16 22:20"
+        "- `manual` 普通检查点\n- **恢复前安全检查点：基线** · 2026-07-16 22:20"
     )
     regular, safety = list(checkpoint_list.compose())
 
@@ -898,18 +887,24 @@ def test_session_title_skips_greeting_and_summarizes_request():
 
 def test_only_agent_conversation_messages_are_persistable_sessions():
     assert _has_persistable_session_messages([Message(role="system", content="system")]) is False
-    assert _has_persistable_session_messages(
-        [
-            Message(role="system", content="system"),
-            Message(role="user", content="[compact_summary]\nold context"),
-        ]
-    ) is False
-    assert _has_persistable_session_messages(
-        [
-            Message(role="system", content="system"),
-            Message(role="user", content="下载 ERA5 数据"),
-        ]
-    ) is True
+    assert (
+        _has_persistable_session_messages(
+            [
+                Message(role="system", content="system"),
+                Message(role="user", content="[compact_summary]\nold context"),
+            ]
+        )
+        is False
+    )
+    assert (
+        _has_persistable_session_messages(
+            [
+                Message(role="system", content="system"),
+                Message(role="user", content="下载 ERA5 数据"),
+            ]
+        )
+        is True
+    )
 
 
 def test_session_title_falls_back_to_greeting_when_only_greeting_exists():
@@ -919,7 +914,10 @@ def test_session_title_falls_back_to_greeting_when_only_greeting_exists():
 
 
 def test_generated_session_title_is_normalized():
-    assert _normalize_generated_session_title("标题：\"ERA5 降水下载分析。\"\n解释") == "ERA5 降水下载分析"
+    assert (
+        _normalize_generated_session_title('标题："ERA5 降水下载分析。"\n解释')
+        == "ERA5 降水下载分析"
+    )
     assert _normalize_generated_session_title("  # 我的新会话！ ") == "我的新会话"
 
 
@@ -988,9 +986,7 @@ async def test_checkpoint_title_is_generated_by_model(monkeypatch):
 
     monkeypatch.setattr("aero.agent.llm_client.LLMClient", FakeClient)
     app = AeroApp.__new__(AeroApp)
-    app.agent = SimpleNamespace(
-        messages=[Message(role="user", content="绘制 CAMS 全球臭氧图")]
-    )
+    app.agent = SimpleNamespace(messages=[Message(role="user", content="绘制 CAMS 全球臭氧图")])
     app.config = SimpleNamespace(
         language="zh",
         llm=SimpleNamespace(

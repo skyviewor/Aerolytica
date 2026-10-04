@@ -52,22 +52,16 @@ IFS_FORECAST_SEGMENTS = (
     {"start": 150, "end": 240, "step": 6, "label": "150-240h by 6h"},
 )
 
-IFS_FORECAST_SEGMENTS_SHORT = (
-    {"start": 0, "end": 90, "step": 3, "label": "0-90h by 3h"},
-)
+IFS_FORECAST_SEGMENTS_SHORT = ({"start": 0, "end": 90, "step": 3, "label": "0-90h by 3h"},)
 
 ENFO_FORECAST_SEGMENTS = (
     {"start": 0, "end": 144, "step": 3, "label": "0-144h by 3h"},
     {"start": 150, "end": 360, "step": 6, "label": "150-360h by 6h"},
 )
 
-ENFO_FORECAST_SEGMENTS_SHORT = (
-    {"start": 0, "end": 144, "step": 3, "label": "0-144h by 3h"},
-)
+ENFO_FORECAST_SEGMENTS_SHORT = ({"start": 0, "end": 144, "step": 3, "label": "0-144h by 3h"},)
 
-AIFS_FORECAST_SEGMENTS = (
-    {"start": 0, "end": 360, "step": 6, "label": "0-360h by 6h"},
-)
+AIFS_FORECAST_SEGMENTS = ({"start": 0, "end": 360, "step": 6, "label": "0-360h by 6h"},)
 
 
 def ifs_forecast_segments(cycle: str, stream: str = "oper", model: str = "ifs") -> tuple[dict, ...]:
@@ -197,7 +191,8 @@ class IFSAdapter:
         grib_url = _build_grib_url(self._base_url, date, cycle, step, stream, typ, model)
         index_url = _build_index_url(grib_url)
         emit_progress(
-            f"正在读取 {stream_name} 索引：{date} {cycle}z step={step}h，变量={', '.join(variables)}"
+            f"正在读取 {stream_name} 索引：{date} {cycle}z step={step}h，"
+            f"变量={', '.join(variables)}"
         )
 
         idx_text = await asyncio.to_thread(self._fetch_text, index_url)
@@ -211,9 +206,11 @@ class IFSAdapter:
                 f"{stream_name} .index 中没有找到匹配字段。"
                 f"请求: 变量={variables}, levtype={levtype or '不限'}, "
                 f"levels={levels or '不限'}, numbers={numbers or '不限'}。\n"
-                f"实际可用: 变量={', '.join(params[:20])}{'...(更多)' if len(params) > 20 else ''}, "
+                f"实际可用: 变量={', '.join(params[:20])}"
+                f"{'...(更多)' if len(params) > 20 else ''}, "
                 f"levtype={', '.join(levtypes)}, "
-                f"层级示例={', '.join(str(l) for l in level_samples[:10])}{'...(更多)' if len(level_samples) > 10 else ''}"
+                f"层级示例={', '.join(str(level) for level in level_samples[:10])}"
+                f"{'...(更多)' if len(level_samples) > 10 else ''}"
             )
 
         dest_path = _build_dest_path(
@@ -312,10 +309,14 @@ def _request_with_retry(
             last_error = e
             if attempt == HTTP_RETRY_ATTEMPTS:
                 raise RuntimeError(
-                    f"{action}失败：网络连接异常（{e.__class__.__name__}: {e}），已重试 {attempt} 次。"
+                    f"{action}失败：网络连接异常（{e.__class__.__name__}: {e}），"
+                    f"已重试 {attempt} 次。"
                 ) from e
             delay = _retry_delay(None, attempt)
-            emit_progress(f"{action}遇到网络异常，{delay:.0f}s 后重试（第 {attempt}/{HTTP_RETRY_ATTEMPTS} 次）")
+            emit_progress(
+                f"{action}遇到网络异常，{delay:.0f}s 后重试"
+                f"（第 {attempt}/{HTTP_RETRY_ATTEMPTS} 次）"
+            )
             time.sleep(delay)
     raise RuntimeError(f"{action}失败：{last_error or '未知错误'}")
 
@@ -359,10 +360,14 @@ class _RetryingStream:
                     self._ctx = None
                 if attempt == HTTP_RETRY_ATTEMPTS:
                     raise RuntimeError(
-                        f"{self.action}失败：网络连接异常（{e.__class__.__name__}: {e}），已重试 {attempt} 次。"
+                        f"{self.action}失败：网络连接异常（{e.__class__.__name__}: {e}），"
+                        f"已重试 {attempt} 次。"
                     ) from e
                 delay = _retry_delay(None, attempt)
-                emit_progress(f"{self.action}遇到网络异常，{delay:.0f}s 后重试（第 {attempt}/{HTTP_RETRY_ATTEMPTS} 次）")
+                emit_progress(
+                    f"{self.action}遇到网络异常，{delay:.0f}s 后重试"
+                    f"（第 {attempt}/{HTTP_RETRY_ATTEMPTS} 次）"
+                )
                 time.sleep(delay)
         raise RuntimeError(f"{self.action}失败：{last_error or '未知错误'}")
 
@@ -493,21 +498,18 @@ def _select_ifs_entries(
         if levels:
             for level in levels:
                 matched = [
-                    e for e in candidates
+                    e
+                    for e in candidates
                     if e.levelist is not None and _normalize_levelist(e.levelist) == level
                 ]
                 if matched:
                     selected.extend(matched)
                 else:
-                    missing.append(
-                        {"variable": variable, "levtype": levtype, "level": level}
-                    )
+                    missing.append({"variable": variable, "levtype": levtype, "level": level})
         elif candidates:
             selected.extend(candidates)
         else:
-            missing.append(
-                {"variable": variable, "levtype": levtype, "level": None}
-            )
+            missing.append({"variable": variable, "levtype": levtype, "level": None})
 
     if numbers_set:
         selected = [e for e in selected if e.raw.get("number", "") in numbers_set]
@@ -536,10 +538,7 @@ def _build_dest_path(
     if levels:
         level_hash = hashlib.sha1("|".join(levels).encode()).hexdigest()[:8]
         vars_part = f"{vars_part}_{level_hash}"
-    return (
-        dest_dir
-        / f"{model}_{date}_{cycle}z_{stream}_{typ}_step{step:03d}_{vars_part}.grib2"
-    )
+    return dest_dir / f"{model}_{date}_{cycle}z_{stream}_{typ}_step{step:03d}_{vars_part}.grib2"
 
 
 def _build_request_id(

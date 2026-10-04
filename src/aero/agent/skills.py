@@ -316,8 +316,18 @@ def _is_plotting_request(normalized_text: str) -> bool:
     return any(
         marker in normalized_text
         for marker in (
-            "画", "绘", "作图", "制图", "图表", "子图",
-            "plot", "chart", "figure", "visualiz", "subplot", "panel",
+            "画",
+            "绘",
+            "作图",
+            "制图",
+            "图表",
+            "子图",
+            "plot",
+            "chart",
+            "figure",
+            "visualiz",
+            "subplot",
+            "panel",
         )
     )
 

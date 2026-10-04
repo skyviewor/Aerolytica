@@ -309,15 +309,19 @@ class NoaaIsdProvider:
         term = query.casefold().strip()
         results: list[DatasetStation] = []
         for station in stations:
-            if term and term not in " ".join(
-                (
-                    station.station_id,
-                    station.name,
-                    station.country,
-                    station.state,
-                    station.icao,
-                )
-            ).casefold():
+            if (
+                term
+                and term
+                not in " ".join(
+                    (
+                        station.station_id,
+                        station.name,
+                        station.country,
+                        station.state,
+                        station.icao,
+                    )
+                ).casefold()
+            ):
                 continue
             if area and not self._in_area(station, area):
                 continue
@@ -427,9 +431,7 @@ class NoaaIsdProvider:
                 if raw_reused and parsed_reused:
                     reused.append(parsed_destination)
         if not files:
-            detail = "; ".join(
-                f"{item['station']}: {item['reason']}" for item in failures[:5]
-            )
+            detail = "; ".join(f"{item['station']}: {item['reason']}" for item in failures[:5])
             raise RuntimeError(f"NOAA ISD 所有站点下载均失败：{detail}")
         warnings = (
             (f"{len(failures)} 个站点下载失败，详情见 metadata.failed_stations",)
@@ -521,9 +523,13 @@ class NoaaIsdProvider:
             and self._observation_count(inventory.get(station.station_id), start, end) != 0
         )
         if request.stations:
-            selected = tuple(self._resolve_station(viable, selector) for selector in request.stations)
+            selected = tuple(
+                self._resolve_station(viable, selector) for selector in request.stations
+            )
             if request.area:
-                selected = tuple(station for station in selected if self._in_area(station, request.area))
+                selected = tuple(
+                    station for station in selected if self._in_area(station, request.area)
+                )
         else:
             selected = tuple(station for station in viable if self._in_area(station, request.area))
             if len(selected) > MAX_AUTO_STATIONS:
@@ -545,23 +551,20 @@ class NoaaIsdProvider:
         return tuple(dict.fromkeys(selected))
 
     @staticmethod
-    def _resolve_station(
-        stations: tuple[DatasetStation, ...], selector: str
-    ) -> DatasetStation:
+    def _resolve_station(stations: tuple[DatasetStation, ...], selector: str) -> DatasetStation:
         key = selector.casefold().strip()
         exact = [
             station
             for station in stations
-            if key in {station.station_id.casefold(), station.icao.casefold(), station.name.casefold()}
+            if key
+            in {station.station_id.casefold(), station.icao.casefold(), station.name.casefold()}
         ]
         if len(exact) == 1:
             return exact[0]
         candidates = exact or [
             station
             for station in stations
-            if key
-            and key
-            in " ".join((station.station_id, station.name, station.icao)).casefold()
+            if key and key in " ".join((station.station_id, station.name, station.icao)).casefold()
         ]
         if len(candidates) == 1:
             return candidates[0]
@@ -686,11 +689,7 @@ class NoaaIsdProvider:
         for year in range(int(request.start_date[:4]), int(request.end_date[:4]) + 1):
             url = f"{self._archive_base}/{year}/{station.station_id}.csv"
             source = (
-                request.output_dir
-                / ".aero-cache"
-                / "isd"
-                / str(year)
-                / f"{station.station_id}.csv"
+                request.output_dir / ".aero-cache" / "isd" / str(year) / f"{station.station_id}.csv"
             )
             await self._download_stream(client, url, source, on_progress, resume=True)
             sources.append(source)
@@ -714,9 +713,7 @@ class NoaaIsdProvider:
                 if not source_fields:
                     source_fields = list(reader.fieldnames or ())
                 rows.extend(
-                    row
-                    for row in reader
-                    if start_date <= row.get("DATE", "")[:10] <= end_date
+                    row for row in reader if start_date <= row.get("DATE", "")[:10] <= end_date
                 )
         if not rows:
             raise RuntimeError("NOAA ISD 归档文件中没有请求日期的记录")

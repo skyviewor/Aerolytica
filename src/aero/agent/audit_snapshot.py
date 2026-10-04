@@ -24,8 +24,18 @@ def render_conversation(manager: SessionManager, session_id: str) -> str:
         f"名称：{meta.name or '未命名智能体'}",
         f"模型：{meta.model or '未知'}",
         f"模式：{meta.mode or '未知'}",
-        f"会话创建时间：{datetime.fromtimestamp(meta.created_at, timezone.utc).isoformat() if meta.created_at else '未知'}",
-        f"最后保存时间：{datetime.fromtimestamp(meta.updated_at, timezone.utc).isoformat() if meta.updated_at else '未知'}",
+        "会话创建时间："
+        + (
+            datetime.fromtimestamp(meta.created_at, timezone.utc).isoformat()
+            if meta.created_at
+            else "未知"
+        ),
+        "最后保存时间："
+        + (
+            datetime.fromtimestamp(meta.updated_at, timezone.utc).isoformat()
+            if meta.updated_at
+            else "未知"
+        ),
         f"生成时间：{datetime.now(timezone.utc).isoformat()}",
         "说明：此文件包含已持久化上下文；已识别的凭据会被遮盖，仍请在上传前人工审阅。",
         "",
@@ -38,7 +48,9 @@ def render_conversation(manager: SessionManager, session_id: str) -> str:
             lines.append(str(_redact_secret_value(message.content)))
         for call in message.tool_calls or []:
             lines.append(f"工具：{call.name}（{call.id}）")
-            lines.append(json.dumps(_redact_secret_value(call.arguments), ensure_ascii=False, indent=2))
+            lines.append(
+                json.dumps(_redact_secret_value(call.arguments), ensure_ascii=False, indent=2)
+            )
         lines.append("")
     result = "\n".join(lines)
     if len(result.encode("utf-8")) > MAX_TEXT_BYTES:

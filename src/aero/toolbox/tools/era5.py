@@ -555,9 +555,13 @@ def _normalize_pressure_levels(
     pressure_levels: list[int] | None,
 ) -> list[int]:
     if pressure_level is not None and pressure_levels:
-        raise ValueError("pressure_level 和 pressure_levels 不能同时传；多层请只用 pressure_levels。")
-    raw_levels = pressure_levels if pressure_levels else (
-        [pressure_level] if pressure_level is not None else []
+        raise ValueError(
+            "pressure_level 和 pressure_levels 不能同时传；多层请只用 pressure_levels。"
+        )
+    raw_levels = (
+        pressure_levels
+        if pressure_levels
+        else ([pressure_level] if pressure_level is not None else [])
     )
     normalized: list[int] = []
     for raw in raw_levels:
@@ -580,8 +584,6 @@ def _is_non_retryable_cds_submit_error(error: BaseException) -> bool:
         or "invalid request" in text
         or "none of the data you have requested is available yet" in text
     )
-
-
 
 
 def _reuse_existing_era5_file(

@@ -115,9 +115,7 @@ async def test_paper_latex_slash_command_reports_fixed_output(tmp_path, monkeypa
     app._project_dir = tmp_path
     app._set_footer_status = lambda _message: None
     shown = []
-    app._show_checkpoint_message = lambda message, **kwargs: shown.append(
-        (message, kwargs)
-    )
+    app._show_checkpoint_message = lambda message, **kwargs: shown.append((message, kwargs))
     monkeypatch.setattr(
         "aero.cli.main.export_paper",
         lambda project_dir, output_format, env: {
@@ -145,9 +143,7 @@ async def test_pandoc_install_updates_footer_status(tmp_path, monkeypatch):
 
     exports = iter(
         [
-            PaperExportError(
-                "缺少 Pandoc，无法导出论文。", missing_tools=["pandoc"]
-            ),
+            PaperExportError("缺少 Pandoc，无法导出论文。", missing_tools=["pandoc"]),
             {
                 "source": "paper/main.md",
                 "output": "paper/main.tex",

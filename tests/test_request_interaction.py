@@ -212,7 +212,7 @@ def test_transport_enforces_source_without_mutating_user_or_history(stream):
 @pytest.mark.asyncio
 async def test_local_form_all_widgets_and_validation_without_network():
     from textual.app import App
-    from textual.widgets import Checkbox, Input, Select, SelectionList, TextArea
+    from textual.widgets import Input, OptionList, SelectionList, TextArea
 
     from aero.cli.main import UserInputScreen
 
@@ -229,18 +229,25 @@ async def test_local_form_all_widgets_and_validation_without_network():
         screen = UserInputScreen({"title": "参数", "fields": fields})
         app.push_screen(screen, callback=results.append)
         await pilot.pause()
-        screen.submit()
+        await screen.advance()
         assert results == []
-        screen.query_one("#user-field-0", Input).value = "test"
-        screen.query_one("#user-field-1", TextArea).text = "notes"
-        screen.query_one("#user-field-1", TextArea).focus()
+        screen.query_one("#question-editor", Input).value = "test"
+        await screen.advance()
+        screen.query_one("#question-editor", TextArea).load_text("notes")
+        screen.query_one("#question-editor", TextArea).focus()
         await pilot.press("tab")
-        assert app.focused.id == "user-field-2"
-        screen.query_one("#user-field-2", Input).value = "2"
-        screen.query_one("#user-field-3", Select).value = "one"
-        screen.query_one("#user-field-4", SelectionList).select("two")
-        screen.query_one("#user-field-5", Checkbox).value = True
-        screen.submit()
+        assert app.focused.id in {"question-back", "question-next", "question-skip"}
+        screen.query_one("#question-next").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        screen.query_one("#question-editor", Input).value = "2"
+        await screen.advance()
+        screen.query_one("#question-editor", OptionList).highlighted = 0
+        await screen.advance()
+        screen.query_one("#question-editor", SelectionList).select("two")
+        await screen.advance()
+        screen.query_one("#question-editor", OptionList).highlighted = 0
+        await screen.advance()
         await pilot.pause()
     assert results == [
         {

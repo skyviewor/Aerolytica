@@ -17,6 +17,8 @@ from aero.cli.setup_wizard import FirstRunSetupScreen
 from aero.core.config import AeroConfig, LLMProviderConfig
 from aero.core.llm_providers import BUILTIN_LLM_PROVIDERS, model_tags
 
+pytestmark = pytest.mark.usefixtures("byok_ui")
+
 
 class WizardHost(App[None]):
     def __init__(self, **wizard_kwargs) -> None:
@@ -304,10 +306,7 @@ async def test_deepseek_provider_opens_full_model_selection():
         wizard._choose("deepseek")
         assert wizard._page == "primary_model"
         options = wizard.query_one("#setup-list", OptionList)
-        model_ids = [
-            options.get_option_at_index(index).id
-            for index in range(options.option_count)
-        ]
+        model_ids = [options.get_option_at_index(index).id for index in range(options.option_count)]
         assert model_ids == [
             "deepseek-v4-flash",
             "deepseek-v4-pro",
@@ -325,10 +324,7 @@ async def test_bailian_provider_lists_all_preset_models():
         wizard._render_page()
         wizard._choose("bailian")
         options = wizard.query_one("#setup-list", OptionList)
-        model_ids = [
-            options.get_option_at_index(index).id
-            for index in range(options.option_count)
-        ]
+        model_ids = [options.get_option_at_index(index).id for index in range(options.option_count)]
         assert model_ids == [
             "qwen3.7-max",
             "qwen3.7-plus",
@@ -466,11 +462,19 @@ async def test_primary_setup_keeps_form_open_when_connection_test_fails(monkeypa
 
 @pytest.mark.asyncio
 async def test_primary_setup_shows_green_success_before_advancing(monkeypatch):
+    from types import SimpleNamespace
+
+    release_success = asyncio.Event()
+
+    async def hold_success(seconds):
+        assert seconds == FirstRunSetupScreen._CONNECTION_SUCCESS_DELAY
+        await release_success.wait()
+
     async def successful_connection(_: dict[str, str]) -> None:
         return None
 
     monkeypatch.setattr("aero.cli.setup_wizard._test_primary_connection", successful_connection)
-    monkeypatch.setattr(FirstRunSetupScreen, "_CONNECTION_SUCCESS_DELAY", 0.05)
+    monkeypatch.setattr("aero.cli.setup_wizard.asyncio", SimpleNamespace(sleep=hold_success))
     app = WizardHost(
         primary={
             "provider": "bailian",
@@ -493,7 +497,7 @@ async def test_primary_setup_shows_green_success_before_advancing(monkeypatch):
         assert str(status.render()) == "测试通过"
         assert status.has_class("setup-success")
 
-        await asyncio.sleep(0.06)
+        release_success.set()
         await pilot.pause()
         assert wizard._page == "vision_mode"
 

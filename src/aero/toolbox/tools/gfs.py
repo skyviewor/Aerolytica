@@ -65,8 +65,8 @@ async def get_gfs_forecast_schedule(
     cycle: str | None = None,
 ) -> dict:
     """Resolve requested GFS forecast window to actual forecast-hour outputs."""
-    from aero.data.gfs_availability import gfs_forecast_hours_for_range
     from aero.adapters.gfs_adapter import normalize_cycle
+    from aero.data.gfs_availability import gfs_forecast_hours_for_range
 
     try:
         normalized_cycle = normalize_cycle(cycle) if cycle is not None else None
@@ -575,4 +575,3 @@ def _gfs_object_to_dict(item) -> dict:
         "status_code": item.status_code,
         "source_url": item.source_url,
     }
-

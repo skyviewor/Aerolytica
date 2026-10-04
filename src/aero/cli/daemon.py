@@ -11,10 +11,23 @@ from aero.core.daemon import DaemonManager, run_daemon
 
 
 def main(argv: list[str] | None = None) -> None:
+    from aero.release_environment import configure_runtime
+
+    configure_runtime()
     parser = argparse.ArgumentParser(prog="aero service")
-    parser.add_argument("action", choices=[
-        "start", "stop", "status", "logs", "run", "web", "enable", "disable",
-    ])
+    parser.add_argument(
+        "action",
+        choices=[
+            "start",
+            "stop",
+            "status",
+            "logs",
+            "run",
+            "web",
+            "enable",
+            "disable",
+        ],
+    )
     parser.add_argument("--project", type=Path, default=Path.cwd())
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--port", type=int, default=0)
@@ -24,7 +37,15 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("port must be between 0 and 65535")
     manager = DaemonManager(args.project, args.state_dir)
     if args.action == "run":
-        run_daemon(manager, port=args.port)
+        from aero.update_processes import process_record
+
+        with process_record(
+            "daemon",
+            project_dir=str(manager.project_dir),
+            state_dir=str(manager.state_dir.resolve()),
+            port=args.port,
+        ):
+            run_daemon(manager, port=args.port)
     elif args.action == "web":
         result = manager.start(port=args.port)
         if not args.no_open:

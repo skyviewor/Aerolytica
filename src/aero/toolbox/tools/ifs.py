@@ -10,7 +10,6 @@ from aero.toolbox.download_progress import download_progress_reporter
 from aero.toolbox.paths import find_project_dir, short_path
 from aero.toolbox.registry import register_tool
 
-
 # ---------------------------------------------------------------------------
 # IFS (ECMWF Integrated Forecasting System) tools
 # ---------------------------------------------------------------------------
@@ -497,8 +496,6 @@ async def search_ifs_variables(keyword: str | None = None) -> dict:
     return result
 
 
-
-
 def _ifs_decision_to_dict(decision) -> dict:
     return {
         "requested_source": decision.requested_source,
@@ -522,4 +519,3 @@ def _ifs_object_to_dict(item) -> dict:
         "status_code": item.status_code,
         "source_url": item.source_url,
     }
-

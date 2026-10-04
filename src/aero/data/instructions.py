@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-GLOBAL_INSTRUCTIONS_PATH = Path.home() / ".aero" / "instructions.md"
+from aero.release_environment import user_home
+
+GLOBAL_INSTRUCTIONS_PATH = user_home() / "instructions.md"
 PROJECT_INSTRUCTIONS_FILENAME = "AGENTS.md"
 
 MAX_CHAR_LENGTH = 2000
@@ -64,7 +66,7 @@ def append_instruction(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    existing_lines = [l for l in existing.splitlines() if l.strip()]
+    existing_lines = [line for line in existing.splitlines() if line.strip()]
     existing_lines.append(f"- {inst}")
     path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
     return path

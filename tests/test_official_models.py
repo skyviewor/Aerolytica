@@ -112,7 +112,7 @@ async def test_official_model_catalog_keeps_stale_cache_when_refresh_fails(monke
 
 
 @pytest.mark.asyncio
-async def test_official_preferences_only_expose_models_in_user_pool(monkeypatch):
+async def test_official_preferences_expose_models_outside_auto_pool(monkeypatch):
     FakeSession.calls = []
     FakeSession.response = httpx.Response(
         200,
@@ -141,7 +141,23 @@ async def test_official_preferences_only_expose_models_in_user_pool(monkeypatch)
 
     preferences = await catalog.official_preferences()
 
-    assert [model.id for model in preferences.text_models] == ["auto"]
-    assert preferences.text_default == "auto"
+    assert [model.id for model in preferences.text_models] == ["auto", "glm-5.2"]
+    assert preferences.text_default == "glm-5.2"
     assert [model.id for model in preferences.vision_models] == ["auto", "qwen3.8-max"]
     assert preferences.vision_default == "qwen3.8-max"
+
+
+@pytest.mark.asyncio
+async def test_manual_selection_does_not_modify_auto_pool(monkeypatch):
+    FakeSession.calls = []
+    FakeSession.response = httpx.Response(
+        200,
+        json={
+            "text": {"pool": ["auto"], "models": [{"id": "glm-5.2"}]},
+        },
+    )
+    monkeypatch.setattr(official_models, "OfficialAccountSession", FakeSession)
+    await official_models.OfficialModelCatalog().enable_text_model("glm-5.2")
+    assert [(method, path) for _, method, path in FakeSession.calls] == [
+        ("GET", "/model-preferences"),
+    ]

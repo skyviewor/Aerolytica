@@ -6,7 +6,6 @@ from aero.toolbox.download_progress import download_progress_reporter
 from aero.toolbox.paths import find_project_dir, short_path
 from aero.toolbox.registry import register_tool
 
-
 # ── GEFS Tools ──
 
 
@@ -31,7 +30,8 @@ from aero.toolbox.registry import register_tool
             },
             "duration_hours": {
                 "type": "integer",
-                "description": "预报持续时长。与 end_hour 二选一。如 240 表示从 start_hour 开始的 240 小时",
+                "description": "预报持续时长。与 end_hour 二选一。如 240 表示从 start_hour 开始"
+                "的 240 小时",
             },
             "product": {
                 "type": "string",
@@ -76,7 +76,8 @@ def get_gefs_forecast_schedule(
     )
     result["download_hint"] = (
         "将返回的 forecast_hours 列表直接传给 download_gefs 的 forecast_hours 参数。"
-        '默认只下载控制成员 c00；如需更多成员，传入 members 参数（如 members=["c00","p01","p02"]）。'
+        "默认只下载控制成员 c00；如需更多成员，传入 members 参数（如 members="
+        '["c00","p01","p02"]）。'
     )
     return result
 
@@ -208,7 +209,8 @@ async def check_gefs_availability(
             "variables": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "GRIB2 变量短名列表。如 TMP、HGT、UGRD、VGRD。用 search_gefs_variables 查找可用变量",
+                "description": "GRIB2 变量短名列表。如 TMP、HGT、UGRD、VGRD。用 search_gef"
+                "s_variables 查找可用变量",
             },
             "levels": {
                 "type": "array",
@@ -572,5 +574,3 @@ async def lookup_gefs_parameter(param: str, **kwargs) -> dict:
             "https://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_doc/grib2_table4-2.shtml",
         ],
     }
-
-

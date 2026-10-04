@@ -93,7 +93,8 @@ async def scan_local_files(
         "registered": registered,
         "registered_count": len(registered),
         "message": (
-            "已登记可读取的本地数据文件。" if confirm
+            "已登记可读取的本地数据文件。"
+            if confirm
             else "扫描结果仅为预览；请向用户展示候选文件并在确认后再登记。"
         ),
     }
@@ -252,9 +253,12 @@ def _add_dataset_coordinate_quality(ds: Any, item: dict[str, Any], np: Any) -> N
     lat_summary = _coordinate_quality(lat, np)
     lon_summary = _coordinate_quality(lon, np)
     item["spatial_extent"] = {
-        "north": lat_summary["max"], "south": lat_summary["min"],
-        "west": lon_summary["min"], "east": lon_summary["max"],
-        "latitude_order": lat_summary["order"], "longitude_order": lon_summary["order"],
+        "north": lat_summary["max"],
+        "south": lat_summary["min"],
+        "west": lon_summary["min"],
+        "east": lon_summary["max"],
+        "latitude_order": lat_summary["order"],
+        "longitude_order": lon_summary["order"],
     }
     if lat_summary["missing"] or lon_summary["missing"]:
         _issue(item, "missing_spatial_values", "经纬度坐标存在缺失值")
@@ -283,8 +287,12 @@ def _add_csv_coordinate_quality(path: Path, item: dict[str, Any]) -> None:
         _issue(item, "invalid_spatial_coordinate", "经纬度字段不包含有效数值")
         return
     item["spatial_extent"] = {
-        "north": max(lat), "south": min(lat), "west": min(lon), "east": max(lon),
-        "latitude_order": _order(lat), "longitude_order": _order(lon),
+        "north": max(lat),
+        "south": min(lat),
+        "west": min(lon),
+        "east": max(lon),
+        "latitude_order": _order(lat),
+        "longitude_order": _order(lon),
     }
 
 
@@ -308,7 +316,8 @@ def _numeric_quality(values: Any, np: Any) -> dict[str, Any]:
     missing = count - int(finite.sum())
     valid = array[finite]
     return {
-        "dtype": str(array.dtype), "missing": missing,
+        "dtype": str(array.dtype),
+        "missing": missing,
         "missing_ratio": missing / count if count else 0.0,
         "min": _json_number(valid.min()) if valid.size else None,
         "max": _json_number(valid.max()) if valid.size else None,
@@ -373,8 +382,13 @@ def _csv_time_quality(values: list[str], item: dict[str, Any]) -> dict[str, Any]
     regular = len(set(intervals)) <= 1 if intervals else True
     if intervals and not regular:
         _issue(item, "irregular_time_interval", "时间字段间隔不一致")
-    return {"start": cleaned[0] if cleaned else None, "end": cleaned[-1] if cleaned else None,
-            "count": len(cleaned), "duplicate_count": duplicate_count, "regular_interval": regular}
+    return {
+        "start": cleaned[0] if cleaned else None,
+        "end": cleaned[-1] if cleaned else None,
+        "count": len(cleaned),
+        "duplicate_count": duplicate_count,
+        "regular_interval": regular,
+    }
 
 
 def _csv_numbers(rows: list[dict[str, str]], name: str) -> list[float]:

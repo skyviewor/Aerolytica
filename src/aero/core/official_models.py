@@ -95,9 +95,7 @@ class OfficialModelCatalog:
         finally:
             await session.close()
         if response.status_code >= 400:
-            raise OfficialAccountError(
-                f"官方模型列表暂时不可用（HTTP {response.status_code}）。"
-            )
+            raise OfficialAccountError(f"官方模型列表暂时不可用（HTTP {response.status_code}）。")
         try:
             payload = response.json()
         except ValueError as exc:
@@ -119,13 +117,19 @@ class OfficialModelCatalog:
             parsed.insert(0, _fallback_model())
         return tuple(parsed)
 
-    async def official_preferences(self, *, force_refresh: bool = False) -> OfficialModelPreferences:
+    async def official_preferences(
+        self, *, force_refresh: bool = False
+    ) -> OfficialModelPreferences:
         now = self._clock()
         if not force_refresh and self._preferences and now - self._loaded_at < self._ttl_seconds:
             return self._preferences
         async with self._refresh_lock:
             now = self._clock()
-            if not force_refresh and self._preferences and now - self._loaded_at < self._ttl_seconds:
+            if (
+                not force_refresh
+                and self._preferences
+                and now - self._loaded_at < self._ttl_seconds
+            ):
                 return self._preferences
             try:
                 preferences = await self._fetch_preferences()
@@ -161,24 +165,19 @@ class OfficialModelCatalog:
                 fallback = _fallback_model()
                 return (fallback,), "auto"
             items = group.get("models") if isinstance(group.get("models"), list) else []
-            pool = {
-                str(model_id).strip()
-                for model_id in group.get("pool", [])
-                if str(model_id).strip()
-            } if isinstance(group.get("pool"), list) else set()
-            pool.add("auto")
             parsed = tuple(
                 self._parse_model(item)
                 for item in items
                 if (
                     isinstance(item, dict)
                     and str(item.get("id") or "").strip()
+                    and (item.get("id") == "auto" or key in item.get("capabilities", []))
                 )
             )
             if not any(model.id == "auto" for model in parsed):
                 parsed = (_fallback_model(), *parsed)
             default = str(group.get("default") or "auto").strip()
-            if default not in pool:
+            if default not in {model.id for model in parsed}:
                 default = "auto"
             return parsed, default
 
@@ -187,25 +186,17 @@ class OfficialModelCatalog:
         return OfficialModelPreferences(text_models, vision_models, text_default, vision_default)
 
     async def enable_text_model(self, model_id: str) -> None:
-        """Add a selected model while preserving both existing model pools."""
+        """Validate manual selection without changing the automatic routing pool."""
         session = OfficialAccountSession()
         try:
             response = await session.request_to(relay_llm_url(), "GET", "/model-preferences")
             if response.status_code >= 400:
                 raise OfficialAccountError("无法获取当前模型设置，请稍后重试。")
             payload = response.json()
-            text, vision = payload["text"], payload["vision"]
+            text = payload["text"]
             available = {item["id"] for item in text["models"]}
             if model_id not in available:
                 raise OfficialAccountError("该模型当前不可用，请刷新模型列表。")
-            pool = list(dict.fromkeys([*text["pool"], model_id]))
-            response = await session.request_to(
-                relay_llm_url(), "PUT", "/model-preferences",
-                json={"text_pool": pool, "text_default": text["default"],
-                      "vision_pool": vision["pool"], "vision_default": vision["default"]},
-            )
-            if response.status_code >= 400:
-                raise OfficialAccountError("模型设置保存失败，请稍后重试。")
         except (ValueError, KeyError, TypeError) as exc:
             raise OfficialAccountError("官方模型设置格式无效。") from exc
         finally:
@@ -213,8 +204,12 @@ class OfficialModelCatalog:
 
     @staticmethod
     def _parse_model(item: dict) -> OfficialModel:
-        capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), list) else ["text"]
-        multiplier = item.get("price_multiplier") if isinstance(item.get("price_multiplier"), dict) else {}
+        capabilities = (
+            item.get("capabilities") if isinstance(item.get("capabilities"), list) else ["text"]
+        )
+        multiplier = (
+            item.get("price_multiplier") if isinstance(item.get("price_multiplier"), dict) else {}
+        )
         return OfficialModel(
             id=str(item.get("id") or "").strip(),
             display_name=str(item.get("name") or item.get("display_name") or item.get("id") or ""),

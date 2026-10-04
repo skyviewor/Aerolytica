@@ -1,6 +1,6 @@
 """Aero shared types and config."""
 
-from aero.core.config import CDSCredentials, Credentials, LLMConfig, AeroConfig
+from aero.core.config import AeroConfig, CDSCredentials, Credentials, LLMConfig
 from aero.core.types import (
     DownloadResult,
     Message,

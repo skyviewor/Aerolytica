@@ -275,7 +275,7 @@ class GhcnDailyProvider:
                         raw_files.append(raw)
                         urls.append(url)
                         actual_ranges[station.station_id] = actual_range
-                        actual_variables[station.station_id] = list(found_variables)
+                        actual_variables[station.station_id] = sorted(found_variables)
                         if raw_reused and parsed_reused:
                             reused.append(destination)
                         break

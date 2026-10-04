@@ -57,7 +57,8 @@ class CDSDownloadStore:
             f"CREATE INDEX IF NOT EXISTS idx_{self._table}_status ON {self._table}(status)",
             f"CREATE INDEX IF NOT EXISTS idx_{self._table}_dataset ON {self._table}(dataset_id)",
             f"CREATE INDEX IF NOT EXISTS idx_{self._table}_source ON {self._table}(source)",
-            f"CREATE INDEX IF NOT EXISTS idx_{self._table}_updated ON {self._table}(updated_at DESC)",
+            f"CREATE INDEX IF NOT EXISTS idx_{self._table}_updated "
+            f"ON {self._table}(updated_at DESC)",
         ]
         for idx in indexes:
             conn.execute(idx)
@@ -174,8 +175,17 @@ class CDSDownloadStore:
     def get_stats(self) -> dict:
         conn = self._connect()
         stats = {}
-        for s in ("completed_with_file", "download_failed", "downloading",
-                   "queued", "running", "submitted", "error", "confirmed", "verified"):
+        for s in (
+            "completed_with_file",
+            "download_failed",
+            "downloading",
+            "queued",
+            "running",
+            "submitted",
+            "error",
+            "confirmed",
+            "verified",
+        ):
             count = conn.execute(
                 f"SELECT COUNT(*) FROM {self._table} WHERE status=?", (s,)
             ).fetchone()[0]
@@ -190,9 +200,7 @@ class CDSDownloadStore:
             return 0
         placeholders = ", ".join("?" for _ in ids)
         conn = self._connect()
-        cursor = conn.execute(
-            f"DELETE FROM {self._table} WHERE id IN ({placeholders})", ids
-        )
+        cursor = conn.execute(f"DELETE FROM {self._table} WHERE id IN ({placeholders})", ids)
         conn.commit()
         return cursor.rowcount
 

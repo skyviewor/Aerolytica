@@ -62,9 +62,7 @@ class PaperVersionManager:
         if not path.exists():
             self._write_bytes(path, b"")
             document_created = True
-        state.update(
-            {"version": 1, "document": self.DOCUMENT, "head": state.get("head")}
-        )
+        state.update({"version": 1, "document": self.DOCUMENT, "head": state.get("head")})
         self._write_json(self.state_path, state)
         if state.get("head"):
             return {
@@ -223,9 +221,7 @@ class PaperVersionManager:
     def _require_state(self) -> dict[str, Any]:
         state = self._read_state()
         if not state.get("document"):
-            raise PaperVersionError(
-                "尚未启用论文版本控制。请先指定一份 Markdown 正文。"
-            )
+            raise PaperVersionError("尚未启用论文版本控制。请先指定一份 Markdown 正文。")
         return state
 
     def _read_state(self) -> dict[str, Any]:

@@ -262,9 +262,9 @@ def _precipitation(row: dict[str, str]) -> dict[str, Any]:
 def _relative_humidity(temperature: float | None, dew_point: float | None) -> float | None:
     if temperature is None or dew_point is None:
         return None
-    exponent = (17.625 * dew_point) / (243.04 + dew_point) - (
-        17.625 * temperature
-    ) / (243.04 + temperature)
+    exponent = (17.625 * dew_point) / (243.04 + dew_point) - (17.625 * temperature) / (
+        243.04 + temperature
+    )
     return round(max(0.0, min(100.0, 100.0 * math.exp(exponent))), 1)
 
 

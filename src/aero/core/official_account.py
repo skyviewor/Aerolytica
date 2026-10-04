@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from aero.core.config import load_user_secrets, save_user_secrets, user_secrets_path
+from aero.release_environment import official_url
 
 DEFAULT_PLATFORM_API_URL = "https://api.aerolytica.skyviewor.team"
 DEFAULT_RELAY_LLM_URL = "https://llm.aerolytica.skyviewor.team/v1"
@@ -64,11 +65,11 @@ class OfficialSessionData:
 
 
 def platform_api_url() -> str:
-    return os.environ.get("AERO_OFFICIAL_API_URL", DEFAULT_PLATFORM_API_URL).rstrip("/")
+    return official_url("api_url")
 
 
 def relay_llm_url() -> str:
-    return os.environ.get("AERO_OFFICIAL_LLM_URL", DEFAULT_RELAY_LLM_URL).rstrip("/")
+    return official_url("llm_url")
 
 
 def load_official_session() -> OfficialSessionData:
@@ -121,8 +122,7 @@ def _session_from_tokens(
             payload.get("expires_at") or now + float(payload.get("expires_in") or 0)
         ),
         refresh_expires_at=float(
-            payload.get("refresh_expires_at")
-            or now + float(payload.get("refresh_expires_in") or 0)
+            payload.get("refresh_expires_at") or now + float(payload.get("refresh_expires_in") or 0)
         ),
         user_id=str(payload.get("user_id") or prior.user_id),
         email=str(payload.get("email") or prior.email),
@@ -191,7 +191,8 @@ class OfficialAccountSession:
                 f"{self.base_url}/v1/auth/login",
                 json={"email": email.strip(), "password": password},
                 headers={
-                    "Cache-Control": "no-store", "X-Aero-Client": "cli",
+                    "Cache-Control": "no-store",
+                    "X-Aero-Client": "cli",
                     "X-Aero-Device": socket.gethostname()[:128],
                     "X-Aero-OS": platform.system()[:64],
                 },
@@ -208,10 +209,7 @@ class OfficialAccountSession:
         session = self.data
         if not session.is_logged_in:
             raise OfficialLoginRequiredError("请先登录 Aerolytica 官方账户。")
-        if (
-            not force_refresh
-            and session.access_expires_at > time.time() + _REFRESH_SKEW_SECONDS
-        ):
+        if not force_refresh and session.access_expires_at > time.time() + _REFRESH_SKEW_SECONDS:
             return session.access_token
         return (await self.refresh(force=force_refresh)).access_token
 
@@ -237,7 +235,8 @@ class OfficialAccountSession:
                     f"{self.base_url}/v1/auth/refresh",
                     json={"refresh_token": current.refresh_token},
                     headers={
-                        "Cache-Control": "no-store", "X-Aero-Client": "cli",
+                        "Cache-Control": "no-store",
+                        "X-Aero-Client": "cli",
                         "X-Aero-Device": socket.gethostname()[:128],
                         "X-Aero-OS": platform.system()[:64],
                     },
@@ -290,9 +289,7 @@ class OfficialAccountSession:
         headers["Authorization"] = f"Bearer {token}"
         url = f"{base_url.rstrip('/')}{path}"
         try:
-            response = await self._client.request(
-                method, url, headers=headers, **kwargs
-            )
+            response = await self._client.request(method, url, headers=headers, **kwargs)
         except httpx.HTTPError as exc:
             raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
         if response.status_code == 401 and retry_unauthorized:
@@ -303,9 +300,7 @@ class OfficialAccountSession:
                 raise OfficialLoginRequiredError("账户已切换，请重新打开当前云端操作。")
             headers["Authorization"] = f"Bearer {token}"
             try:
-                response = await self._client.request(
-                    method, url, headers=headers, **kwargs
-                )
+                response = await self._client.request(method, url, headers=headers, **kwargs)
             except httpx.HTTPError as exc:
                 raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
             if response.status_code == 401:
@@ -389,9 +384,14 @@ class CloudSyncClient:
         return url
 
     async def upload_file(
-        self, path: str | os.PathLike[str], *, project_id: str | None = None,
-        directory_id: str | None = None, filename: str | None = None,
-        replaces: dict[str, Any] | None = None, exclusive: bool = False,
+        self,
+        path: str | os.PathLike[str],
+        *,
+        project_id: str | None = None,
+        directory_id: str | None = None,
+        filename: str | None = None,
+        replaces: dict[str, Any] | None = None,
+        exclusive: bool = False,
     ) -> dict[str, Any]:
         file_path = os.fspath(path)
         size_bytes = os.path.getsize(file_path)
@@ -410,6 +410,7 @@ class CloudSyncClient:
         if response.status_code >= 400:
             raise OfficialAccountError(_error_message(response, "获取云文件上传地址失败。"))
         payload = response.json()
+
         async def chunks():
             with open(file_path, "rb") as stream:
                 while chunk := await asyncio.to_thread(stream.read, 1024 * 1024):
@@ -418,7 +419,8 @@ class CloudSyncClient:
         try:
             async with self.transfer() as client:
                 uploaded = await client.put(
-                    self.check_url(payload["upload_url"]), content=chunks(),
+                    self.check_url(payload["upload_url"]),
+                    content=chunks(),
                     headers={"Content-Type": content_type, "Content-Length": str(size_bytes)},
                 )
                 uploaded.raise_for_status()
@@ -428,11 +430,15 @@ class CloudSyncClient:
             raise OfficialAccountError("云文件上传失败，未修改原有云端文件。") from None
         # Completion is separate from PUT. Never mark an ambiguous completion failed:
         # it may already have committed, and its signed key can be the active revision.
-        completed = await self.json("POST", f"/{payload['object_id']}/complete", json={
-            "replaces_object_id": replaces["object_id"] if replaces else None,
-            "expected_updated_at": replaces["updated_at"] if replaces else None,
-            "exclusive": exclusive,
-        })
+        completed = await self.json(
+            "POST",
+            f"/{payload['object_id']}/complete",
+            json={
+                "replaces_object_id": replaces["object_id"] if replaces else None,
+                "expected_updated_at": replaces["updated_at"] if replaces else None,
+                "exclusive": exclusive,
+            },
+        )
         return {**payload, **completed}
 
     async def download_file(self, object_id: str, destination: Path) -> None:
@@ -453,9 +459,11 @@ class CloudSyncClient:
         return str(response.json()["download_url"])
 
     async def delete(self, object_id: str, *, expected_updated_at: str | None = None) -> bool:
-        response = await self.request("DELETE", f"/v1/storage/{object_id}",
-                                      params={"expected_updated_at": expected_updated_at}
-                                      if expected_updated_at else {})
+        response = await self.request(
+            "DELETE",
+            f"/v1/storage/{object_id}",
+            params={"expected_updated_at": expected_updated_at} if expected_updated_at else {},
+        )
         if response.status_code >= 400:
             raise OfficialAccountError(_error_message(response, "删除云文件失败。"))
         return True

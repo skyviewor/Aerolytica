@@ -94,8 +94,12 @@ def test_variable_selection_requires_category_when_ambiguous():
 
 def test_monthly_selection_excludes_long_term_climatology():
     entries = (
-        CatalogEntry("pressure", "air", "Datasets/ncep.reanalysis.derived/pressure/air.mon.mean.nc", None),
-        CatalogEntry("pressure", "air", "Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.nc", None),
+        CatalogEntry(
+            "pressure", "air", "Datasets/ncep.reanalysis.derived/pressure/air.mon.mean.nc", None
+        ),
+        CatalogEntry(
+            "pressure", "air", "Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.nc", None
+        ),
     )
     selected = NcepReanalysisProvider._select_entries(
         entries,
@@ -161,20 +165,26 @@ def test_six_hourly_selection_excludes_dailies_and_prefers_exact_category():
     )
     product = PRODUCTS["ncep-reanalysis-2-6-hourly"]
 
-    assert NcepReanalysisProvider._select_entries(
-        entries,
-        ("hgt",),
-        product,
-        date(2025, 1, 1),
-        date(2025, 1, 1),
-    ) == entries[1:]
-    assert NcepReanalysisProvider._select_entries(
-        entries,
-        ("pressure/hgt",),
-        product,
-        date(2025, 1, 1),
-        date(2025, 1, 1),
-    ) == entries[1:]
+    assert (
+        NcepReanalysisProvider._select_entries(
+            entries,
+            ("hgt",),
+            product,
+            date(2025, 1, 1),
+            date(2025, 1, 1),
+        )
+        == entries[1:]
+    )
+    assert (
+        NcepReanalysisProvider._select_entries(
+            entries,
+            ("pressure/hgt",),
+            product,
+            date(2025, 1, 1),
+            date(2025, 1, 1),
+        )
+        == entries[1:]
+    )
 
 
 @pytest.mark.asyncio
@@ -320,7 +330,7 @@ async def test_ncss_failure_falls_back_to_source_file_and_local_subset(tmp_path)
             "lat": [20.0, 10.0],
             "lon": [100.0, 110.0],
         },
-    ).to_netcdf(source, engine="scipy")
+    ).to_netcdf(source, engine="netcdf4")
     source_bytes = source.read_bytes()
     source.unlink()
 
