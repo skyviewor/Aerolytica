@@ -170,6 +170,18 @@ def test_testpypi_is_paused_unless_explicitly_enabled():
     assert workflow["jobs"]["rehearsal"]["if"] == ("${{ vars.ENABLE_TESTPYPI_PUBLISH == 'true' }}")
 
 
+@pytest.mark.parametrize("workflow_name", ["ci.yml", "release.yml"])
+def test_offline_build_test_dependencies_are_warmed_before_pytest(workflow_name):
+    workflow = yaml.load(
+        (ROOT / ".github/workflows" / workflow_name).read_text(), Loader=yaml.BaseLoader
+    )
+    steps = workflow["jobs"]["checks" if workflow_name == "ci.yml" else "build"]["steps"]
+    runs = [step.get("run", "") for step in steps]
+    assert runs.index('uv build --out-dir "$RUNNER_TEMP/aero-build-check"') < runs.index(
+        "uv run --locked pytest"
+    )
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required for a real release build")
 @pytest.mark.parametrize("environment", ["production", "testing"])
 def test_real_signed_wheel_sdist_and_manifest_are_consistent(monkeypatch, tmp_path, environment):

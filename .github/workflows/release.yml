@@ -63,6 +63,8 @@ jobs:
           printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
       - run: uv run --locked ruff check src tests scripts/release
+      - name: Warm build dependencies for offline release tests
+        run: uv build --out-dir "$RUNNER_TEMP/aero-build-check"
       - run: uv run --locked pytest
       - working-directory: webui
         run: npm ci && npm run check && npm run build

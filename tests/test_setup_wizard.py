@@ -504,12 +504,20 @@ async def test_primary_setup_shows_green_success_before_advancing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_vision_setup_tests_connection_before_saving(monkeypatch):
+    from types import SimpleNamespace
+
+    release_success = asyncio.Event()
+
+    async def hold_success(seconds):
+        assert seconds == FirstRunSetupScreen._CONNECTION_SUCCESS_DELAY
+        await release_success.wait()
+
     async def successful_connection(values: dict[str, str]) -> None:
         assert values["model"] == "qwen3.7-plus"
         assert values["api_key"] == "sk-vision"
 
     monkeypatch.setattr("aero.cli.setup_wizard._test_primary_connection", successful_connection)
-    monkeypatch.setattr(FirstRunSetupScreen, "_CONNECTION_SUCCESS_DELAY", 0.05)
+    monkeypatch.setattr("aero.cli.setup_wizard.asyncio", SimpleNamespace(sleep=hold_success))
     app = WizardHost(vision_only=True)
 
     async with app.run_test(size=(100, 30)) as pilot:
@@ -531,7 +539,7 @@ async def test_vision_setup_tests_connection_before_saving(monkeypatch):
         assert str(wizard.query_one("#setup-error", Static).render()) == "测试通过"
         assert wizard.query_one("#setup-error", Static).has_class("setup-success")
 
-        await asyncio.sleep(0.06)
+        release_success.set()
         await pilot.pause()
         assert app.result is not None
         assert app.result["vision"]["api_key"] == "sk-vision"

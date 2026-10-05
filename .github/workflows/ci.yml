@@ -23,6 +23,8 @@ jobs:
       - run: python -m pip install uv==0.12.23
       - run: uv sync --locked --extra dev
       - run: uv run --locked ruff check src tests scripts/release
+      - name: Warm build dependencies for offline release tests
+        run: uv build --out-dir "$RUNNER_TEMP/aero-build-check"
       - run: uv run --locked pytest
       - working-directory: webui
         run: npm ci && npm run check && npm run build
