@@ -16,8 +16,10 @@ import tarfile
 import tempfile
 import tomllib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+if TYPE_CHECKING:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
@@ -43,6 +45,8 @@ def file_digest(path: Path) -> str:
 
 
 def get_signing_key() -> Ed25519PrivateKey:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
     raw = os.environ.get("RELEASE_SIGNING_KEY", "")
     try:
         return Ed25519PrivateKey.from_private_bytes(base64.b64decode(raw, validate=True))

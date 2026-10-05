@@ -50,7 +50,7 @@ flowchart TB
 当前生产 workflow 不使用 PyPI Environment、Trusted Publisher 或 OIDC 发布权限。
 
 先在仓库 Settings → Environments 创建 `production`、`testing`。下面配置分别填入
-两个环境，不同后端地址、发布前缀与密钥不要共用配置。生产环境可启用部署审批。
+两个环境，各自配置独立 bucket、后端地址与密钥。生产环境可启用部署审批。
 环境名由 workflow 决定，无需另外配置 `AERO_ENVIRONMENT` Variable。
 
 GitHub Environment secrets：
@@ -70,8 +70,8 @@ Secrets，未配置时才读取 Variables。私钥与 OSS 访问凭据必须保�
 | --- | --- |
 | `OSS_BUCKET` | 已存在的发布 bucket 名称 |
 | `OSS_ENDPOINT` | bucket 区域 HTTPS endpoint |
-| `OSS_PREFIX` | 必填；生产 `download`，测试例如 `download/testing`；不允许 bucket 根目录 |
-| `AERO_DOWNLOAD_BASE` | 必填；生产 `https://aero.skyviewor.com/download`，测试填实际测试前缀的公网 HTTPS 地址 |
+| `OSS_PREFIX` | 必填；两个独立 bucket 均填 `download`；不允许 bucket 根目录 |
+| `AERO_DOWNLOAD_BASE` | 必填；对应环境 bucket 的公网 HTTPS 下载地址，路径为 `/download` |
 | `AERO_OFFICIAL_API_URL` | 必填；该环境的平台 API HTTPS 地址（生产 `https://api.aerolytica.skyviewor.team`） |
 | `AERO_OFFICIAL_LLM_URL` | 必填；该环境的 LLM 网关 HTTPS 地址，含 `/v1`（生产 `https://llm.aerolytica.skyviewor.team/v1`） |
 | `RELEASE_PUBLIC_KEYS` | 可选，key-id → base64 公钥的 JSON；用于提前分发新公钥 |
@@ -100,8 +100,9 @@ CI 将环境名、API/LLM 地址和下载入口写入 wheel 的 `release_environ
 测试 `AERO_DOWNLOAD_BASE`。升级读取新安装包的默认地址，旧默认值不会继承为覆盖值。
 
 正式 Release 自动走生产；测试在 Actions 中手动运行 Publish Aerolytica to OSS，
-选择 `testing` 和匹配版本的已有 tag。同一版本可在两个独立前缀各构建一次；
-每个前缀内不可覆盖同版本产物。仍不向 PyPI 发布。
+选择 `testing` 和匹配版本的已有 tag。同一版本可在两个独立 bucket 各构建一次；
+每个 bucket 的 `download/` 内不可覆盖同版本产物，不添加 `testing/` 子目录。
+下载域名须映射到对应环境 bucket。仍不向 PyPI 发布。
 
 首次验证可直接从 develop 创建 testing 分支并推送，自动跑完整流程。
 这不需要把 workflow 或客户端代码合入 main，也不修改仓库默认分支。

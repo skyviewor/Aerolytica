@@ -46,8 +46,7 @@ def main():
     prefix = os.environ.get("OSS_PREFIX", "download").strip("/")
     if not prefix or ".." in prefix.split("/"):
         raise SystemExit("OSS_PREFIX must be a non-root safe object prefix")
-    if os.environ.get("AERO_ENVIRONMENT") == "testing" and prefix == "download":
-        raise SystemExit("Testing must use a separate prefix, for example download/testing")
+    # Environments use independently configured buckets; both may use download/.
     bucket = oss2.Bucket(
         oss2.Auth(os.environ[names[0]], os.environ[names[1]]),
         endpoint,

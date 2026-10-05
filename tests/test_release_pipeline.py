@@ -42,6 +42,22 @@ def test_package_name_and_entrypoint():
     assert metadata["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/aero"]
 
 
+def test_upload_helpers_do_not_require_signing_dependencies():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            "from prepare import distribution_module, file_digest; "
+            "assert distribution_module().DEFAULT_RUNTIME_PROFILE; assert callable(file_digest)",
+        ],
+        cwd=ROOT / "scripts/release",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_release_order_secret_scope_and_immutable_actions():
     workflow = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(), Loader=yaml.BaseLoader
