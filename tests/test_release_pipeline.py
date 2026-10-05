@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -45,17 +47,24 @@ def test_release_order_secret_scope_and_immutable_actions():
         (ROOT / ".github/workflows/release.yml").read_text(), Loader=yaml.BaseLoader
     )
     assert workflow["on"]["release"]["types"] == ["published"]
+    assert workflow["on"]["push"]["branches"] == ["testing"]
     assert workflow["on"]["workflow_dispatch"]["inputs"]["environment"]["default"] == "testing"
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
     jobs = workflow["jobs"]
     assert set(jobs) == {"build", "stage-oss", "install-smoke", "promote-oss"}
     assert workflow["permissions"] == {"contents": "read"}
     assert jobs["stage-oss"]["needs"] == "build"
-    assert jobs["install-smoke"]["needs"] == "stage-oss"
-    assert jobs["promote-oss"]["needs"] == "install-smoke"
+    assert jobs["install-smoke"]["needs"] == ["build", "stage-oss"]
+    assert jobs["promote-oss"]["needs"] == ["build", "install-smoke"]
+    assert jobs["install-smoke"]["env"]["RELEASE_TAG"] == ("${{ needs.build.outputs.release_tag }}")
+    for job_name in ("stage-oss", "promote-oss"):
+        assert jobs[job_name]["steps"][0]["with"]["ref"] == (
+            "${{ needs.build.outputs.source_sha }}"
+        )
     for job in jobs.values():
         assert job["environment"] == (
-            "${{ github.event_name == 'release' && 'production' || inputs.environment }}"
+            "${{ github.event_name == 'release' && 'production' "
+            "|| inputs.environment || 'testing' }}"
         )
         assert "id-token" not in job.get("permissions", {})
         assert "OSS_ACCESS_KEY_SECRET" not in job.get("env", {})
@@ -67,6 +76,74 @@ def test_release_order_secret_scope_and_immutable_actions():
             if "OSS_ACCESS_KEY_SECRET" in step.get("env", {}):
                 assert "scripts/release/publish_oss.py" in step["run"]
             assert "continue-on-error" not in step
+
+
+@pytest.mark.parametrize(
+    ("event", "environment", "ref", "tag", "succeeds"),
+    [
+        ("push", "testing", "refs/heads/testing", "", True),
+        ("push", "production", "refs/heads/testing", "", False),
+        ("push", "testing", "refs/heads/main", "", False),
+        ("workflow_dispatch", "testing", "refs/tags/v0.1.0", "v0.1.0", True),
+        ("workflow_dispatch", "testing", "refs/tags/v0.2.0", "v0.2.0", False),
+        ("workflow_dispatch", "production", "refs/tags/v0.1.0", "v0.1.0", False),
+        ("release", "production", "refs/tags/v0.1.0", "v0.1.0", False),
+    ],
+)
+def test_source_gate_allows_testing_but_rejects_unmerged_production(
+    tmp_path, event, environment, ref, tag, succeeds
+):
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    step = next(
+        step for step in workflow["jobs"]["build"]["steps"] if step.get("id") == "release_identity"
+    )
+    script_directory = tmp_path / "scripts/release"
+    script_directory.mkdir(parents=True)
+    shutil.copy(ROOT / "scripts/release/validate_artifacts.py", script_directory)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="aerolytica"\nversion="0.1.0"\n')
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    (binaries / "uv").write_text(
+        "#!/bin/sh\nshift 3\nexec " + shlex.quote(sys.executable) + ' "$@"\n'
+    )
+    (binaries / "git").write_text(
+        '#!/bin/sh\ncase "$1" in\n'
+        "merge-base) exit 1 ;;\n"
+        'rev-parse) printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;\n'
+        'show) printf "%s\\n" 1728000000 ;;\n'
+        "*) exit 2 ;;\nesac\n"
+    )
+    for binary in binaries.iterdir():
+        binary.chmod(0o755)
+    output = tmp_path / "outputs"
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": str(binaries)
+            + os.pathsep
+            + str(Path(sys.executable).parent)
+            + os.pathsep
+            + os.environ["PATH"],
+            "GITHUB_EVENT_NAME": event,
+            "GITHUB_REF": ref,
+            "RELEASE_ENVIRONMENT": environment,
+            "RELEASE_TAG": tag,
+            "GITHUB_ENV": str(tmp_path / "environment"),
+            "GITHUB_OUTPUT": str(output),
+        },
+    )
+    assert (result.returncode == 0) is succeeds, result.stderr
+    if succeeds:
+        assert "release_tag=v0.1.0\n" in output.read_text()
+        assert "source_sha=" + "a" * 40 in output.read_text()
+    else:
+        assert not output.exists()
 
 
 def test_testpypi_is_paused_unless_explicitly_enabled():

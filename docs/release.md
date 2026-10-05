@@ -13,6 +13,12 @@ pyproject。发布不会自动篡改版本号：先修改版本，再建完全�
 `testing` 或 `production` 和已有 tag。两个环境分别串行，不会取消前一发行。
 所有 job 显式绑定所选 GitHub Environment，使用该环境的 Variables/Secrets。
 
+`testing` 分支的 push 自动发布测试环境，直接构建该次 push 的 commit SHA，
+从 pyproject 读取版本（无需先创建 Git tag），不要求代码已合入 main。
+后续上传和推进步骤固定使用同一 SHA，避免运行期间分支移动改变发布代码。
+生产发行仍要求 tag 版本匹配且源提交已进入 main；测试 push 不能选择生产环境。
+这样安装构建可以先在 testing 验证，main 保持已充分测试的代码。
+
 正式 Release → checkout tag → 验证版本与 main 祖先关系 → 测试/WebUI →
 构建一次签名 wheel/sdist/清单 → 上传不可变 OSS 文件并检查公网映射 →
 四平台从 OSS 脚本安装、setup/doctor/冒烟 →
@@ -57,6 +63,9 @@ GitHub Environment secrets：
 
 GitHub Environment variables：
 
+下面非敏感配置也可以全部保存为同名 Environment Secrets；workflow 优先读取
+Secrets，未配置时才读取 Variables。私钥与 OSS 访问凭据必须保持在 Secrets 中。
+
 | Variable | 配置 |
 | --- | --- |
 | `OSS_BUCKET` | 已存在的发布 bucket 名称 |
@@ -93,6 +102,12 @@ CI 将环境名、API/LLM 地址和下载入口写入 wheel 的 `release_environ
 正式 Release 自动走生产；测试在 Actions 中手动运行 Publish Aerolytica to OSS，
 选择 `testing` 和匹配版本的已有 tag。同一版本可在两个独立前缀各构建一次；
 每个前缀内不可覆盖同版本产物。仍不向 PyPI 发布。
+
+首次验证可直接从 develop 创建 testing 分支并推送，自动跑完整流程。
+这不需要把 workflow 或客户端代码合入 main，也不修改仓库默认分支。
+GitHub 的网页手动运行按钮依赖默认分支存在 workflow；尚未合入 main 时，
+使用 testing push 触发，失败后可在该次运行页面使用 Re-run failed jobs。
+同一测试版本成功上传后仍不可覆盖；后续不同构建应先递增版本号。
 
 ### 本地生成签名密钥与备份
 
