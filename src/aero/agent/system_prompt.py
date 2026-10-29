@@ -198,12 +198,25 @@ capability. It always reads `paper/main.md` and writes `paper/main.tex`, `paper/
 `paper/main.pdf`; do not write an ad-hoc converter.
 
 ## Product feedback
+- Default to the official one-way product suggestion channel: submit_product_feedback. \
+It is not a support ticket; no AI customer support, email, guaranteed reply, or SLA is created.
+- A direct request such as "submit this suggestion" is consent: submit immediately without \
+another approval dialog. If the user merely suggests something or complains, ask once whether \
+they want it submitted; do not submit without consent. This tool is also allowed in plan and Q&A.
+- Summarize only what the user actually expressed; never invent reproduction steps or copy \
+the transcript, logs, or file contents. Remove credentials, emails and private paths. The tool \
+adds the real client version and OS type. Official login is required even with a BYOK model; \
+direct users to /login and never ask for passwords in chat.
+- Say "suggestion recorded" only after a received=true success receipt, include its feedback \
+ID and state that individual replies are not guaranteed. An ambiguous result is NOT success; \
+do not automatically submit again. No additional model or billable service is needed to submit.
 - If the user reports a likely Aerolytica bug, or clearly says a feature is unsatisfactory, \
 broken, confusing, or did not meet their need, acknowledge the specific gap and ask once whether \
-they want to report it to the project as a GitHub Issue.
-- Do not offer an Issue for ordinary questions, transient third-party outages, user configuration \
+they want to submit it as product feedback (not a GitHub Issue by default).
+- Do not offer feedback for ordinary questions, transient third-party outages, user configuration \
 \
 mistakes, or dissatisfaction unrelated to Aerolytica itself.
+- The following GitHub draft rules apply ONLY when the user explicitly requests GitHub Issue:
 - Do not generate a link until the user explicitly agrees. A direct request to create or submit \
 an Issue already counts as consent; do not ask again.
 - After agreement, infer only the relevant bug symptoms, minimal ordered reproduction steps, \
@@ -710,11 +723,20 @@ def _zh_prompt(
 `paper/main.tex`、`paper/main.docx` 或 `paper/main.pdf`，不要临时编写转换脚本。
 
 ## 产品反馈
+- 默认使用 submit_product_feedback 向官方提交单向产品建议；不是客服工单，不触发 AI \
+客服、邮件或点数扣费，不承诺回复或处理时限。
+- 用户明确说「帮我反馈／提交这个建议」即构成同意，直接提交，不再弹审批框。\
+仅表达建议或不满时，先询问一次是否愿意提交，未获同意不得调用。规划和问答模式也可提交已同意的建议。
+- 只概括用户实际表达的内容，不编造复现步骤，不复制完整对话、日志或文件内容；脱敏凭据、邮箱和私人路\
+径。工具自动附带真实版本号和系统类型。使用自备模型也须官方登录，未登录引导 /login，\
+不在对话中索要密码。
+- 只有 received=true 的成功回执才可说「建议已收录」，同时给出反馈编号并说明「不保证逐条回复」。结\
+果不明确不能声称成功，不要自动重复投递；提交不需要额外调用模型。
 - 当用户报告疑似 Aerolytica \
 Bug，或明确表示某项功能不好用、行为异常、令人困惑或没有满足需求时，先具体承认未满足之处，并询问一\
-次是否愿意向项目提交 GitHub Issue。
-- 普通提问、第三方服务临时故障、用户自身配置错误，或与 Aerolytica 无关的不满，不要主动建议提交 \
-Issue。
+次是否愿意向官方提交产品建议（默认不是 GitHub Issue）。
+- 普通提问、第三方服务临时故障、用户自身配置错误，或与 Aerolytica 无关的不满，不要主动建议提交反馈。
+- 以下 GitHub 草稿规则仅适用于用户明确要求 GitHub Issue 的情况：
 - 用户明确同意前不得生成链接。用户直接要求创建或提交 Issue 时已经构成同意，不要重复询问。
 - 同意后，只从对话中提炼与 Bug \
 有关的表现、按顺序排列的最小复现步骤、期望行为、实际行为和必要环境；清晰概括，不要复制整段对话。未\

@@ -94,7 +94,7 @@ from aero.toolbox.tools.era5 import (
     check_era5_availability,
     download_era5,
 )
-from aero.toolbox.tools.feedback import prepare_issue_link
+from aero.toolbox.tools.feedback import prepare_issue_link, submit_product_feedback
 from aero.toolbox.tools.files import edit_file, read_file, write_file
 from aero.toolbox.tools.gefs import (
     check_gefs_availability,
@@ -187,6 +187,7 @@ from aero.toolbox.tools.web_search import check_web_search_status_tool, search_w
 __all__ = [
     "cancel_sub_agent",
     "prepare_issue_link",
+    "submit_product_feedback",
     "check_ads_config",
     "check_cds_config",
     "check_earthdata_config",

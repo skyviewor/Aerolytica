@@ -312,6 +312,7 @@ def _is_content_filter_error(error: Exception) -> bool:
 
 
 _TOOL_NAME_REPLACEMENTS = {
+    "submit_product_feedback": "提交产品建议",
     "download_era5": "下载数据",
     "search_datasets": "搜索数据集目录",
     "search_dataset_variables": "查询数据集变量",
@@ -955,6 +956,13 @@ def _prune_generic_reference_urls(urls: list[str]) -> list[str]:
 
 
 def _direct_tool_response(tool_name: str, result: object) -> str | None:
+    if tool_name == "submit_product_feedback" and isinstance(result, dict):
+        feedback_id = result.get("feedback_id", "")
+        if (result.get("status") == "success" and result.get("received") is True
+                and isinstance(feedback_id, str) and re.fullmatch(r"fb_[a-f0-9]{32}", feedback_id)):
+            return f"建议已收录，反馈编号：{feedback_id}。不保证逐条回复。"
+        message = result.get("message")
+        return message if isinstance(message, str) and message.strip() else "未取得建议收录回执。"
     if tool_name != "analyze_image" or not isinstance(result, dict):
         return None
     if result.get("status") != "not_configured":
@@ -1320,6 +1328,12 @@ class AgentLoop:
         self._main_rounds = rounds + 1
 
     async def run(self, user_message: str) -> str:
+        from aero.application.turn_context import current_turn_id, use_turn_id
+
+        with use_turn_id(current_turn_id() or uuid.uuid4().hex):
+            return await self._run_unlocked(user_message)
+
+    async def _run_unlocked(self, user_message: str) -> str:
         """Process a user message and return the agent's response (non-streaming)."""
         debug_log("agent.run_started", mode="non_stream", text_length=len(user_message))
         self._ref_urls.clear()
@@ -1369,6 +1383,13 @@ class AgentLoop:
             return error_msg
 
     async def run_stream(self, user_message: str) -> AsyncGenerator[StreamEvent, None]:
+        from aero.application.turn_context import current_turn_id, use_turn_id
+
+        with use_turn_id(current_turn_id() or uuid.uuid4().hex):
+            async for event in self._run_stream_unlocked(user_message):
+                yield event
+
+    async def _run_stream_unlocked(self, user_message: str) -> AsyncGenerator[StreamEvent, None]:
         """Process a user message with streaming output."""
         from aero.application.request_timing import start_execution_timer
 
@@ -1976,6 +1997,11 @@ class AgentLoop:
                 drained=True,
             )
             yield StreamEvent(type="status", content=_sanitize_progress_text(message))
+
+        if exec_result.success and tc.name == "submit_product_feedback":
+            # The deterministic receipt (including failure/uncertainty) needs no
+            # extra generation round and cannot trigger model-driven retries.
+            self._direct_response = _direct_tool_response(tc.name, exec_result.result)
 
         if exec_result.success and not _tool_result_has_error_status(exec_result.result):
             yield StreamEvent(
