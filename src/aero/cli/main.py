@@ -2253,6 +2253,10 @@ class AeroApp(ChatTuiApp):
 
     def _input_meta_text(self) -> str:
         model_name = _display_model_name(self.config.llm.model)
+        if self.config.llm.provider == "official" and self.config.llm.model in {"auto", "default"}:
+            resolved = getattr(getattr(self.agent, "llm", None), "last_resolved_model", "")
+            if resolved:
+                model_name += f" · {_display_model_name(resolved)}"
         provider = _display_provider_name(self.config.llm.provider)
         effort = self.config.llm.reasoning_effort.strip().lower()
         text = escape(model_name)

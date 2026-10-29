@@ -1279,7 +1279,9 @@ class AgentLoop:
     def _record_llm_usage(self, usage: dict | None) -> None:
         self.tracker.add_llm(
             usage,
-            self.config.llm.model,
+            (getattr(self.llm, "last_resolved_model", "") or self.config.llm.model)
+            if self.config.llm.provider == "official"
+            else self.config.llm.model,
             provider=self.config.llm.provider,
             occurred_at=self.llm.last_request_started_at,
         )
@@ -1292,6 +1294,14 @@ class AgentLoop:
         if getattr(self, "_prepared_turn_id", "") == turn_id:
             return
         self.llm.relay_turn_id = turn_id
+        self.llm.last_resolved_model = ""
+        self.llm.last_routing_reason = ""
+        self.llm.last_routing_policy_version = ""
+        from aero.data.plans import get_session_id
+
+        self.llm.relay_conversation_id = (
+            get_session_id() or getattr(self.llm, "relay_conversation_id", "") or uuid.uuid4().hex
+        )
         self.llm.relay_purpose = "main"
         self._main_rounds = 0
         self._account_round_limit = None

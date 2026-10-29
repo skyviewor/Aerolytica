@@ -19,6 +19,7 @@ from aero.cli.main import (
     ChatTextArea,
     ChatTuiApp,
     SelectScreen,
+    _display_model_name,
     _load_saved_theme,
     _resolve_theme_name,
 )
@@ -174,6 +175,7 @@ class ResidentChatApp(ChatTuiApp):
         self._booted = False
         self._sending = False
         self._model = "auto"
+        self._resolved_model = ""
         self._mode = "execute"
         self._last_reply_text = ""
         self._cmd_list: ListView | None = None
@@ -278,6 +280,8 @@ class ResidentChatApp(ChatTuiApp):
             box.set_class(self._mode == mode, f"mode-{mode}")
         self.query_one("#mode-label", Static).update(labels[self._mode])
         model = "自动" if self._model == "auto" else self._model
+        if self._model in {"auto", "default"} and self._resolved_model:
+            model += f" · 实际：{_display_model_name(self._resolved_model)}"
         self.query_one("#input-meta", Static).update(
             f"模型：{model} · Enter 发送 · Shift+Enter 换行"
         )
@@ -347,6 +351,10 @@ class ResidentChatApp(ChatTuiApp):
             self._write(identifier, content, role)
             if role == "assistant":
                 self._last_reply_text = content
+                model = (message.get("metadata") or {}).get("resolved_model")
+                if isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,128}", model):
+                    self._resolved_model = model
+                    self._refresh_composer()
 
     def _approval(self, approval: dict):
         identifier = approval["approval_id"]

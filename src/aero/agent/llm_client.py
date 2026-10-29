@@ -119,7 +119,11 @@ class LLMClient:
         self._client = httpx.AsyncClient(timeout=120)
         self._official_session = None
         self.relay_turn_id = ""
+        self.relay_conversation_id = ""
         self.relay_purpose = "main"
+        self.last_resolved_model = ""
+        self.last_routing_reason = ""
+        self.last_routing_policy_version = ""
         self.last_usage: dict | None = None
         self.last_search_references: list[str] = []
         self.last_search_performed = False
@@ -201,6 +205,7 @@ class LLMClient:
                             "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
                         )
                     await _raise_for_status_stream(response)
+                    self._capture_relay_metadata(response)
                     async for line in response.aiter_lines():
                         if not line.startswith("data: "):
                             continue
@@ -293,6 +298,7 @@ class LLMClient:
                             "Aerolytica 官方账户登录已失效，请使用 /login 重新登录。"
                         )
                     await _raise_for_status_stream(response)
+                    self._capture_relay_metadata(response)
                     async for line in response.aiter_lines():
                         if not line.startswith("data: "):
                             continue
@@ -408,7 +414,25 @@ class LLMClient:
             headers["x-relay-question-purpose"] = self.relay_purpose
             if self.relay_turn_id:
                 headers["x-relay-turn-id"] = self.relay_turn_id
+            if self.relay_conversation_id:
+                headers["x-relay-conversation-id"] = self.relay_conversation_id
         return headers
+
+    def _capture_relay_metadata(self, response: httpx.Response) -> None:
+        """Observe the selected model without changing the user's auto preference."""
+        if self.config.provider != "official":
+            return
+        for attribute, header in (
+            ("last_resolved_model", "X-Relay-Logical-Model"),
+            ("last_routing_reason", "X-Relay-Routing-Reason"),
+            ("last_routing_policy_version", "X-Relay-Routing-Policy-Version"),
+        ):
+            setattr(self, attribute, "")
+            value = response.headers.get(header, "")
+            if len(value) <= 128 and all(
+                c.isascii() and (c.isalnum() or c in "._:/-") for c in value
+            ):
+                setattr(self, attribute, value)
 
     def _dashscope_headers(self, *, stream: bool = False) -> dict:
         headers = self._headers()
@@ -455,6 +479,7 @@ class LLMClient:
                         continue
                     raise RuntimeError("Aerolytica 官方账户登录已失效，请使用 /login 重新登录。")
                 _raise_for_status(resp)
+                self._capture_relay_metadata(resp)
                 return resp.json()
             except _TRANSIENT_HTTP_ERRORS as e:
                 if self.config.provider == "official":
@@ -491,6 +516,8 @@ class LLMClient:
             body["tool_choice"] = "auto"
         if self.config.provider == "official" and self.relay_turn_id:
             body["relay_turn_id"] = self.relay_turn_id
+        if self.config.provider == "official" and self.relay_conversation_id:
+            body["relay_conversation_id"] = self.relay_conversation_id
         return body
 
     def _dashscope_request_body(

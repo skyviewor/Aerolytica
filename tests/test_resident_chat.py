@@ -192,6 +192,34 @@ async def test_send_failure_never_automatically_resubmits():
         assert "不会自动重发" in str(app._rows["action-error"].render())
 
 
+async def test_resident_actual_model_is_displayed_without_changing_auto():
+    app = resident_chat.ResidentChatApp("my_agent", conversation=FakeConversation())
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._message(
+            {
+                "message_id": "routed",
+                "sender": "agent",
+                "content": "done",
+                "metadata": {"resolved_model": "kimi-k3"},
+            }
+        )
+        assert app._model == "auto"
+        assert "实际：kimi-k3" in str(app.query_one("#input-meta", Static).render())
+        app._message(
+            {
+                "message_id": "unsafe",
+                "sender": "agent",
+                "content": "done",
+                "metadata": {"resolved_model": "[red]bad"},
+            }
+        )
+        assert app._resolved_model == "kimi-k3"
+        app._model = "glm-5.3-flash"
+        app._refresh_composer()
+        assert "实际：" not in str(app.query_one("#input-meta", Static).render())
+
+
 async def test_expired_login_shows_login_command_without_retry_loop():
     conversation = FakeConversation()
     conversation.snapshot.side_effect = OfficialLoginRequiredError("expired")

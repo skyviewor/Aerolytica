@@ -73,6 +73,7 @@ class LocalSession:
         self.id = session_id or uuid.uuid4().hex[:12]
         self.session_manager = session_manager or SessionManager()
         self.agent = AgentLoop(config)
+        self.agent.llm.relay_conversation_id = self.id
         self.subagents = SubAgentManager()
         self.lock = asyncio.Lock()
         # Hosting installs a fenced cloud project guard; foreground and background
@@ -159,6 +160,7 @@ class LocalSession:
             "updated_at": self._session_meta.updated_at,
             "message_count": len(self.agent.messages),
             "model": self.config.llm.model,
+            "resolved_model": getattr(self.agent.llm, "last_resolved_model", ""),
             "provider": self.config.llm.provider,
             "mode": self.config.mode,
             "title_source": self._session_meta.title_source,
@@ -512,6 +514,7 @@ class LocalSession:
                         {
                             "state": RunState.COMPLETED.value,
                             "title_pending": self._title_pending.get(run_id, False),
+                            "resolved_model": getattr(self.agent.llm, "last_resolved_model", ""),
                         },
                     )
                 except asyncio.CancelledError:

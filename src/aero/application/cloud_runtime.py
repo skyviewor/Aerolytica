@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -181,6 +182,14 @@ class CloudAgentRuntime:
                 self._conversation_events.pop(0)
                 private_write(self._conversation_events_path, json.dumps(self._conversation_events))
 
+    def _resolved_model_metadata(self) -> dict[str, str]:
+        # Informational only: the relay ledger remains authoritative for billing.
+        llm = getattr(getattr(self.session, "agent", None), "llm", None)
+        model = getattr(llm, "last_resolved_model", "")
+        if isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,128}", model):
+            return {"resolved_model": model}
+        return {}
+
     def _queue_foreground_messages(self, run_id: str, status: str | None = None) -> None:
         state = self.session.run_status(run_id).get("state")
         status = status or {"completed": "completed", "cancelled": "canceled"}.get(state, "failed")
@@ -209,6 +218,7 @@ class CloudAgentRuntime:
                     "client_event_id": event_id,
                     "images": attachments,
                     "local_turn_id": turn_id,
+                    **(self._resolved_model_metadata() if role == "message" else {}),
                     **{
                         k: v
                         for k, v in self.session.run_status(run_id).items()
@@ -783,6 +793,7 @@ class CloudAgentRuntime:
                         "images": attachments,
                         "in_reply_to": command_id,
                         "client_event_id": event_id,
+                        **self._resolved_model_metadata(),
                         **{
                             k: v
                             for k, v in self.session.run_status(self.active_run_id).items()
