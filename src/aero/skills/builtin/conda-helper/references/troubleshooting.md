@@ -3,12 +3,12 @@
 ## Managed Environment Is Missing
 
 Call `ensure_runtime_tools`. It downloads Aero's Micromamba when needed and
-recreates `~/.aero/runtime/envs/aero-agent`. Do not search for or use a user
+recreates the private `aero-agent` environment. Do not search for or use a user
 Conda installation.
 
 If automatic bootstrap fails, check network access and retry:
 
-```bash
+```text
 aero setup
 ```
 
@@ -16,8 +16,8 @@ Use `aero doctor` to inspect the managed Micromamba and Python paths.
 
 ## Tool Is Found Outside Aero
 
-Executables are accepted only when they resolve inside
-`~/.aero/runtime/envs/aero-agent/bin`. Call `ensure_runtime_tools` to install
+Executables are accepted only when they resolve inside Aero's private runtime
+executable directory (`bin` on POSIX, `Scripts` on Windows). Call `ensure_runtime_tools` to install
 and verify the managed copy; never reuse a binary from base or another user
 environment.
 
@@ -30,8 +30,8 @@ mapping can be added to `package-mapping.md` and `RUNTIME_TOOL_PACKAGES`.
 
 Use:
 
-```bash
-~/.aero/runtime/envs/aero-agent/bin/python -m pip install -U <package>
+```text
+python -m pip install -U <package>
 ```
 
 `cnmaps` is pip-only and must never appear in a conda/mamba transaction.

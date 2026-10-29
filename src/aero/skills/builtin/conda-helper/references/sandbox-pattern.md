@@ -3,9 +3,8 @@
 ## Ownership
 
 - Aero CLI installation: `uv tool`
-- Package manager: `~/.aero/runtime/bin/micromamba`
-- Fixed environment: `~/.aero/runtime/envs/aero-agent`
-- Runtime Python: `~/.aero/runtime/envs/aero-agent/bin/python`
+- Package manager and interpreter live in Aero's platform-specific private runtime.
+- Fixed environment: `aero-agent`; inspect actual paths with `aero doctor`.
 
 No user Conda installation participates in this flow.
 
@@ -23,8 +22,8 @@ conda-forge, and verifies each executable.
 
 For pip-only libraries:
 
-```bash
-~/.aero/runtime/envs/aero-agent/bin/python -m pip install -U <package>
+```text
+python -m pip install -U <package>
 ```
 
 Use that command for `cnmaps`. Never install it with conda or mamba.

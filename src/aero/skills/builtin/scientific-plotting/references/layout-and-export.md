@@ -219,7 +219,7 @@ Open the exported raster and verify all of the following:
   on the left outer edge;
 - top and bottom whitespace are visually balanced;
 - the main data axes remain the dominant area;
-- the file is no larger than 500 KB unless the user requested high resolution.
+- the original file remains readable; create a separate compact preview only if needed.
 
 Do not claim an improvement merely because `figsize`, `pad`, `top`, or `bottom`
 changed in source code. Compare the exported image dimensions and visible
@@ -239,7 +239,7 @@ Use this section only after all of the following are true:
 
 Cropping is not a layout engine. It must not be used to conceal a wrong extent,
 an oversized axes rectangle, a manually misplaced colorbar, or missing labels.
-Never use it merely to satisfy the 500 KB limit.
+Never use it merely to satisfy a preview-size target.
 
 ### PNG/WebP: crop only the transparent outer canvas
 

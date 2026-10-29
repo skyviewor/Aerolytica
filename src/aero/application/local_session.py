@@ -363,19 +363,10 @@ class LocalSession:
 
     @asynccontextmanager
     async def _project_lock(self):
-        from aero.core.daemon import WorkspaceLock
+        from aero.core.project_execution import project_execution
 
-        lock = WorkspaceLock(self.project_dir / ".aero" / "runtime" / "execution.lock")
-        while True:
-            try:
-                lock.acquire()
-                break
-            except BlockingIOError:
-                await asyncio.sleep(0.1)
-        try:
+        async with project_execution(self.project_dir):
             yield
-        finally:
-            lock.release()
 
     async def _run(self, run_id: str, prompt: str) -> None:
         try:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import mimetypes
 import os
 import platform
@@ -17,6 +16,7 @@ from typing import Any
 import httpx
 
 from aero.core.config import load_user_secrets, save_user_secrets, user_secrets_path
+from aero.core.file_lock import lock_nonblocking, unlock
 from aero.release_environment import official_url
 
 DEFAULT_PLATFORM_API_URL = "https://api.aerolytica.skyviewor.team"
@@ -32,14 +32,14 @@ async def account_lock():
     with path.open("a+") as handle:
         while True:
             try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_nonblocking(handle.fileno())
                 break
             except BlockingIOError:
                 await asyncio.sleep(0.05)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            unlock(handle.fileno())
 
 
 class OfficialAccountError(RuntimeError):

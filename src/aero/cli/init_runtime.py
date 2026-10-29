@@ -27,6 +27,7 @@ from aero.distribution import DistributionError, download
 
 ENV_NAME = "aero-agent"
 CONDA_ENVIRONMENT_FILE = Path(__file__).with_name("environment.yaml")
+WINDOWS_ENVIRONMENT_FILE = Path(__file__).with_name("environment.windows.yaml")
 PIP_REQUIREMENTS_FILE = Path(__file__).with_name("env-requirements.txt")
 
 
@@ -110,7 +111,12 @@ def ensure_micromamba() -> Path | None:
             download(url, archive, limit=30_000_000)
             with tarfile.open(archive, "r:bz2") as bundle:
                 member = next(
-                    (item for item in bundle.getmembers() if item.name == "bin/micromamba"),
+                    (
+                        item
+                        for item in bundle.getmembers()
+                        if item.name
+                        == ("Library/bin/micromamba.exe" if os.name == "nt" else "bin/micromamba")
+                    ),
                     None,
                 )
                 if member is None or not member.isfile() or member.size > 30_000_000:
@@ -191,7 +197,7 @@ def install_common_packages(micromamba: Path) -> bool:
         "--prefix",
         str(env_path),
         "--file",
-        str(CONDA_ENVIRONMENT_FILE),
+        str(WINDOWS_ENVIRONMENT_FILE if os.name == "nt" else CONDA_ENVIRONMENT_FILE),
     ]
     print("正在安装完整科学计算工具集...")
     try:
@@ -217,6 +223,13 @@ def install_common_packages(micromamba: Path) -> bool:
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"pip 扩展安装失败: {exc}")
         return False
+    if result.returncode != 0 and "PIP_INDEX_URL" not in os.environ:
+        print("当前 pip 软件源安装失败，正在从 PyPI 官方源重试...")
+        try:
+            result = _run([*pip_command, "--index-url", "https://pypi.org/simple"], timeout=3600)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"PyPI 官方源重试失败: {exc}")
+            return False
     if result.returncode != 0:
         _print_command_error("pip 扩展安装失败", result)
         return False
@@ -311,6 +324,8 @@ def _micromamba_archive_url() -> str:
         target = "osx-arm64" if machine in {"arm64", "aarch64"} else "osx-64"
     elif system == "Linux":
         target = "linux-aarch64" if machine in {"arm64", "aarch64"} else "linux-64"
+    elif system == "Windows" and machine in {"amd64", "x86_64"}:
+        target = "win-64"
     else:
         raise RuntimeError(f"暂不支持自动安装 Micromamba: {system}")
     return f"https://micro.mamba.pm/api/micromamba/{target}/latest"

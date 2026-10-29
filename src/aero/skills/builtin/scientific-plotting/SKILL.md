@@ -7,6 +7,16 @@ description: Use this skill when creating, reviewing, improving, or refactoring 
 
 Use this skill to produce or review meteorological research figures. The goal is not decorative output; the goal is a figure that is physically interpretable, reproducible, publication-ready, and hard to misunderstand.
 
+## Agent guidance
+
+1. Identify the figure type, data source, variable, units, valid time, region, and any level or accumulation window. Choose projection and color scale before writing the script. Keep comparable panels on one scale and disclose interpolation, smoothing, or other processing.
+2. Use a sequential scale for positive fields and a zero-centered diverging scale for anomalies. Label the variable and unit on the colorbar. For CJK text, call `from mplfonts import use_font` and `use_font("Noto Sans CJK SC")` before rendering.
+3. For maps involving China, load the `cnmaps` skill and its `references/api-cheatsheet.md` and `references/plotting-patterns.md` before coding boundaries. Use cnmaps boundary data. A China place name in a time series or other non-map chart does not require cnmaps.
+4. Choose one layout owner: `layout="compressed"` is useful for regular fixed-aspect Cartopy grids; `layout="constrained"` can suit complex GridSpec or mixed panels. Do not combine either with `tight_layout()` or `subplots_adjust()`. PlateCarree geographic ticks and projected-map grid labels need different patterns; see `references/layout-and-export.md` and `references/meteorological-maps.md` when relevant.
+5. Save the reproducible script under `scripts/tmp/` and the complete figure under `figures/`. Render once and inspect the exported image with `analyze_image` when available. Fix one concrete scientific, labeling, or clipping defect, then export and inspect once more. Stop after that and report any remaining limitation. Do not iterate for cosmetic whitespace or a target byte count.
+6. Keep the original figure at readable quality. If a small chat preview is needed, use `prepare_image_for_vision` or a separate preview copy; never degrade the deliverable to satisfy a 500 KB threshold. For publication output, follow `references/publication-quality.md`.
+7. Read only the relevant detail: pressure cross-sections → `references/vertical-cross-sections.md`; vector cross-sections → `references/cross-section-wind-vectors.md`; barbs → `references/wind-barbs.md`; annotated time series → `references/time-series.md`; multi-panel maps → `references/layout-and-export.md`.
+
 ## Default workflow
 
 1. Identify the figure type and the scientific message.
@@ -87,13 +97,12 @@ Use this skill to produce or review meteorological research figures. The goal is
 8. Save and report outputs correctly.
    - Save temporary plotting scripts under `scripts/tmp/`.
    - Save generated figures under `figures/`.
-   - Default to a delivered raster figure no larger than **500 KB** (that is, `500 * 1024` bytes). This is a hard delivery limit unless the user explicitly asks for a high-definition, print, publication, or large-format figure.
-   - Start with a compact canvas and raster DPI (normally no larger than about 7 × 5 inches and 120 DPI), a layout engine such as `layout="compressed"`/`layout="constrained"`, and minimal padding. Do not enlarge the canvas just to fill screen space or use `bbox_inches="tight"` as a substitute for layout.
-   - After every default raster export, check the actual file size. If it exceeds 500 KB, regenerate it with a smaller canvas/DPI and, if still readable, apply lossless PNG optimization or a suitable compressed format. Repeat until it is within the limit while keeping labels, colorbars, and key scientific features legible.
+   - Start with a readable canvas and raster DPI suited to the actual deliverable, with a layout engine such as `layout="compressed"`/`layout="constrained"`. Do not enlarge the canvas just to fill screen space or use `bbox_inches="tight"` as a substitute for layout.
+   - A 500 KB target may be used for a separate chat preview, never as a hard cap on the original scientific figure. If vision needs a smaller image, use `prepare_image_for_vision` or a separate preview copy.
    - Reduce output size only by scaling the **entire figure** proportionally, lowering DPI, or using lossless/format compression. Never crop scientific content to meet the size limit, save only a colorbar axis, or remove the main map/data axes. **Never pass the string `bbox_inches="tight"` for a Cartopy map**, even when one exported image appears correct: Cartopy transforms, colorbars, and inset axes can produce an incomplete tight bounding box.
    - First solve whitespace with the correct geographic extent, an aspect-matched `figsize`, `layout="compressed"`/`layout="constrained"`, and layout-aware title/colorbar placement. If those are correct but the exported file still has uniform **outer canvas** whitespace, use only the safe post-render fallbacks in `references/layout-and-export.md`: alpha-channel autocrop for PNG/WebP, or a manually computed fixed `Bbox` for PDF/SVG. Run the rendered-geometry checks before cropping and visually inspect the final cropped file. Do not use autocrop to hide a wrong extent, oversized axes allocation, or internal panel gaps.
    - Before reporting a figure, visually inspect the exported file (not only the plotting window) and verify that it includes the primary data panel, title/metadata where applicable, and colorbar/legend. If the exported dimensions or aspect ratio are implausible for the requested figure, treat it as a failed export and regenerate it rather than delivering it.
-   - Treat a user request for "高清", "高分辨率", "大图", "出版", "印刷", "publication", "print", or an explicit pixel/DPI target as the only exception to the 500 KB default. State the resulting file size when using that exception.
+   - Honor a user request for "高清", "高分辨率", "大图", "出版", "印刷", "publication", "print", or an explicit pixel/DPI target. State the resulting file size when useful.
    - When reporting a generated image, use Markdown image syntax such as `![description](figures/name.png)`.
    - For every multi-panel Cartopy figure, read
      `references/layout-and-export.md` before writing the plotting script. It
@@ -162,11 +171,10 @@ cbar.ax.set_title("°C", fontsize=10, pad=5)
 For a horizontal colorbar, keep the descriptive variable-and-unit label below the
 bar with `cbar.set_label("2 m temperature (°C)")`.
 
-Use `layout="constrained"` instead if the figure has multiple panels or a more
-complex GridSpec; do not combine either layout mode with `tight_layout()` or with
-`bbox_inches="tight"`. If a default export exceeds 500 KB, lower only the export
-DPI (for example, 120 → 100 → 85) and re-export the same full Figure. Do not
-change axes positions or crop pixels to reduce file size.
+For a regular fixed-aspect Cartopy grid, prefer `layout="compressed"`; for a
+complex GridSpec or mixed panel types, `layout="constrained"` may fit better.
+Do not combine either layout mode with `tight_layout()` or with
+`bbox_inches="tight"`. Keep the original export readable regardless of file size.
 
 If correct layout still leaves a uniform blank strip outside the rendered artists,
 do not keep guessing `figsize` indefinitely. Follow the post-render safe-crop
@@ -420,7 +428,7 @@ These rules must be followed without exception. They override convenience, aesth
 - **Metadata**: Never omit units, valid time, variable level, or accumulation window when they matter scientifically. Colorbar must always be labeled with variable name and unit.
 - **Locked scales**: Never let each panel in a comparison auto-scale independently unless the user explicitly asks and the caption clearly says so. Same variable = same `vmin`/`vmax` across panels, times, and models.
 - **Finite contour levels**: When using `contourf` with an explicitly finite `levels` range, pass `extend="both"` by default so valid values below/above the selected display range use the end colors rather than becoming blank. The colorbar must show the corresponding end triangles. Do not use `extend` to conceal NaN/masked data: investigate and represent genuine missing data separately.
-- **Default file-size cap**: Unless the user explicitly requests high-definition, print, publication, large-format, or a specific high pixel/DPI output, do not deliver a raster figure above 500 KB. Verify the saved file size rather than estimating it from `figsize` or DPI.
+- **Preview size**: A 500 KB target applies only to an optional chat/vision preview. Preserve the readable original figure.
 - **Figure-integrity check**: A colorbar, legend, title, or blank canvas alone is never a valid scientific figure. Before delivering an export, confirm that the primary data axes were saved and occupy a meaningful part of the image. Never trade away the data panel to satisfy the default file-size cap.
 - **Vertical cross-section check**: For pressure coordinates, high pressure must
   appear at the bottom and low pressure at the top. Underground cells must be
@@ -432,7 +440,7 @@ These rules must be followed without exception. They override convenience, aesth
   normalized, clipped, or screen-coordinate quiver as a true airflow angle or
   true two-dimensional speed. State the vertical variable, units, multiplier,
   normalization/clipping, and the meaning of the reference arrow on the figure.
-- **Multi-panel title clearance**: Call `assert_artists_inside_canvas(fig)` after all titles and colorbars are present and immediately before export. It must reject title collisions and clipped artists. Never mutate Figure height or axes positions after compressed layout, reduce title/colorbar reservations to zero, or deliver overlapping/clipped text.
+- **Multi-panel title clearance**: Inspect the rendered export for title collisions and clipped artists. Use `assert_artists_inside_canvas(fig)` from `references/layout-and-export.md` when the figure uses that helper; do not add an undefined call merely to satisfy a textual check.
 - Never use a diverging colormap for a strictly positive scalar field unless it encodes a meaningful threshold.
 - Never use a sequential colormap for an anomaly/bias field that needs positive/negative symmetry.
 - Never use dense wind arrows or dense significance dots that cover the actual meteorological field.
@@ -444,7 +452,7 @@ These rules must be followed without exception. They override convenience, aesth
 - **China boundaries (HIGHEST PRIORITY)**: Whenever a map involves China's territory (Mainland, Taiwan, Hong Kong, Macau, South China Sea islands, etc.), you MUST use `cnmaps` for boundary data. Using `cartopy.feature.BORDERS`, `cartopy.feature.COASTLINE`, or any NaturalEarth-based global boundary for China's border is FORBIDDEN. Before writing any plotting code for a China-involved map, you MUST first read `skills/builtin/cnmaps/references/api-cheatsheet.md` and `skills/builtin/cnmaps/references/plotting-patterns.md`. This rule applies even if the user does not explicitly mention `cnmaps` or China boundaries.
 - **Global fill map seam**: Whenever plotting a global `contourf` or `pcolormesh` map where longitude spans 0°–360° (or -180°–180°) with `ax.set_global()`, you MUST call `cartopy.util.add_cyclic_point` to close the longitude seam. A white-line gap at the 0°/360° meridian is unacceptable for publication-quality output. See `references/meteorological-maps.md` for the exact usage pattern.
 - **Display domain must match the clip domain**: Never use a broad regional extent (for example East Asia) while clipping the plotted field to one country (for example China), unless the user explicitly requests blank surroundings. Regional synoptic fields remain un-clipped with administrative boundaries drawn as overlays. Country-only thematic maps may be clipped, but the axes extent must then fit that country. See `references/meteorological-maps.md`.
-- **Map canvas must match rendered aspect**: After the domain and clip are correct, do not estimate the final canvas solely with `longitude_span / latitude_span` or add arbitrary side-width constants. Cartopy's fixed-aspect GeoAxes, the actual `set_extent(...)`, and layout-aware decorations determine the rendered panel size. For a one-panel map, render once, measure `ax.get_position().width`, and perform one Figure-width correction toward roughly 78–84% main-axes occupancy; keep vertical title/colorbar space intact and rerun canvas-bound checks. See `references/meteorological-maps.md`.
+- **Map canvas must match rendered aspect**: After the domain and clip are correct, do not estimate the final canvas solely with `longitude_span / latitude_span` or add arbitrary side-width constants. Cartopy's fixed-aspect GeoAxes, the actual `set_extent(...)`, and layout-aware decorations determine the rendered panel size. Make at most one Figure-width correction when the exported main map is clearly too small; do not chase a fixed occupancy percentage. See `references/meteorological-maps.md`.
 - Never use decorative basemaps, 3D effects, glow effects, or busy backgrounds for scientific defaults.
 
 ## Python ecosystem defaults

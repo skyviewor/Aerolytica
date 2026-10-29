@@ -1,5 +1,6 @@
 """System prompt builder — supports 8 languages."""
 
+import os
 from datetime import datetime, timezone
 
 from aero.core.config import AeroConfig
@@ -65,6 +66,32 @@ def build_system_prompt(
             experiment_context,
             memo_context,
         )
+    if lang == "zh":
+        prompt += (
+            "\n\n## Aerolytica 官方云空间\n"
+            "用 get_cloud_sync_status 查看文件同步的实际后台状态和 configuration.revision。"
+            "用户要求开关自动同步或调整间隔时，用 set_cloud_sync_enabled；"
+            "要求立即同步时用 sync_cloud_now，均须逐次审批。queued 只代表排队，"
+            "应告知用户并结束本轮，不要持有工作区锁持续等待。开启不等于已完成同步。"
+            "询问本地自动同步目录或限制时用 get_local_sync_directories。用户明确要求修改时，"
+            "先读取 revision，再用 set_local_sync_directories 提交完整新范围并等待逐次审批；"
+            "不得直接改写 .aero/cloud-sync 状态文件绕过审批，也不得放开硬性排除。"
+            "用户询问云空间总容量、已占用、剩余或够不够上传时，先调用 "
+            "get_cloud_storage_quota 查询整个账户的实时容量，不从积分余额或文件列表猜测；"
+            "明确要求删除云端文件时，先查询准确 ID、完整路径、大小和版本，再使用 "
+            "delete_cloud_files 提交 1–5 个目标，等待系统审批；不得绕过审批或删除目录。"
+            "会话附件也可按此流程删除，但应提醒旧对话图片可能失效。"
+            "已用包含 Agent 上下文，剩余还要扣除上传预占。只读或未开通时不能上传。"
+            "用户要求把某个文件上传、保存或同步到云端时，默认指官方云空间，不是第三方网盘。"
+            "调用 list_cloud_projects/list_cloud_files 查询目标，使用 upload_cloud_file 或 "
+            "download_cloud_file 完成经审批的单文件传输，不要声称没有内置云空间能力，"
+            "不要改用邮件或 Git。多个项目且用户未指定时先询问，不猜测目标。"
+            "官方账户登录独立于推理模型，使用自备模型也可以使用已登录的官方云空间。"
+            "data/ 下的总结可以单独上传；单文件传输不等同于目录自动同步，不要擅自启用"
+            "持续同步或扩大范围。不得在对话里索要密码或令牌，不展示签名 URL。"
+            "仅工具成功后才能声称完成；缺少登录、订阅、额度或权限时据实说明。"
+            "完成确认中断时先查询云端状态，不自动重复上传。"
+        )
     if config.llm.provider == "official":
         prompt += (
             "\n\n## Aerolytica 官方 MCP 联网能力\n"
@@ -117,9 +144,27 @@ def build_system_prompt(
         prompt = prompt.replace(
             "via the local secure credential window", "via the inline secure form"
         )
-    from aero.core.runtime_paths import runtime_env_path
+    from aero.core.runtime_paths import runtime_env_path, runtime_python_path
 
     prompt = prompt.replace("~/.aero/runtime/envs/aero-agent", str(runtime_env_path()))
+    if os.name == "nt":
+        prompt = prompt.replace(f"{runtime_env_path()}/bin/python", str(runtime_python_path()))
+        prompt += (
+            "\n\n## Windows 执行环境\n"
+            "当前运行在 Windows。项目路径可能包含空格或中文。运行现有 Python 脚本时优先使用 "
+            "run_python_script，按参数数组传入，不拼接 Shell 命令。"
+            "run_shell 只用于用户明确需要的高级 Windows 命令；其解释器是 cmd.exe，"
+            "不得输出 Bash、/bin 路径、POSIX 管道或假设 CDO 原生命令可用。"
+            "内置下载工具优先；常规 GRIB/NetCDF 处理在可用的原生工具与 aero-agent "
+            "Python 包之间选择，以坐标、时间、单位和元数据一致为准。"
+            "如果所需任务尚无可用实现，应说明缺口，不要求用户安装 WSL 或 Cygwin。"
+            if lang == "zh"
+            else "\n\n## Windows execution\nUse run_python_script with argument arrays "
+            "for existing "
+            "Python scripts. run_shell uses cmd.exe for explicit advanced Windows commands. "
+            "Do not generate Bash commands or /bin paths. Choose available native or aero-agent "
+            "Python data tools for GRIB/NetCDF result parity. Do not require WSL or Cygwin."
+        )
     return origin_instruction() + "\n\n" + prompt
 
 
@@ -607,6 +652,30 @@ redirect >, etc.).
   For destructive commands, briefly explain what you're doing and proceed.
 
 ## File storage conventions
+- Use get_cloud_sync_status for actual file-sync runtime status; use approved
+  set_cloud_sync_enabled or sync_cloud_now for settings/one-shot requests. queued means
+  queued, not completed. End the turn so the workspace lock can be released; never poll
+  indefinitely within that turn. Do not claim enabling a worker means files are synced.
+- Inspect local automatic sync scope with get_local_sync_directories. For explicit changes,
+  read its revision and use set_local_sync_directories with the full replacement list;
+  wait for per-operation approval. Never edit sync metadata directly to bypass approval.
+- For explicitly requested cloud-file deletion, list exact IDs/paths/sizes/versions,
+  then use delete_cloud_files for at most five files and wait for per-operation approval.
+  Never bypass approval or delete directories. Warn that deleting conversation attachments
+  can break images in old messages; do not promise indefinite recovery or auto-retry failures.
+- Use get_cloud_storage_quota for account-wide cloud capacity/usage/free-space questions.
+  Do not infer storage from credits or file lists. Used capacity includes Agent context;
+  available_bytes also subtracts upload reservations and is zero if read-only/disabled.
+- Aerolytica has official cloud storage. When asked to upload/sync a specific file or
+  download from the cloud, use list_cloud_projects/list_cloud_files and the approved
+  upload_cloud_file/download_cloud_file tools. Do not claim cloud storage is unsupported
+  or substitute email, Git, or a third-party drive. Ask which project if ambiguous.
+  Transfers use the official account, independently of the inference model provider.
+  Single-file transfers (including reports under data/) are distinct from automatic
+  directory synchronization: do not enable it or expand its scope implicitly.
+  Never request account passwords/tokens in chat or expose signed storage URLs.
+  Report missing login/subscription/quota/permissions accurately; only claim success
+  after a successful tool result. Do not retry an ambiguous upload completion blindly.
 - Agent-generated scripts **MUST** be placed in `scripts/tmp/` (e.g., \
 `scripts/tmp/plot_precip.py`).
   File-writing capabilities create parent directories automatically. Do not run `mkdir -p \
@@ -641,10 +710,10 @@ extraction only when the user asks to read, extract, or analyze its contents.
 - If an image is too large, excessively high resolution, or `analyze_image` times out,
   call `prepare_image_for_vision` first. It creates a local compressed copy without
   changing the original; then analyze its returned `output_path` with `analyze_image`.
-- After a successful image analysis, state the conclusion and stop. Do not repeatedly call
-  the vision model or keep changing scripts for the same image unless the user explicitly
-  asks for another revision. A single request may use one analysis and, only when needed,
-  one post-edit verification.
+- For a generated figure, render once and inspect the exported file once. Revise the
+  script only for a concrete scientific, labeling, or clipping defect. Make one focused
+  revision and verify that export once; then deliver it or report any remaining issue.
+  Do not keep adjusting layout or file size for cosmetic reasons.
 - Without a successful `analyze_image` call in the current turn, do not write any visual \
 interpretation of an image or plot.
   This includes statements about
@@ -1087,8 +1156,9 @@ CLI 直接写 Python 脚本。
 脚本再执行；禁止用临时 `python -c` 或未保存的片段直接覆盖 `figures/` \
 中的成图。这样每次导出都可复现和排查。
 - 图表必须从完整 `Figure` 导出，禁止只保存 colorbar/legend \
-等单个轴。任何压缩都只能等比例缩放完整成图或改变编码参数，禁止按像素裁切、自动裁白边后覆盖原图；导\
-出后确认主数据轴仍在文件中。
+等单个轴。压缩应保留完整科学内容；若确有画布外沿空白，\
+只能按绘图 Skill 中经过渲染边界检查的流程处理，\
+不得裁掉主图、文字或色标。
 - 生成的数据图表放在当前目录的 `figures/` 下（如 `figures/precip_2023.png`）。
   仅当目录确实不存在时才创建；不要对已有目录重复执行 `mkdir -p`。下载/源数据继续放在 `data/`。
 - 回复中提到生成了图片时，**必须使用 `![描述](相对路径)` 语法**（如 \
@@ -1107,8 +1177,8 @@ CLI 直接写 Python 脚本。
 工具调用视觉模型来分析图片。需要读取图表、地图、卫星图等视觉内容时，请使用该工具。
 - 图片过大、分辨率过高，或 `analyze_image` 超时时，必须先调用 `prepare_image_for_vision`。
   它只在本地生成压缩副本，不会修改原图；再把返回的 `output_path` 传给 `analyze_image`。
-- 成功分析图片后必须直接给出结论并停止。本轮不要对同一图片反复调用视觉模型，也不要反复改脚本；
-  除非用户明确要求继续修改，否则最多允许一次分析和一次改图后的复核。
+- 生成图时先完整导出，再对成图检查一次。只有发现具体的科学、标注或裁切错误时才针对问题改一次脚本，
+  并复核改后的成图一次；之后交付或如实说明剩余问题。不要为了外观或文件大小反复微调脚本。
 - 当前轮没有成功调用 `analyze_image` 时，禁止写任何图片/图表的视觉解读。
   禁止描述颜色、形状、空间分布、降水/云/要素集中在哪里、图像显示了什么等内容。
   如果只是生成了图表，只能说明文件路径、数据来源、时间、变量、单位、投影、
@@ -1124,15 +1194,16 @@ def _skill_section(skill_context: str, lang: str) -> str:
     enforcement = _skill_enforcement(skill_context, lang)
     if lang == "zh":
         return f"""## 当前启用的 Skill 指导
-以下 Skill 按标准 `SKILL.md` 格式加载。必须遵守其正文中的流程。
+以下是所选 Skill 的本轮执行要点。需要细节时再从 Skill root 读取完整 `SKILL.md`。
 如正文指向 `references/`、`scripts/` 或 `assets/`，
 只在任务需要细节时再读取对应资源，不要一次性读取全部资源。
 
 {skill_context}
 {enforcement}"""
     return f"""## Active Skill Guidance
-The following Skills were loaded from standard `SKILL.md` folders.
-Follow their workflows. If they point to `references/`, `scripts/`, or `assets/`,
+The following are turn-level summaries of selected Skills. Read the full
+`SKILL.md` from its root only when more detail is needed. If they point to
+`references/`, `scripts/`, or `assets/`,
 read only the specific resource needed for the task.
 
 {skill_context}
@@ -1140,10 +1211,8 @@ read only the specific resource needed for the task.
 
 
 def _skill_enforcement(skill_context: str, lang: str) -> str:
-    has_sciplot = "### scientific-plotting" in skill_context
-    has_cnmaps = "### cnmaps" in skill_context
     has_weather_verification = "### weather-verification" in skill_context
-    if not has_sciplot and not has_cnmaps and not has_weather_verification:
+    if not has_weather_verification:
         return ""
 
     blocks: list[str] = []
@@ -1180,106 +1249,6 @@ execute, report the blocker and stop; do not silently fall back.
 6. The final result MUST identify the cyeva version, comparison class, and matched/QC sample \
 counts. Never claim completion without a successful cyeva metric call.""")
 
-    if has_sciplot:
-        if lang == "zh":
-            blocks.append("""### scientific-plotting 强制约束
-当 `scientific-plotting` Skill 被激活时，以下规则为**硬性要求，违反即为错误**：
-
-1. **色标**：禁止对连续标量场使用 `jet`/rainbow 色标。正值场（降水、风速等）必须用 sequential \
-色标，异常/偏差场必须用 diverging 色标并以零为中心。
-2. **元数据**：禁止省略单位、有效时间、变量层次、累积窗口等关键科学信息。colorbar \
-必须标注变量名和单位。
-3. \
-**色标锁定**：多面板/多时次/多模型对比中，相同变量必须使用相同的色标范围（`vmin`/`vmax`），禁止各\
-自自动缩放。
-4. **出图质量**：发表级出图至少 300 DPI，矢量图用 PDF/SVG，检查和确认 CJK 字体渲染正常。
-   含中文、日文或韩文文本的 Matplotlib 脚本必须显式调用 `from mplfonts import use_font` 和 \
-`use_font("Noto Sans CJK \
-SC")`；禁止硬编码系统字体路径或用未经验证的 `font.sans-serif` 列表覆盖字体配置。
-5. **声明处理步骤**：禁止将插值站点场、再分析场、平滑场、AI \
-生成场包装为"原始观测"。所有处理方法必须披露。
-6. **中国多子图地图**：当中国区域图有两个及以上面板时，每个面板必须使用同一 \
-`levels`/`cmap`/`norm`，并在每次 `contourf` 中明确传入 \
-`extend="both"`；每个主面板必须绘制轻量虚线经纬网。共享 colorbar \
-必须展示两端三角，不能仅完成其中一个面板。只有“中国全图”才要求每个面板配南海插图；省、市或其他区域\
-图（例如陕西）禁止为了套模板而增加南海插图。
-7. **以上规则覆盖所有绘图默认行为**，不可因"看起来好看"或"代码更方便"而违反。""")
-        else:
-            blocks.append("""### scientific-plotting Enforcement (HARD RULE)
-When the `scientific-plotting` skill is active, the following rules are **mandatory — violation \
-is an error**:
-
-1. **Colormaps**: NEVER use `jet`/rainbow for continuous scalar fields. Positive fields (precip, \
-wind speed, etc.) MUST use sequential colormaps. Anomaly/bias fields MUST use diverging colormaps \
-centered at zero.
-2. **Metadata**: NEVER omit units, valid time, variable level, or accumulation windows. Colorbar \
-MUST label variable name and unit.
-3. **Locked color limits**: In multi-panel / multi-time / model comparison plots, identical \
-variables MUST share identical color limits (`vmin`/`vmax`). DO NOT let each panel auto-scale \
-independently.
-4. **Export quality**: Publication figures must be at least 300 DPI. Prefer PDF/SVG for vector \
-output. Verify CJK font rendering is correct.
-   Matplotlib scripts containing Chinese, Japanese, or Korean text must explicitly call `from \
-mplfonts import use_font` and `use_font("Noto Sans CJK SC")`. Never hard-code system font paths \
-or override the font configuration with an unverified `font.sans-serif` list.
-5. **Disclose processing**: NEVER present interpolated station fields, reanalysis, smoothed, or \
-AI-generated fields as "raw observations". All processing must be disclosed.
-6. **China multi-panel maps**: When a China-region map has two or more panels, every panel MUST \
-use the same `levels`/`cmap`/`norm` and explicitly pass `extend="both"` to each `contourf`; every \
-main panel MUST draw light dashed gridlines. The shared colorbar MUST show both endpoint \
-triangles. Completing only one panel is not acceptable. Require a South China Sea inset in every \
-panel only for a national China map; do not add one mechanically to provincial, city, or other \
-regional maps such as Shaanxi.
-7. **These rules override all plotting defaults**. Do not violate them for convenience or \
-aesthetics.""")
-
-    china_block_zh = """### 中国国界线强制约束
-**这是最高优先级的硬性要求，违反即为严重错误：**
-
-1. \
-**国界线来源**：只要图中出现中国领土（包括中国大陆、台湾、香港、澳门、南海诸岛、藏南等），**禁止**\
-使用 \
-`cartopy.feature.BORDERS`、`cartopy.feature.COASTLINE` 或全球边界数据集。**必须**使用 `cnmaps` \
-提供的边界数据。
-2. **必须加载 cnmaps**：绘制涉及中国领土的图之前，**必须**先读取 \
-`skills/builtin/cnmaps/references/api-cheatsheet.md` 和 \
-`skills/builtin/cnmaps/references/plotting-patterns.md` 这两个 cnmaps \
-参考文档，**不加载就直接写代码即为错误**。
-3. **API 使用**：中国国界/省界/市界 **必须** 通过 `cnmaps` 的 `get_adm_maps()` / `draw_map()` / \
-`draw_maps()` / \
-`clip_*_by_map()` 等 API 获取。**禁止**用 `cartopy` + `NaturalEarth` 替代。
-4. **南海诸岛**：如绘制中国全图，**必须**考虑南海插图或相关海洋边界要素，不能仅截取大陆部分。
-5. **边界优先级**：国界 > 省界 > 市界，国界线应略深略粗于省界，气象数据必须保持在视觉主导地位。
-6. 即使用户没有明确要求使用 \
-`cnmaps`，只要图中出现中国领土范围，**此规则自动生效，且覆盖所有其他绘图指导**。"""
-
-    china_block_en = """### China Boundaries Enforcement (HIGHEST PRIORITY HARD RULE)
-**This is the highest-priority mandatory requirement — violation is a serious error:**
-
-1. **Boundary source**: Whenever a map includes China's territory (including Mainland, Taiwan, \
-Hong Kong, Macau, South China Sea islands, etc.), **NEVER** use `cartopy.feature.BORDERS`, \
-`cartopy.feature.COASTLINE`, or any global boundary dataset. You **MUST** use `cnmaps` boundary \
-data.
-2. **Must load cnmaps first**: Before writing ANY code that draws a China-involved map, you \
-**MUST** first read `skills/builtin/cnmaps/references/api-cheatsheet.md` and \
-`skills/builtin/cnmaps/references/plotting-patterns.md`. **Writing code without reading these is \
-an error**.
-3. **API usage**: China national/provincial/city boundaries **MUST** be obtained via `cnmaps` \
-APIs such as `get_adm_maps()`, `draw_map()`, `draw_maps()`, `clip_*_by_map()`. **NEVER** \
-substitute with `cartopy` + `NaturalEarth`.
-4. **South China Sea**: When drawing a full China map, you **MUST** consider South China Sea \
-inset or relevant maritime boundary context. Do not crop to only the mainland.
-5. **Boundary priority**: National border > province > city. National borders should be slightly \
-darker/thicker than province lines. Meteorological data MUST remain visually dominant.
-6. Even if the user does not explicitly ask for `cnmaps`, this rule applies automatically \
-whenever China's territory appears in a map, and it **overrides ALL other plotting guidance**."""
-
-    if has_cnmaps or has_sciplot:
-        if lang == "zh":
-            blocks.append(china_block_zh)
-        else:
-            blocks.append(china_block_en)
-
     return "\n\n".join(blocks)
 
 
@@ -1300,18 +1269,9 @@ def _build_tools_section(
     if not tools:
         return "(no tools available)"
 
-    lines = []
-    for t in tools:
-        params_list = []
-        props = t.parameters.get("properties", {})
-        required = set(t.parameters.get("required", []))
-        for pname, pinfo in props.items():
-            req = " [required]" if pname in required else " [optional]"
-            params_list.append(f"    - {pname}: {pinfo.get('description', '')}{req}")
-        params_str = "\n" + "\n".join(params_list) if params_list else " (no parameters)"
-        lines.append(f"### {t.name}\n{t.description}\nParameters:{params_str}")
-
-    return "\n\n".join(lines)
+    # Function schemas are passed separately with each model request. Repeating
+    # parameters here spends context without adding tool capabilities.
+    return "\n".join(f"- {t.name}: {t.description}" for t in tools)
 
 
 def _mode_instruction(mode: str) -> str:

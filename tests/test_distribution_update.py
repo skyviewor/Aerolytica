@@ -18,6 +18,12 @@ from aero import update_processes
 from aero.cli import onboarding, update
 
 
+def test_windows_amd64_reports_x64_platform(monkeypatch):
+    monkeypatch.setattr(dist.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(dist.platform, "machine", lambda: "AMD64")
+    assert dist.target_platform() == "windows-x86_64"
+
+
 @pytest.fixture
 def release(monkeypatch, tmp_path):
     monkeypatch.setenv("AERO_INSTALL_ROOT", str(tmp_path / "client"))

@@ -18,6 +18,11 @@ pixi.lock
 .idea/
 .opencode/
 webui/node_modules/
+desktop/node_modules/
+desktop/runtime/python/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/aero-*
 *.swp
 *.swo
 

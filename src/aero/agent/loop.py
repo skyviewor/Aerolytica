@@ -17,7 +17,7 @@ import structlog
 from aero.agent.llm_client import LLMClient, LLMConfig, StreamEvent
 from aero.agent.progress import ProgressReporter, use_progress_reporter
 from aero.agent.runtime import Runtime
-from aero.agent.skills import SelectedSkill, SkillSelector, render_skill_context
+from aero.agent.skills import SkillSelector, render_skill_context
 from aero.agent.system_prompt import build_system_prompt
 from aero.application.turn_context import use_primary_model
 from aero.core.config import AeroConfig
@@ -291,6 +291,11 @@ def _runtime_tools_already_ready(args: dict) -> bool:
         return False
 
 
+_FRESH_APPROVAL_TOOLS = frozenset({
+    "delete_cloud_files", "set_local_sync_directories", "set_cloud_sync_enabled", "sync_cloud_now",
+})
+
+
 def _tool_call_needs_confirmation(tool_name: str, args: dict) -> bool:
     if tool_name == "scan_local_files":
         return bool(args.get("confirm"))
@@ -313,6 +318,17 @@ def _is_content_filter_error(error: Exception) -> bool:
 
 _TOOL_NAME_REPLACEMENTS = {
     "submit_product_feedback": "提交产品建议",
+    "get_cloud_sync_status": "查看云同步状态",
+    "set_cloud_sync_enabled": "设置自动云同步",
+    "sync_cloud_now": "请求立即云同步",
+    "get_local_sync_directories": "读取本地同步范围",
+    "set_local_sync_directories": "修改本地同步范围",
+    "delete_cloud_files": "删除云端文件",
+    "get_cloud_storage_quota": "查询官方云空间容量",
+    "list_cloud_projects": "查询官方云项目",
+    "list_cloud_files": "查询云端文件",
+    "upload_cloud_file": "上传文件到官方云空间",
+    "download_cloud_file": "下载云端文件",
     "download_era5": "下载数据",
     "search_datasets": "搜索数据集目录",
     "search_dataset_variables": "查询数据集变量",
@@ -1003,20 +1019,6 @@ def _reference_label(url: str) -> str:
     return "Reference"
 
 
-def _ensure_cnmaps_when_sciplot_active(
-    selected: list[SelectedSkill],
-    *,
-    skill_selector: SkillSelector,
-) -> None:
-    names = {item.skill.name for item in selected}
-    if "scientific-plotting" not in names or "cnmaps" in names:
-        return
-    all_skills = skill_selector.loader.load()
-    cnmaps = next((s for s in all_skills if s.name == "cnmaps"), None)
-    if cnmaps:
-        selected.append(SelectedSkill(skill=cnmaps, score=100))
-
-
 def _skill_selection_text(user_message: str, messages: list[Message]) -> str:
     """Add recent user intent only for an explicitly referential follow-up."""
     normalized = str(user_message or "").lower()
@@ -1141,7 +1143,6 @@ class AgentLoop:
     def _refresh_system_prompt_for_turn(self, user_message: str) -> None:
         selection_text = _skill_selection_text(user_message, self.messages)
         selected = self.skill_selector.select(selection_text)
-        _ensure_cnmaps_when_sciplot_active(selected, skill_selector=self.skill_selector)
         skill_context = render_skill_context(selected)
         from aero.data.instructions import load_instructions
 
@@ -1339,9 +1340,12 @@ class AgentLoop:
 
     async def run(self, user_message: str) -> str:
         from aero.application.turn_context import current_turn_id, use_turn_id
+        from aero.core.project_execution import project_execution
+        from aero.toolbox.paths import find_project_dir
 
         with use_turn_id(current_turn_id() or uuid.uuid4().hex):
-            return await self._run_unlocked(user_message)
+            async with project_execution(find_project_dir(), only_if_sync_configured=True):
+                return await self._run_unlocked(user_message)
 
     async def _run_unlocked(self, user_message: str) -> str:
         """Process a user message and return the agent's response (non-streaming)."""
@@ -1394,10 +1398,13 @@ class AgentLoop:
 
     async def run_stream(self, user_message: str) -> AsyncGenerator[StreamEvent, None]:
         from aero.application.turn_context import current_turn_id, use_turn_id
+        from aero.core.project_execution import project_execution
+        from aero.toolbox.paths import find_project_dir
 
         with use_turn_id(current_turn_id() or uuid.uuid4().hex):
-            async for event in self._run_stream_unlocked(user_message):
-                yield event
+            async with project_execution(find_project_dir(), only_if_sync_configured=True):
+                async for event in self._run_stream_unlocked(user_message):
+                    yield event
 
     async def _run_stream_unlocked(self, user_message: str) -> AsyncGenerator[StreamEvent, None]:
         """Process a user message with streaming output."""
@@ -1583,9 +1590,11 @@ class AgentLoop:
 
         groups: dict[str, list[ToolCall]] = {}
         for tc in tool_calls:
-            groups.setdefault(tc.name, []).append(tc)
+            key = f"{tc.name}:{tc.id}" if tc.name in _FRESH_APPROVAL_TOOLS else tc.name
+            groups.setdefault(key, []).append(tc)
 
-        for tool_name, calls in groups.items():
+        for calls in groups.values():
+            tool_name = calls[0].name
             if self._is_official_mcp_tool(tool_name):
                 for tc in calls:
                     result = await self._call_official_mcp(tc)
@@ -1613,7 +1622,14 @@ class AgentLoop:
                     self.messages.append(Message(role="tool", content=reason, tool_call_id=tc.id))
                 continue
 
-            if spec.requires_confirmation and tool_name not in self.always_allow:
+            if tool_name in _FRESH_APPROVAL_TOOLS and not (
+                await self._prepare_guarded_operation(calls[0])
+            ):
+                continue
+            if spec.requires_confirmation and (
+                tool_name in _FRESH_APPROVAL_TOOLS
+                or tool_name not in self.always_allow
+            ):
                 all_args = [self._parse_tool_args(tc) for tc in calls]
                 _needs_confirm = any(
                     _tool_call_needs_confirmation(tool_name, args) for args in all_args
@@ -1623,9 +1639,10 @@ class AgentLoop:
                         choice = await self._ask_confirmation_simple(tool_name, all_args[0])
                     else:
                         choice = await self._ask_confirmation_simple_batch(tool_name, all_args)
-                    if choice == "always":
+                    if choice == "always" and tool_name not in _FRESH_APPROVAL_TOOLS:
                         self.always_allow.add(tool_name)
-                    elif choice == "deny":
+                    if choice == "deny" or (tool_name in _FRESH_APPROVAL_TOOLS
+                                             and choice not in {"allow", "always"}):
                         for tc in calls:
                             if tool_name == "propose_execution":
                                 deny_msg = json.dumps(
@@ -1805,9 +1822,11 @@ class AgentLoop:
         # Group tool calls by name so same-tool batch gets confirmed once
         groups: dict[str, list[ToolCall]] = {}
         for tc in tool_calls:
-            groups.setdefault(tc.name, []).append(tc)
+            key = f"{tc.name}:{tc.id}" if tc.name in _FRESH_APPROVAL_TOOLS else tc.name
+            groups.setdefault(key, []).append(tc)
 
-        for tool_name, calls in groups.items():
+        for calls in groups.values():
+            tool_name = calls[0].name
             debug_log("agent.tool_group_started", tool_name=tool_name, calls=len(calls))
             if self._is_official_mcp_tool(tool_name):
                 for tc in calls:
@@ -1868,7 +1887,14 @@ class AgentLoop:
                     self.messages.append(Message(role="tool", content=reason, tool_call_id=tc.id))
                 continue
 
-            if spec.requires_confirmation and tool_name not in self.always_allow:
+            if tool_name in _FRESH_APPROVAL_TOOLS and not (
+                await self._prepare_guarded_operation(calls[0])
+            ):
+                continue
+            if spec.requires_confirmation and (
+                tool_name in _FRESH_APPROVAL_TOOLS
+                or tool_name not in self.always_allow
+            ):
                 all_args = [self._parse_tool_args(tc) for tc in calls]
                 _needs_confirm = any(
                     _tool_call_needs_confirmation(tool_name, args) for args in all_args
@@ -1900,12 +1926,13 @@ class AgentLoop:
                         choice = await self.confirm_future
                     finally:
                         self.confirm_future = None
-                    if choice == "always":
+                    if choice == "always" and tool_name not in _FRESH_APPROVAL_TOOLS:
                         self.always_allow.add(tool_name)
                     debug_log(
                         "agent.tool_confirmation_answered", tool_name=tool_name, choice=choice
                     )
-                    if choice == "deny":
+                    if choice == "deny" or (tool_name in _FRESH_APPROVAL_TOOLS
+                                             and choice not in {"allow", "always"}):
                         for tc in calls:
                             if tool_name == "propose_execution":
                                 deny_msg = json.dumps(
@@ -1927,6 +1954,37 @@ class AgentLoop:
             for tc in calls:
                 async for event in self._execute_tool_stream_body(tc):
                     yield event
+
+    async def _prepare_guarded_operation(self, call: ToolCall) -> bool:
+        args = self._parse_tool_args(call)
+        if call.name == "delete_cloud_files":
+            from aero.toolbox.tools.cloud import prepare_cloud_delete
+
+            result = await prepare_cloud_delete(args.get("project_id"), args.get("files"))
+        elif call.name == "set_local_sync_directories":
+            from aero.toolbox.tools.cloud_sync import prepare_sync_scope
+
+            result = await prepare_sync_scope(args.get("includes"), args.get("expected_revision"))
+        else:
+            from aero.toolbox.tools.cloud_sync import prepare_sync_control
+
+            enabled = args.get("enabled")
+            if call.name == "set_cloud_sync_enabled" and type(enabled) is not bool:
+                result = {"status": "error", "message": "enabled 必须是布尔值。"}
+            else:
+                action = "run_once" if call.name == "sync_cloud_now" else (
+                    "enable" if enabled else "disable"
+                )
+                result = await prepare_sync_control(action, args.get("expected_revision"),
+                                                    args.get("interval_seconds"))
+        if result.get("status") != "success":
+            self.messages.append(Message(
+                role="tool", content=json.dumps(result, ensure_ascii=False), tool_call_id=call.id,
+            ))
+            return False
+        # Only the independently verified manifest is shown and subsequently executed.
+        call.arguments = result["result"]
+        return True
 
     async def _execute_one_tool_stream(
         self,
@@ -2137,6 +2195,17 @@ class AgentLoop:
 
         if current_origin() == "web":
             return await request_approval_from_context({"tool": tool_name, "args": args})
+        if tool_name in _FRESH_APPROVAL_TOOLS:
+            from aero.application.approval_details import approval_payload
+
+            payload = approval_payload({"tool": tool_name, "args": args})
+            print(f"\n⚠️  {payload['title']}")
+            for row in payload["details"]:
+                print(f"{row['label']}：{row['value']}")
+            print(payload["description"])
+            print("   [y] 批准本次操作  [n] 拒绝")
+            choice = await self._read_terminal_confirmation()
+            return "allow" if choice == "allow" else "deny"
         print(f"\n⚠️  危险操作: {tool_name}")
         args_summary = json.dumps(args, ensure_ascii=False, default=str)
         if len(args_summary) > 200:

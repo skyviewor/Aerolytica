@@ -1,7 +1,7 @@
 """Conservative, restartable workspace synchronization against Relay storage v2.
 
 No background task is started implicitly. The caller owns the execution/busy guard
-and the lifetime of ``run``. Only the four research-document trees are eligible.
+and the lifetime of ``run``. Research-document defaults can be explicitly extended.
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
@@ -23,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from aero.core.file_lock import lock_nonblocking, nofollow_flag
 from aero.core.official_account import CloudSyncClient, OfficialAccountSession
 
 ALLOWED_ROOTS = frozenset({"papers", "literature", "scripts", "plans"})
@@ -133,6 +133,167 @@ class CloudSyncEngine:
             raise CloudSyncError("Unsupported sync state schema")
         return state
 
+    @classmethod
+    def _scope_reader(cls, root: Path):
+        engine = object.__new__(cls)
+        engine.root = Path(os.path.abspath(root))
+        engine._state_dir = engine.root / ".aero" / "cloud-sync"
+        if not engine.root.is_dir() or any(
+            p.is_symlink()
+            for p in (
+                engine.root,
+                engine.root / ".aero",
+                engine._state_dir,
+            )
+        ):
+            raise CloudSyncError("Workspace or sync metadata path is unsafe")
+        engine._state = engine._load()
+        return engine
+
+    @classmethod
+    def inspect_scope(cls, root: Path) -> dict:
+        """Read scope without creating metadata or accessing the network."""
+        return cls._scope_reader(root)._scope_view()
+
+    @classmethod
+    def preview_scope_at(cls, root: Path, includes: list[str], expected_revision: str) -> dict:
+        return cls._scope_reader(root).preview_scope(includes, expected_revision)
+
+    def _scope_view(self) -> dict:
+        binding = self._state.get("binding")
+        includes = (binding or {}).get("includes") or self._state.get("sync_includes")
+        includes = list(includes if includes is not None else sorted(ALLOWED_ROOTS))
+        # Revision binds approval to the entire destination/account/scope and pause state.
+        identity = {
+            "binding": binding,
+            "includes": includes,
+            "paused": bool(self._state.get("paused", False)),
+            "interval_seconds": self._state.get("sync_interval_seconds", 30),
+        }
+        revision = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        return {
+            "workspace": str(self.root),
+            "bound": bool(binding),
+            "project_id": (binding or {}).get("project_id"),
+            "directory_id": (binding or {}).get("root_directory_id"),
+            "includes": includes,
+            "default_includes": sorted(ALLOWED_ROOTS),
+            "excluded_components": sorted(EXCLUDED),
+            "paused": identity["paused"],
+            "automatic_enabled": bool(binding) and not identity["paused"],
+            "interval_seconds": identity["interval_seconds"],
+            "last_sync_at": self._state.get("last_sync_at"),
+            "pending_uploads": len(self._state.get("pending", {})),
+            "conflict_count": len(self._state.get("conflicts", {})),
+            "revision": revision,
+            "rules": [
+                "只允许当前工作区的相对目录",
+                "隐藏路径和疑似凭据路径不可同步",
+                "不允许符号链接、硬链接或特殊文件",
+                "data、tmp 等硬性排除不可放开",
+            ],
+            "note": "配置范围不代表同步服务已运行；未绑定时不会同步。",
+        }
+
+    def preview_scope(self, includes: list[str], expected_revision: str) -> dict:
+        current = self._scope_view()
+        if current["revision"] != expected_revision:
+            raise CloudSyncError("同步绑定或范围已变化，请重新读取并审批。")
+        if not isinstance(includes, list) or not 1 <= len(includes) <= 20:
+            raise CloudSyncError("请选择 1–20 个明确的同步目录；暂停同步不是将范围设为空。")
+        for value in includes:
+            if not isinstance(value, str) or not 1 <= len(value) <= 128:
+                raise CloudSyncError("同步目录名称无效。")
+            path = value.removesuffix("/**")
+            # Limit changes to top-level directory scopes: nested scopes in the
+            # legacy scanner cannot safely reconcile ancestor directory deletes.
+            if (
+                "/" in path
+                or "\\" in path
+                or not _eligible(path)
+                or not all(c.isprintable() for c in path)
+            ):
+                raise CloudSyncError(
+                    "目前只支持工作区一级目录，如 figures 或 figures/**；"
+                    "不允许 data、tmp、隐藏目录或凭据路径。"
+                )
+            local = self.root / path
+            if local.is_symlink() or (local.exists() and not local.is_dir()):
+                raise CloudSyncError("同步范围必须是普通目录，不能是链接或文件。")
+        normalized = sorted(set(self._validate_includes(includes)))
+        previous = sorted(current["includes"])
+        # Canonical directory names make 'figures' and 'figures/**' equivalent.
+        normalized = sorted({p.removesuffix("/**") for p in normalized})
+        if any(sum(len(p.encode()) for p in values) > 2000 for values in (normalized, previous)):
+            raise CloudSyncError("目录清单过长，无法完整展示审批；请缩小范围。")
+        old = {p.removesuffix("/**") for p in previous}
+        return {
+            "includes": normalized,
+            "expected_revision": expected_revision,
+            "previous_includes": previous,
+            "added": sorted(set(normalized) - old),
+            "removed": sorted(old - set(normalized)),
+            "workspace": str(self.root),
+            "project_id": current["project_id"],
+            "bound": current["bound"],
+            "paused": current["paused"],
+        }
+
+    async def update_scope(self, includes: list[str], expected_revision: str) -> dict:
+        """Change scope only, under the same cross-process lock as synchronization."""
+        async with self._mutex:
+            with self._locked():
+                preview = self.preview_scope(includes, expected_revision)
+                binding = self._state.get("binding")
+                if binding and (
+                    binding["user_id"] != self.session.data.user_id
+                    or binding["base_url"] != self.session.base_url
+                    or binding["local_root"] != str(self.root)
+                ):
+                    raise CloudSyncError("当前官方账户、接口或工作区与同步绑定不一致。")
+                if self._state["pending"]:
+                    raise SyncDeferred("存在待完成上传，先完成或处理原同步后再修改范围。")
+                self._state["sync_includes"] = preview["includes"]
+                if binding:
+                    binding["includes"] = preview["includes"]
+                for key in ("baseline", "conflicts"):
+                    self._state[key] = {
+                        p: v for p, v in self._state[key].items() if self._eligible_path(p)
+                    }
+                self._state["remote_entities"] = {}
+                self._state["remote_cursor"] = None
+                self._save()
+                return self._scope_view()
+
+    async def configure_sync(
+        self,
+        enabled: bool,
+        expected_revision: str,
+        interval_seconds: int | None = None,
+    ) -> dict:
+        if type(enabled) is not bool or (
+            interval_seconds is not None
+            and (type(interval_seconds) is not int or not 30 <= interval_seconds <= 900)
+        ):
+            raise CloudSyncError("开关必须为布尔值，同步间隔必须为 30–900 秒。")
+        async with self._mutex:
+            with self._locked():
+                if self._scope_view()["revision"] != expected_revision:
+                    raise CloudSyncError("同步配置已变化，请重新读取并审批。")
+                binding = self._state.get("binding")
+                if enabled and (
+                    not binding
+                    or binding["user_id"] != self.session.data.user_id
+                    or binding["base_url"] != self.session.base_url
+                    or binding["local_root"] != str(self.root)
+                ):
+                    raise CloudSyncError("必须先绑定当前账户、接口和工作区，不能自动选择云项目。")
+                self._paused = not enabled
+                if interval_seconds is not None:
+                    self._state["sync_interval_seconds"] = interval_seconds
+                self._save()
+                return self._scope_view()
+
     def _save(self) -> None:
         self._check_metadata()
         self._state["paused"] = self._paused
@@ -149,7 +310,9 @@ class CloudSyncEngine:
 
     @staticmethod
     def _fsync_dir(path: Path) -> None:
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if os.name == "nt":
+            return
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | nofollow_flag())
         try:
             os.fsync(fd)
         finally:
@@ -158,19 +321,20 @@ class CloudSyncEngine:
     @contextmanager
     def _locked(self):
         self._check_metadata()
-        fd = os.open(self._state_dir / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fd = os.open(self._state_dir / "lock", os.O_CREAT | os.O_RDWR | nofollow_flag(), 0o600)
         try:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_nonblocking(fd)
             except BlockingIOError as exc:
                 raise SyncDeferred("Another engine is syncing this workspace") from exc
             self._state = self._load()
+            self._paused = bool(self._state.get("paused", False))
             yield
         finally:
             os.close(fd)
 
     def _guard(self) -> None:
-        if self._paused or self.busy():
+        if (self._paused and not getattr(self, "_manual_mode", False)) or self.busy():
             raise SyncDeferred("Sync paused or project execution is busy")
         binding = self._state["binding"]
         if not binding:
@@ -255,7 +419,9 @@ class CloudSyncEngine:
                     "root_directory_id": root_directory_id,
                     "local_root": str(self.root),
                     "base_url": self.session.base_url,
-                    "includes": self._validate_includes(includes),
+                    "includes": self._validate_includes(
+                        includes if includes is not None else self._state.get("sync_includes")
+                    ),
                 }
                 if self._state["binding"] and self._state["binding"] != binding:
                     raise CloudSyncError("Already bound; use another workspace for another scope")
@@ -274,10 +440,12 @@ class CloudSyncEngine:
         return self.status()
 
     def pause(self, paused: bool = True) -> dict[str, Any]:
-        self._paused = paused
         if not self._mutex.locked():
             with self._locked():
+                self._paused = paused
                 self._save()
+        else:
+            self._paused = paused
         return self.status()
 
     async def _api(self, method: str, path: str, **kwargs: Any) -> dict:
@@ -449,7 +617,7 @@ class CloudSyncEngine:
             raise SyncConflict("Only regular, non-hardlinked files may be synchronized")
         sha = hashlib.sha256()
         md5 = hashlib.md5(usedforsecurity=False)
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(target, os.O_RDONLY | nofollow_flag() | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, "rb") as stream:
             before = os.fstat(stream.fileno())
             if (before.st_dev, before.st_ino) != (info.st_dev, info.st_ino):
@@ -526,9 +694,28 @@ class CloudSyncEngine:
             local["md5"] == etag or local["sha256"] == remote.get("sha256")
         )
 
-    async def sync_once(self) -> dict[str, Any]:
+    async def sync_once(self, *, manual: bool = False) -> dict[str, Any]:
+        from aero.core.daemon import WorkspaceLock
+
+        lease = WorkspaceLock(self.root / ".aero/runtime/execution.lock")
+        try:
+            lease.acquire()
+        except BlockingIOError:
+            return {
+                **self.status(),
+                "deferred": True,
+                "last_error": "工作区正在执行任务，稍后同步。",
+            }
+        try:
+            return await self._sync_once_locked(manual=manual)
+        finally:
+            lease.release()
+
+    async def _sync_once_locked(self, *, manual: bool = False) -> dict[str, Any]:
         async with self._mutex:
             with self._locked():
+                self._manual_mode = manual
+                deferred = False
                 try:
                     self._guard()
                     await self._recover()
@@ -555,14 +742,16 @@ class CloudSyncEngine:
                     self._failures = 0
                     self._state["last_sync_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
                 except SyncDeferred as exc:
+                    deferred = True
                     self._last_error = str(exc)
                 except Exception:
                     self._failures += 1
                     self._last_error = "Sync failed; pending operations retained for retry"
                     raise
                 finally:
+                    self._manual_mode = False
                     self._save()
-        return self.status()
+        return {**self.status(), "deferred": deferred}
 
     async def _reconcile(self, path: str, remote: dict[str, dict]) -> None:
         local = self._fingerprint(path)
@@ -756,7 +945,10 @@ class CloudSyncEngine:
         sha = hashlib.sha256()
         try:
             with os.fdopen(fd, "wb") as target:
-                source_fd = os.open(self._path(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                source_fd = os.open(
+                    self._path(path),
+                    os.O_RDONLY | nofollow_flag() | getattr(os, "O_NONBLOCK", 0),
+                )
                 with os.fdopen(source_fd, "rb") as source:
                     if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                         raise SyncConflict("Upload source is no longer a regular file")
@@ -876,11 +1068,21 @@ class CloudSyncEngine:
         if interval <= 0:
             raise ValueError("interval must be positive")
         while not stop.is_set():
+            previous_failures = self._failures
             try:
                 await self.sync_once()
-            except (OSError, CloudSyncError):
-                pass
-            delay = min(interval * 2 ** min(self._failures, 5), 900)
+            except Exception:
+                # Transport/JSON/runtime failures must not silently kill the
+                # background task. Cancellation remains a BaseException.
+                if self._failures == previous_failures:
+                    self._failures += 1
+                self._last_error = "Sync failed; pending operations retained for retry"
+            configured = self._state.get("sync_interval_seconds", interval)
+            if "sync_interval_seconds" in self._state and (
+                type(configured) is not int or not 30 <= configured <= 900
+            ):
+                configured = 30
+            delay = min(configured * 2 ** min(self._failures, 5), 900)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=delay)
             except TimeoutError:

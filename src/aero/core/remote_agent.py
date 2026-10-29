@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
 import re
 import uuid
@@ -14,6 +13,7 @@ from typing import Any
 import httpx
 
 from aero.core.config import load_user_secrets, save_user_secrets
+from aero.core.file_lock import lock_nonblocking, unlock
 from aero.core.official_account import OfficialAccountError, OfficialAccountSession
 from aero.release_environment import user_home
 
@@ -145,7 +145,7 @@ class AgentProcessLock:
     def acquire(self) -> None:
         self._handle = self.path.open("a+")
         try:
-            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_nonblocking(self._handle.fileno())
         except BlockingIOError as exc:
             self._handle.close()
             self._handle = None
@@ -158,7 +158,7 @@ class AgentProcessLock:
     def release(self) -> None:
         if self._handle is None:
             return
-        fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        unlock(self._handle.fileno())
         self._handle.close()
         self._handle = None
 

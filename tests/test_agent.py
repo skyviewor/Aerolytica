@@ -337,6 +337,8 @@ def test_build_system_prompt_injects_selected_skill_context():
     assert "当前启用的 Skill 指导" in prompt
     assert "scientific-plotting" in prompt
     assert "Use publication-quality labels." in prompt
+    assert "中国国界线强制约束" not in prompt
+    assert "500 KB" not in prompt
 
 
 def test_build_system_prompt_enforces_cyeva_for_weather_verification():

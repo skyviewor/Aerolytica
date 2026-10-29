@@ -3,6 +3,7 @@
 # ruff: noqa: E501
 
 import ast
+import os
 import re
 import shlex
 import shutil
@@ -11,7 +12,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from aero.core.network_region import detect_network_region
-from aero.core.runtime_paths import runtime_bin_path, runtime_env_path, runtime_root
+from aero.core.runtime_paths import (
+    runtime_bin_path,
+    runtime_env_path,
+    runtime_python_path,
+    runtime_root,
+)
 from aero.toolbox.registry import register_tool
 from aero.toolbox.runtime_manager import get_runtime_tool_manager
 
@@ -54,6 +60,18 @@ async def ensure_runtime_tools(tools: list[str]) -> dict:
             "message": f"暂不知道这些命令对应的 conda 包：{', '.join(unknown)}",
             "known_tools": sorted(manager.packages),
         }
+    if os.name == "nt":
+        unavailable = [tool for tool in requested if manager.packages[tool][0] in {"cdo", "nco"}]
+        if unavailable:
+            return {
+                "status": "error",
+                "message": (
+                    "这些命令没有经过 Aerolytica Windows 原生运行时验收："
+                    f"{', '.join(unavailable)}。请使用已覆盖的专用工具或 aero-agent Python 脚本；"
+                    "不要要求用户安装 WSL/Cygwin。"
+                ),
+                "unsupported_tools": unavailable,
+            }
 
     env = Runtime._build_exec_env()
     if detect_network_region() == "mainland_china":
@@ -380,6 +398,52 @@ async def run_shell(
     }
 
 
+@register_tool(
+    name="run_python_script",
+    description=(
+        "在 Aero 私有 aero-agent 环境中运行当前项目内已有的 Python 脚本。"
+        "参数按数组传递，不经过 Shell 解释；适合 Windows 和带空格的路径。"
+        "执行前先写好脚本，任务取消或超时时会终止子进程。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "script_path": {"type": "string", "description": "项目内的 Python 脚本相对路径"},
+            "args": {"type": "array", "items": {"type": "string"}},
+            "timeout_ms": {"type": "integer", "description": "超时毫秒，默认 120000"},
+        },
+        "required": ["script_path"],
+    },
+    requires_confirmation=True,
+)
+async def run_python_script(
+    script_path: str, args: list[str] | None = None, timeout_ms: int = 120000
+) -> dict:
+    from aero.agent.runtime import Runtime
+    from aero.toolbox.paths import find_workspace_dir
+
+    root = find_workspace_dir().resolve()
+    script = (root / script_path).resolve()
+    if not script.is_relative_to(root) or script.suffix.lower() != ".py" or not script.is_file():
+        return {"status": "error", "message": "只能运行当前项目内已有的 .py 脚本"}
+    python = runtime_python_path()
+    if not python.is_file():
+        return {"status": "error", "message": "aero-agent Python 未安装，请先运行运行时初始化"}
+    arguments = [str(python), str(script), *(str(value) for value in (args or []))]
+    result = await Runtime().run_subprocess_streaming(
+        arguments, str(root), timeout_ms, output_limit=20_000
+    )
+    return {
+        "status": "success" if result.success else "error",
+        "message": "脚本执行完成" if result.success else result.error or "脚本执行失败",
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "stdout_bytes": result.stdout_bytes,
+        "stderr_bytes": result.stderr_bytes,
+    }
+
+
 def _has_multiple_subplots(source: str) -> bool:
     try:
         tree = ast.parse(source)
@@ -464,13 +528,11 @@ def _search_has_no_matches(command: str, result) -> bool:
 
 
 def _scientific_plot_script_error(command: str, workdir: str) -> dict | None:
-    """Block unsafe or incomplete Cartopy plotting scripts before run.
+    """Reject only deterministic plotting API errors before executing a script.
 
-    Skills guide model behaviour, but a generated source file is the last safe
-    point to stop a visually incomplete scientific figure from being exported.
-    The tight-bbox check applies to every local Cartopy contour map: its export
-    bounds are not reliable with Cartopy transforms, colorbars, or inset axes.
-    The remaining checks target multi-panel axes loops.
+    Projection, panel labels, colorbar semantics and canvas geometry need the
+    rendered figure. Inferring them from source substrings produced false
+    positives and repeated edit/run cycles for valid Cartopy scripts.
     """
     try:
         command_parts = shlex.split(command)
@@ -495,104 +557,61 @@ def _scientific_plot_script_error(command: str, workdir: str) -> dict | None:
             source = script_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-
-        is_cartopy_contour_map = "cartopy" in source and "contourf(" in source
         violations = _scientific_label_violations(source)
-        if re.search(
-            r"(?:savefig|print_(?:png|jpg|jpeg|tif|tiff))\s*\([^)]*"
-            r"\blayout\s*=",
-            source,
-            flags=re.DOTALL,
-        ):
-            violations.append(
-                "layout 只能在 plt.subplots()/plt.figure() 创建画布时设置，"
-                "不能传给 savefig/print_png"
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue  # Python will report the syntax error with its line number.
+        uses_cartopy = any(
+            (
+                isinstance(node, ast.Import)
+                and any(alias.name.startswith("cartopy") for alias in node.names)
             )
-        if is_cartopy_contour_map and re.search(r"bbox_inches\s*=\s*['\"]tight['\"]", source):
-            violations.append(
-                "Cartopy 地图不得使用 bbox_inches='tight'；请使用 "
-                "layout='compressed'、合适的 figsize 和 colorbar 参数控制留白"
-            )
-        is_multi_panel = _has_multiple_subplots(source)
-        if not (is_cartopy_contour_map and is_multi_panel):
-            if violations:
-                return {
-                    "status": "error",
-                    "scientific_plot_validation_failed": True,
-                    "message": "科学绘图检查未通过：" + "；".join(violations),
-                    "script_path": str(script_path),
-                    "violations": violations,
-                }
-            continue
-
-        if not re.search(r"extend\s*=\s*['\"]both['\"]", source):
-            violations.append("每个有限 levels 的 contourf 必须显式使用 extend='both'")
-        if not re.search(r"layout\s*=\s*['\"]compressed['\"]", source):
-            violations.append(
-                "固定比例 Cartopy 多子图必须使用 layout='compressed'，"
-                "不能用 constrained layout 假装缩小子图间距"
-            )
-        elif re.search(r"(?:subplots_adjust|tight_layout)\s*\(", source):
-            violations.append(
-                "使用 layout='compressed' 后不得再调用 subplots_adjust/tight_layout；"
-                "画布只能有一个布局所有者"
-            )
-        if re.search(
-            r"\.suptitle\s*\([^)]*\by\s*=\s*(?:1(?:\.0*)?|1\.\d+|[2-9]\d*(?:\.\d+)?)",
-            source,
-            flags=re.DOTALL,
-        ):
-            violations.append(
-                "总标题不得用 y>=1 放到画布外；省略 y，让布局引擎为 suptitle 预留空间"
-            )
-        if not re.search(r"\.gridlines\s*\(", source):
-            violations.append("每个面板必须绘制轻量虚线经纬网")
-        elif not all(
-            re.search(pattern, source)
-            for pattern in (
-                r"linestyle\s*=\s*['\"]--['\"]",
-                r"xlocs\s*=",
-                r"ylocs\s*=",
-            )
-        ):
-            violations.append("经纬网必须指定 xlocs/ylocs，并使用 linestyle='--'")
-        if "ccrs.PlateCarree" in source:
-            if re.search(r"gridlines\s*\([^)]*draw_labels\s*=\s*True", source):
-                violations.append(
-                    "矩形 PlateCarree 多子图不得依赖 Gridliner 绘制标签；"
-                    "请用普通 GeoAxes 刻度，Gridliner 只绘制虚线"
-                )
-            if not all(
-                re.search(pattern, source)
-                for pattern in (
-                    r"\.set_xticks\s*\(",
-                    r"\.set_yticks\s*\(",
-                    r"LongitudeFormatter\s*\(",
-                    r"LatitudeFormatter\s*\(",
-                    r"labelleft\s*=",
-                    r"labelbottom\s*=",
-                )
-            ):
-                violations.append(
-                    "PlateCarree 多子图必须保留外侧经纬度标签："
-                    "底行显示 LongitudeFormatter 刻度，左列显示 "
-                    "LatitudeFormatter 刻度"
-                )
-        if not re.search(r"assert_artists_inside_canvas\s*\(\s*fig\s*\)", source):
-            violations.append(
-                "多子图必须在导出前调用 assert_artists_inside_canvas(fig)，"
-                "用实际渲染边界检查标题碰撞及标题、坐标标签和色标是否超出画布"
-            )
-
+            or (isinstance(node, ast.ImportFrom) and (node.module or "").startswith("cartopy"))
+            for node in ast.walk(tree)
+        )
+        draws_map_field = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"contourf", "pcolormesh", "imshow"}
+            for node in ast.walk(tree)
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func_name = node.func.attr if isinstance(node.func, ast.Attribute) else ""
+            if func_name not in {
+                "savefig",
+                "print_png",
+                "print_jpg",
+                "print_jpeg",
+                "print_tif",
+                "print_tiff",
+            }:
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "layout":
+                    violations.append(
+                        "layout 只能在 plt.subplots()/plt.figure() 创建画布时设置，"
+                        "不能传给 savefig/print_png"
+                    )
+                if (
+                    uses_cartopy
+                    and draws_map_field
+                    and func_name == "savefig"
+                    and keyword.arg == "bbox_inches"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value == "tight"
+                ):
+                    violations.append(
+                        "Cartopy 地图不得使用 bbox_inches='tight'；"
+                        "请在画布创建时选择布局，并检查导出结果"
+                    )
         if violations:
             return {
                 "status": "error",
                 "scientific_plot_validation_failed": True,
-                "message": (
-                    "多子图 Cartopy 科学绘图脚本未通过执行前检查："
-                    + "；".join(violations)
-                    + "。请先编辑脚本并重新执行，不能交付不完整的图。"
-                ),
+                "message": "科学绘图脚本有确定的调用错误：" + "；".join(violations),
                 "script_path": str(script_path),
                 "violations": violations,
             }

@@ -50,5 +50,6 @@ def test_package_mirrors_apply_in_mainland_china_and_preserve_overrides():
     )
 
     assert env["PIP_INDEX_URL"] == "https://example.test/simple"
-    assert env["CONDA_CHANNEL_ALIAS"].endswith("/anaconda/cloud")
+    assert env["CONDA_CHANNEL_ALIAS"] == "https://mirror.nju.edu.cn/anaconda/cloud"
     assert env["MAMBA_CHANNEL_ALIAS"] == env["CONDA_CHANNEL_ALIAS"]
+    assert env["MAMBA_USE_SHARDED_REPODATA"] == "false"

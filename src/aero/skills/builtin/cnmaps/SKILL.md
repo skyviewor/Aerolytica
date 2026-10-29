@@ -5,6 +5,14 @@ description: Use when writing, reviewing, or explaining Python code that uses cn
 
 # cnmaps
 
+## Agent guidance
+
+- Use this skill for China-region maps or when the user explicitly asks for cnmaps boundaries, clipping, or administrative queries. A time series merely naming a Chinese location is not a map.
+- Before plotting a China boundary, read `references/api-cheatsheet.md` and `references/plotting-patterns.md`. Query China explicitly with `get_adm_maps(country="中国", level="国")`; `level="国"` alone includes other countries.
+- Use `get_adm_maps` for boundary records and centroids, `draw_map`/`draw_maps` for boundaries, and the matching `clip_*_by_map` helper only when clipping is scientifically intended. Do not substitute generic global border data for China's national boundary.
+- Check `import cnmaps` in the active runtime. Install cnmaps with pip in Aero's managed environment when needed; do not put it in conda/mamba packages. Keep Cartopy responsible for projections and Matplotlib responsible for figure layout.
+- Read `references/return-types.md` only for record/geometry questions and `references/common-pitfalls.md` only when an API result is unclear.
+
 ## Overview
 
 Use this skill when helping with Python code that uses `cnmaps`, especially for compliant boundary data aligned with China's territorial claims, Chinese administrative boundaries, global country or region boundaries, Cartopy overlays, Matplotlib map rendering, raster masking, and workflows that combine `cnmaps` with `cartopy`, `matplotlib`, or `xarray`.

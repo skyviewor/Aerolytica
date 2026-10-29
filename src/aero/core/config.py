@@ -226,8 +226,16 @@ def load_user_secrets() -> dict:
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text()) or {}
-    except Exception:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if os.name == "nt" and content.startswith("AERO-DPAPI1\n"):
+        from aero.core.windows_secret import unprotect_text
+
+        content = unprotect_text(content)
+    try:
+        data = yaml.safe_load(content) or {}
+    except yaml.YAMLError:
         return {}
     data = AeroConfig._resolve_env(data)
     return data if isinstance(data, dict) else {}
@@ -237,6 +245,10 @@ def save_user_secrets(data: dict) -> None:
     path = user_secrets_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    if os.name == "nt":
+        from aero.core.windows_secret import protect_text
+
+        content = protect_text(content)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
         dir=path.parent,
@@ -248,7 +260,8 @@ def save_user_secrets(data: dict) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.chmod(0o600)
+        if os.name != "nt":
+            temporary.chmod(0o600)
         os.replace(temporary, path)
     finally:
         if temporary.exists():

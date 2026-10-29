@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import uuid
 from typing import Any, Literal
 
 import httpx
@@ -44,6 +45,12 @@ class ResolutionBody(BaseModel):
     choice: Literal["local", "cloud", "both"]
 
 
+class SyncControlBody(BaseModel):
+    action: Literal["enable", "disable", "run_once"]
+    expected_revision: str
+    interval_seconds: int | None = Field(default=None, ge=30, le=900, strict=True)
+
+
 class AgentBody(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: str = Field(default="", max_length=500)
@@ -65,6 +72,9 @@ class CloudServices:
         self._sync = None
         self._sync_stop = asyncio.Event()
         self._sync_task: asyncio.Task | None = None
+        self._manual_sync_task: asyncio.Task | None = None
+        self._manual_job: dict = {}
+        self._sync_control_lock = asyncio.Lock()
         self.agents: dict[str, Any] = {}
         self._account_change_lock = asyncio.Lock()
 
@@ -87,10 +97,108 @@ class CloudServices:
             self._sync_stop = asyncio.Event()
             self._sync_task = asyncio.create_task(self.sync.run(self._sync_stop))
 
+    def sync_control_status(self) -> dict:
+        from aero.core.cloud_sync import CloudSyncEngine
+
+        return {
+            "configuration": CloudSyncEngine.inspect_scope(self.web.project_dir),
+            "service_running": True,
+            "automatic_task_running": bool(self._sync_task and not self._sync_task.done()),
+            "transfer_in_progress": bool(self._sync and self._sync._mutex.locked()),
+            "manual_job": dict(self._manual_job),
+            "last_error": self._sync._last_error if self._sync else None,
+        }
+
+    async def control_sync(self, body: SyncControlBody) -> dict:
+        async with self._sync_control_lock:
+            return await self._control_sync(body)
+
+    async def _control_sync(self, body: SyncControlBody) -> dict:
+        from aero.core.cloud_sync import CloudSyncEngine, CloudSyncError
+
+        current = CloudSyncEngine.inspect_scope(self.web.project_dir)
+        if current["revision"] != body.expected_revision:
+            raise HTTPException(409, "同步配置已变化，请重新读取并审批。")
+        if body.action != "disable":
+            if not current["bound"]:
+                raise HTTPException(409, "工作区尚未绑定云项目，不能开启或立即同步。")
+            await self.account.access_token()
+            binding = (
+                CloudSyncEngine._scope_reader(self.web.project_dir)._state.get("binding") or {}
+            )
+            if (
+                binding.get("user_id") != self.account.data.user_id
+                or binding.get("base_url") != self.account.base_url
+            ):
+                raise HTTPException(409, "当前账户或接口与同步绑定不匹配。")
+        if body.action in {"enable", "disable"}:
+            # Cancel our own transfers before changing persisted pause state.
+            tasks = [t for t in (self._sync_task, self._manual_sync_task) if t and not t.done()]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if self._manual_job.get("state") in {"queued", "running"}:
+                self._manual_job["state"] = "canceled"
+            try:
+                await self.sync.configure_sync(
+                    body.action == "enable", body.expected_revision, body.interval_seconds
+                )
+            except CloudSyncError as exc:
+                raise HTTPException(409, "同步配置未能修改，请重新查询状态。") from exc
+            if body.action == "enable":
+                self.start_sync()
+            return {"status": "success", **self.sync_control_status()}
+        if not self._manual_sync_task or self._manual_sync_task.done():
+            self._manual_job = {"job_id": uuid.uuid4().hex, "state": "queued"}
+            self._manual_sync_task = asyncio.create_task(
+                self._manual_sync_once(body.expected_revision)
+            )
+        return {"status": "queued", **self.sync_control_status()}
+
+    async def _manual_sync_once(self, revision: str) -> None:
+        from aero.core.cloud_sync import CloudSyncEngine
+
+        deadline = asyncio.get_running_loop().time() + 300
+        try:
+            while asyncio.get_running_loop().time() < deadline:
+                reader = CloudSyncEngine._scope_reader(self.web.project_dir)
+                if reader._scope_view()["revision"] != revision:
+                    self._manual_job["state"] = "configuration_changed"
+                    return
+                binding = reader._state.get("binding") or {}
+                if (
+                    binding.get("user_id") != self.account.data.user_id
+                    or binding.get("base_url") != self.account.base_url
+                ):
+                    self._manual_job["state"] = "account_changed"
+                    return
+                self._manual_job["state"] = "running"
+                result = await self.sync.sync_once(manual=True)
+                if not result.get("deferred") and not result.get("busy"):
+                    count = len(result["conflicts"])
+                    self._manual_job.update(
+                        state="completed_with_conflicts" if count else "completed",
+                        conflict_count=count,
+                    )
+                    return
+                self._manual_job["state"] = "queued"
+                await asyncio.sleep(1)
+            self._manual_job["state"] = "wait_timeout"
+        except asyncio.CancelledError:
+            self._manual_job["state"] = "canceled"
+            raise
+        except Exception:
+            # Do not persist/return exception strings with credentials or signed URLs.
+            self._manual_job["state"] = "failed"
+
     async def pause_cloud(self) -> None:
         if self._sync is not None:
             self.sync.pause(True)
         self._sync_stop.set()
+        if self._manual_sync_task:
+            self._manual_sync_task.cancel()
+            await asyncio.gather(self._manual_sync_task, return_exceptions=True)
         if self._sync_task:
             self._sync_task.cancel()
             await asyncio.gather(self._sync_task, return_exceptions=True)
@@ -230,6 +338,14 @@ def cloud_router(require_auth) -> APIRouter:
     @router.get("/sync")
     async def sync_status(cloud=Depends(service)):
         return cloud.sync.status()
+
+    @router.get("/sync/control/status")
+    async def sync_control_status(cloud=Depends(service)):
+        return cloud.sync_control_status()
+
+    @router.post("/sync/control")
+    async def sync_control(body: SyncControlBody, cloud=Depends(service)):
+        return await cloud.control_sync(body)
 
     @router.put("/sync")
     async def bind(body: BindingBody, cloud=Depends(service)):

@@ -133,6 +133,12 @@ DEEPSEEK_DOCS_URL = "https://api-docs.deepseek.com/"
 STARTUP_LOGO = "── A E R O L Y T I C A ──"
 
 _CONFIRM_ACTION_LABELS = {
+    "set_cloud_sync_enabled": "设置自动云同步",
+    "sync_cloud_now": "立即云同步",
+    "set_local_sync_directories": "修改本地同步范围",
+    "delete_cloud_files": "删除云端文件",
+    "upload_cloud_file": "上传文件到官方云空间",
+    "download_cloud_file": "下载云端文件",
     "delete_file": "删除文件",
     "run_shell": "执行 Shell 命令",
     "ensure_runtime_tools": "安装命令行工具",
@@ -7000,6 +7006,10 @@ class AeroApp(ChatTuiApp):
                 "delete_memo",
                 "clear_memos",
                 "restore_paper_version",
+                "delete_cloud_files",
+                "set_local_sync_directories",
+                "set_cloud_sync_enabled",
+                "sync_cloud_now",
             }:
                 labels = {
                     "record_memo": ("加入备忘录", "确认加入"),
@@ -7007,6 +7017,10 @@ class AeroApp(ChatTuiApp):
                     "delete_memo": ("删除备忘录", "确认删除"),
                     "clear_memos": ("清理备忘录", "确认清理"),
                     "restore_paper_version": ("恢复论文版本", "恢复到此版"),
+                    "delete_cloud_files": ("删除云端文件", "批准本次删除"),
+                    "set_local_sync_directories": ("修改同步范围", "批准本次修改"),
+                    "set_cloud_sync_enabled": ("设置自动云同步", "批准本次设置"),
+                    "sync_cloud_now": ("立即云同步", "批准本次同步"),
                 }
                 title, allow_label = labels[tool_name]
                 screen = ConfirmScreen(
@@ -7115,6 +7129,21 @@ class AeroApp(ChatTuiApp):
     ) -> str:
         lang = self.config.language
         action_label = _CONFIRM_ACTION_LABELS.get(tool_name, "执行操作")
+        if tool_name in {"delete_cloud_files", "set_local_sync_directories",
+                         "set_cloud_sync_enabled", "sync_cloud_now"}:
+            from aero.application.approval_details import approval_payload
+
+            payload = approval_payload({"tool": tool_name, "args": args})
+            details = "\n\n".join(f"{r['label']}：{r['value']}" for r in payload["details"])
+            return escape(f"{payload['title']}\n\n{details}\n\n{payload['description']}")
+        if tool_name in {"upload_cloud_file", "download_cloud_file"}:
+            from aero.application.approval_details import approval_payload
+
+            payload = approval_payload({"tool": tool_name, "args": args,
+                                        **({"batch_args": batch_args} if batch_args else {})})
+            details = "\n".join(f"{row['label']}：{row['value']}" for row in payload["details"])
+            return (f"← {action_label}\n\n{details}\n\n"
+                    "仅传输这些文件，不开启目录自动同步；同名文件不会覆盖。")
         if tool_name == "record_memo":
             proposals = batch_args or [args]
             blocks = []
@@ -9321,9 +9350,6 @@ Aero — 气象科研 AI Agent IDE
   aero chat --service 通过本机常驻服务续接会话，关闭 TUI 不会终止任务
   aero chat --agent 名称或ID  打开常驻 Agent 原对话，关闭 TUI 不停止 Agent
   aero chat --continue 续接当前目录上一次保存的会话（短参数: -c）
-  aero serve           启动本地 Web Agent 工作台（默认端口 8765）
-  aero serve --port N  使用指定端口启动本地 Web 工作台
-  aero serve --no-open 启动服务但不自动打开浏览器
   aero chat --mouse    启用 Textual 鼠标滚轮（默认已启用，保留兼容）
   aero chat --no-mouse 禁用 Textual 鼠标模式，交给终端原生选择/复制
   ↑/↓ 或 PageUp/PageDown  对话中滚动聊天区域

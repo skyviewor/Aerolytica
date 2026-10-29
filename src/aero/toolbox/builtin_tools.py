@@ -20,6 +20,21 @@ from aero.toolbox.tools.checkpoints import (
     rename_checkpoint,
     start_checkpoint_experiment,
 )
+from aero.toolbox.tools.cloud import (
+    delete_cloud_files,
+    download_cloud_file,
+    get_cloud_storage_quota,
+    list_cloud_files,
+    list_cloud_projects,
+    upload_cloud_file,
+)
+from aero.toolbox.tools.cloud_sync import (
+    get_cloud_sync_status,
+    get_local_sync_directories,
+    set_cloud_sync_enabled,
+    set_local_sync_directories,
+    sync_cloud_now,
+)
 from aero.toolbox.tools.compat import (
     _download_progress_reporter as _download_progress_reporter,
 )
@@ -170,6 +185,8 @@ from aero.toolbox.tools.parameters import (
 )
 from aero.toolbox.tools.planning import propose_execution, write_plan_document
 from aero.toolbox.tools.runtime import ensure_runtime_tools, run_shell
+from aero.toolbox.tools.runtime import run_python_script as run_python_script
+from aero.toolbox.tools.scientific import transform_scientific_data as transform_scientific_data
 from aero.toolbox.tools.subagents import cancel_sub_agent, launch_sub_agent, query_sub_agents
 from aero.toolbox.tools.tool_rounds import get_max_tool_rounds, set_max_tool_rounds
 from aero.toolbox.tools.vision import (
@@ -185,6 +202,17 @@ from aero.toolbox.tools.vision import (
 from aero.toolbox.tools.web_search import check_web_search_status_tool, search_web
 
 __all__ = [
+    "get_cloud_sync_status",
+    "set_cloud_sync_enabled",
+    "sync_cloud_now",
+    "get_local_sync_directories",
+    "set_local_sync_directories",
+    "delete_cloud_files",
+    "get_cloud_storage_quota",
+    "download_cloud_file",
+    "list_cloud_files",
+    "list_cloud_projects",
+    "upload_cloud_file",
     "cancel_sub_agent",
     "prepare_issue_link",
     "submit_product_feedback",

@@ -63,8 +63,6 @@ aero chat
 
 首次启动时，程序会引导配置模型服务商与 API Key；密钥保存于 `~/.aero/secrets.yaml`，不会写入项目的 `aero.yaml`。内置 DeepSeek、阿里云百炼、Kimi 与 OpenAI 的 OpenAI-compatible 配置，也支持在 `aero.yaml` 中自定义兼容服务。
 
-如果更偏好浏览器工作台，可在项目目录运行 `aero serve`。它会打开一个本机网页界面，提供会话侧栏、流式 Agent 对话、工具进度、确认卡片、项目文件浏览与产物预览。首次启动若尚未配置模型 API Key，网页会自动弹出配置引导；密钥只保存到本机凭据存储。服务只绑定 `127.0.0.1`，不会替换或关闭 TUI；最终用户运行已安装的 `aero serve` 不需要 Node.js。
-
 可以直接提出研究任务，例如：
 
 ```text
@@ -88,8 +86,6 @@ aero chat
 | `aero runtime clean` | 删除私有运行时，不影响项目文件和用户 Conda |
 | `aero chat` | 启动 Textual TUI 对话（默认启用鼠标） |
 | `aero chat --continue` | 续接当前目录最近保存的 TUI 会话（短参数 `-c`） |
-| `aero serve` | 启动本地现代 Web Agent 工作台（默认只监听 localhost:8765） |
-| `aero serve --port 8765 --no-open` | 使用指定端口启动 Web 工作台且不自动打开浏览器 |
 | `aero chat --no-mouse` | 禁用 TUI 鼠标模式，使用终端原生选择与复制 |
 | `aero version` | 显示版本号 |
 | `aero help` | 显示命令帮助 |

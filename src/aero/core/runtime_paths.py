@@ -38,7 +38,8 @@ def save_runtime_root(path: Path) -> None:
 def micromamba_path() -> Path:
     """Return the managed Micromamba executable path."""
     configured = os.environ.get("AERO_MICROMAMBA")
-    return Path(configured).expanduser() if configured else runtime_root() / "bin" / "micromamba"
+    name = "micromamba.exe" if os.name == "nt" else "micromamba"
+    return Path(configured).expanduser() if configured else runtime_root() / "bin" / name
 
 
 def runtime_env_path() -> Path:

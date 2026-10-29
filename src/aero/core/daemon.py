@@ -16,14 +16,21 @@ from typing import Any
 
 import httpx
 
+from aero.core.file_lock import lock_nonblocking, nofollow_flag
+from aero.core.process import isolated_process_kwargs
 from aero.release_environment import user_home
 
 
 def private_directory(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if path.is_symlink() or path.stat().st_uid != os.getuid():
+    if path.is_symlink() or (os.name != "nt" and path.stat().st_uid != os.getuid()):
         raise RuntimeError("unsafe_state_directory")
-    path.chmod(0o700)
+    if os.name == "nt":
+        from aero.core.windows_acl import protect_private_directory
+
+        protect_private_directory(path)
+    else:
+        path.chmod(0o700)
     return path
 
 
@@ -50,12 +57,10 @@ class WorkspaceLock:
         self._fd: int | None = None
 
     def acquire(self) -> None:
-        import fcntl
-
         private_directory(self.path.parent)
-        fd = os.open(self.path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fd = os.open(self.path, os.O_CREAT | os.O_RDWR | nofollow_flag(), 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_nonblocking(fd)
         except BaseException:
             os.close(fd)
             raise
@@ -82,7 +87,7 @@ class DaemonManager:
             if self.state_path.is_symlink():
                 return {}
             stat = self.state_path.stat()
-            if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
+            if os.name != "nt" and (stat.st_uid != os.getuid() or stat.st_mode & 0o077):
                 return {}
             state = json.loads(self.state_path.read_text())
             if state.get("project_dir") != str(self.project_dir):
@@ -145,7 +150,7 @@ class DaemonManager:
             if status["running"]:
                 return status
             fd = os.open(
-                self.log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+                self.log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY | nofollow_flag(), 0o600
             )
             with os.fdopen(fd, "a") as log:
                 process = subprocess.Popen(
@@ -165,7 +170,7 @@ class DaemonManager:
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=log,
-                    start_new_session=True,
+                    **isolated_process_kwargs(),
                     close_fds=True,
                 )
             deadline = time.monotonic() + timeout
@@ -230,9 +235,12 @@ class DaemonManager:
             if os.environ.get(variable):
                 environment[variable] = os.environ[variable]
 
-        interpreter = (
-            str(install_root() / "current/bin/python") if managed_install() else sys.executable
-        )
+        if managed_install():
+            interpreter = str(
+                install_root() / ("current/python.exe" if os.name == "nt" else "current/bin/python")
+            )
+        else:
+            interpreter = sys.executable
         command = [
             interpreter,
             "-m",
@@ -280,6 +288,20 @@ class DaemonManager:
                 + " ".join(quote(arg) for arg in command)
                 + "\nRestart=on-failure\n[Install]\nWantedBy=default.target\n"
             )
+        elif platform == "win32":
+            startup = Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming"))) / (
+                "Microsoft/Windows/Start Menu/Programs/Startup"
+            )
+            path = startup / f"Aerolytica-{self.workspace_id}.cmd"
+            if any("\n" in value or "\r" in value or '"' in value for value in command):
+                raise ValueError("invalid_service_path")
+            lines = ["@echo off", "setlocal DisableDelayedExpansion"]
+            for key, value in environment.items():
+                if any(char in value for char in '\r\n"'):
+                    raise ValueError("invalid_service_environment")
+                lines.append(f'set "{key}={value.replace("%", "%%")}"')
+            lines.append(" ".join(f'"{argument.replace("%", "%%")}"' for argument in command))
+            content = "\r\n".join(lines) + "\r\n"
         else:
             raise RuntimeError("autostart_unsupported; use detached start")
         return path, content
@@ -293,7 +315,7 @@ class DaemonManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.is_symlink():
                 raise RuntimeError("unsafe_autostart_path")
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow_flag(), 0o600)
             with os.fdopen(fd, "w") as handle:
                 handle.write(content)
             if sys.platform == "darwin":

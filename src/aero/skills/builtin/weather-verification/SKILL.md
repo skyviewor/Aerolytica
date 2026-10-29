@@ -68,7 +68,7 @@ levels, metric directions, and known limitations.
 - First test `import cyeva` and record `cyeva.__version__` when available. Preserve the
   version used in reproducible output.
 - If it is missing, follow `conda-helper`: install it only into Aero's managed interpreter
-  with `~/.aero/runtime/envs/aero-agent/bin/python -m pip install -U cyeva`. Never modify
+  with Aero's managed `python -m pip install -U cyeva`. Never modify
   the user's Conda base environment.
 - If the request includes a figure, also use `scientific-plotting`. Plots complement the
   numeric verification table; they do not replace it.

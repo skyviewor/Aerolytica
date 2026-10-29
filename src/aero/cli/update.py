@@ -7,7 +7,6 @@ import json
 import os
 import secrets
 import shlex
-import socket
 import sys
 import time
 from importlib.metadata import PackageNotFoundError, distribution
@@ -110,19 +109,9 @@ def external_update_command() -> str:
 def control(record: dict, action: str) -> dict:
     details = record["control"]
     if record["kind"] == "agent":
-        from aero.cli.agent_background import control_path
+        from aero.cli.agent_background import control_request
 
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(3)
-            connection.connect(str(control_path(details["agent_id"])))
-            connection.sendall(action.encode() + b"\n")
-            data = bytearray()
-            while b"\n" not in data:
-                part = connection.recv(4096)
-                if not part or len(data) > 65536:
-                    raise DistributionError("后台控制响应无效。")
-                data.extend(part)
-            response = json.loads(data)
+        response = json.loads(control_request(details["agent_id"], action))
     elif record["kind"] == "daemon":
         import httpx
 

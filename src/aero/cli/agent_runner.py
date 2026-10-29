@@ -505,6 +505,7 @@ async def _run_service(
     process_lock: AgentProcessLock | None = None,
     on_ready=None,
     on_runtime=None,
+    on_stop=None,
 ) -> int:
     """Run the fenced resident worker, optionally with a bound cloud project."""
     from aero.toolbox import builtin_tools  # noqa: F401
@@ -568,6 +569,9 @@ async def _run_service(
 
     def request_stop() -> None:
         stop_event.set()
+
+    if on_stop is not None:
+        on_stop(request_stop)
 
     for signum in (signal.SIGINT, signal.SIGTERM):
         with suppress(NotImplementedError):

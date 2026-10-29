@@ -1,3 +1,5 @@
 mplfonts
 cnmaps
 cyeva>=0.2.3,<0.3
+pint==0.24.3
+flexparser>=0.3.1,<0.4

@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import shutil
-import signal
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from aero.core.process import isolated_process_kwargs, terminate_process_tree
 from aero.core.runtime_paths import micromamba_path, runtime_bin_path, runtime_env_path
 
 RUNTIME_TOOL_PACKAGES = {
@@ -100,20 +99,7 @@ def run_command(
 
 
 async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except (AttributeError, ProcessLookupError):
-        process.terminate()
-    try:
-        await asyncio.wait_for(process.wait(), timeout=1)
-    except TimeoutError:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (AttributeError, ProcessLookupError):
-            process.kill()
-        await process.wait()
+    await terminate_process_tree(process, grace=1)
 
 
 async def _run_command_async(
@@ -127,7 +113,7 @@ async def _run_command_async(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
-        start_new_session=True,
+        **isolated_process_kwargs(),
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)

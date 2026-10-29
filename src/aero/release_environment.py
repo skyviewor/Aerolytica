@@ -50,6 +50,9 @@ def user_home() -> Path:
     configured = os.environ.get("AERO_HOME")
     if configured:
         return Path(configured).expanduser()
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        return base / ("Aerolytica-Testing" if environment_name() == "testing" else "Aerolytica")
     suffix = ".aero-testing" if environment_name() == "testing" else ".aero"
     return Path.home() / suffix
 

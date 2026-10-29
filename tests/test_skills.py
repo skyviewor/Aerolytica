@@ -130,10 +130,30 @@ def test_skill_selector_adds_cnmaps_for_china_map_requests(tmp_path):
     assert [item.skill.name for item in selected] == ["scientific-plotting", "cnmaps"]
 
 
+def test_china_time_series_does_not_load_map_boundary_skill():
+    names = [item.skill.name for item in SkillSelector().select("画北京气温时间序列图")]
+
+    assert "scientific-plotting" in names
+    assert "cnmaps" not in names
+
+
+def test_china_era5_map_preserves_download_and_boundary_skills():
+    names = [item.skill.name for item in SkillSelector().select("下载 ERA5 并画华北温度图")]
+
+    assert names == ["scientific-plotting", "era5-cds", "cnmaps"]
+
+
+def test_global_map_does_not_load_cnmaps():
+    names = [item.skill.name for item in SkillSelector().select("绘制全球降水分布图")]
+
+    assert "scientific-plotting" in names
+    assert "cnmaps" not in names
+
+
 def test_follow_up_plot_request_inherits_recent_user_context_for_skill_selection():
     history = [
         Message(role="system", content="system"),
-        Message(role="user", content="中国地区气温，画一个 2x2 的图，共享同一个 colorbar"),
+        Message(role="user", content="中国地区气温分布图，画一个 2x2 的图，共享同一个 colorbar"),
         Message(role="assistant", content="已完成。"),
     ]
 
@@ -166,6 +186,14 @@ def test_skill_context_mentions_references_without_loading_them(tmp_path):
 
     assert "references/maps.md" in context
     assert "Detailed map rules should not be injected." not in context
+
+
+def test_builtin_plotting_context_is_short_and_points_to_detail():
+    context = render_skill_context(SkillSelector().select("画北京气温时间序列图"))
+
+    assert "references/time-series.md" in context
+    assert "## Default workflow" not in context
+    assert len(context) < 6000
 
 
 def test_builtin_weather_verification_skill_is_selected_for_chinese_request():

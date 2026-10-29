@@ -95,7 +95,6 @@ class SkillSelector:
                 selected.append(SelectedSkill(skill=sciplot, score=10_000))
 
         selected.sort(key=lambda item: (-item.score, item.skill.name))
-        selected = selected[: self.max_selected]
         return _expand_related_skills(skills, selected, normalized, self.max_selected)
 
 
@@ -130,11 +129,17 @@ def render_skill_context(selected: list[SelectedSkill]) -> str:
                     "Resources:",
                     *resource_lines,
                     "",
-                    skill.body.strip(),
+                    _agent_guidance(skill.body),
                 ]
             )
         )
     return "\n\n".join(parts)
+
+
+def _agent_guidance(body: str) -> str:
+    """Keep the full Skill on disk while injecting only its turn-level guidance."""
+    match = re.search(r"^## Agent guidance\s*$\n(.*?)(?=^## |\Z)", body, re.MULTILINE | re.DOTALL)
+    return match.group(1).strip() if match else body.strip()
 
 
 def _parse_skill(path: Path, source: str) -> Skill | None:
@@ -212,27 +217,20 @@ def _expand_related_skills(
     max_selected: int,
 ) -> list[SelectedSkill]:
     by_name = {skill.name: skill for skill in skills}
-    selected_by_name = {item.skill.name: item for item in selected}
-
-    if _is_china_map_request(normalized_text):
+    china_map = _is_china_map_request(normalized_text)
+    explicit_cnmaps = "cnmaps" in normalized_text
+    # The map-boundary skill is a dependency, not a competitor for a download or
+    # verification workflow slot. Keep it in addition to the normal top skills.
+    primary = [item for item in selected if item.skill.name != "cnmaps"][:max_selected]
+    if china_map and not any(item.skill.name == "scientific-plotting" for item in primary):
         sciplot = by_name.get("scientific-plotting")
-        cnmaps = by_name.get("cnmaps")
         if sciplot is not None:
-            if "scientific-plotting" in selected_by_name:
-                selected = [
-                    SelectedSkill(skill=item.skill, score=100)
-                    if item.skill.name == "scientific-plotting"
-                    else item
-                    for item in selected
-                ]
-            else:
-                selected.append(SelectedSkill(skill=sciplot, score=100))
-                selected_by_name["scientific-plotting"] = selected[-1]
-        if cnmaps is not None and "cnmaps" not in selected_by_name:
-            selected.append(SelectedSkill(skill=cnmaps, score=99))
-
-    selected.sort(key=lambda item: (-item.score, item.skill.name))
-    return selected[:max_selected]
+            primary = [SelectedSkill(skill=sciplot, score=10_000), *primary[: max_selected - 1]]
+    if china_map or explicit_cnmaps:
+        cnmaps = by_name.get("cnmaps")
+        if cnmaps is not None:
+            primary.append(SelectedSkill(skill=cnmaps, score=99))
+    return primary
 
 
 def _is_china_map_request(normalized_text: str) -> bool:
@@ -285,30 +283,37 @@ def _is_china_map_request(normalized_text: str) -> bool:
         "china",
         "mainland china",
     )
+    if not any(term in normalized_text for term in china_terms):
+        return False
     map_terms = (
-        "图",
-        "画",
-        "绘",
         "地图",
         "空间分布",
+        "分布图",
+        "区域图",
+        "等值线",
+        "填色图",
+        "天气图",
+        "边界",
+        "国界",
+        "省界",
+        "市界",
         "高度场",
         "温度场",
         "降水场",
         "风场",
         "气压场",
-        "边界",
-        "国界",
-        "省界",
-        "市界",
-        "map",
-        "plot",
-        "figure",
+        "地理",
+        " map",
+        "mapping",
         "boundary",
         "border",
     )
-    return any(term in normalized_text for term in china_terms) and any(
-        term in normalized_text for term in map_terms
-    )
+    if any(term in normalized_text for term in map_terms):
+        return True
+    chart_terms = ("时间序列", "时序", "折线", "曲线", "柱状", "散点", "剖面", "直方")
+    if any(term in normalized_text for term in chart_terms):
+        return False
+    return bool(re.search(r"(?:气温|温度|降水|风速|湿度|气压|环流|辐射)图", normalized_text))
 
 
 def _is_plotting_request(normalized_text: str) -> bool:

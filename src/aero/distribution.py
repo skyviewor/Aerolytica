@@ -70,7 +70,11 @@ def default_download_base() -> str:
 
 def install_root() -> Path:
     name = install_environment()
-    default = Path.home() / (".aero-testing" if name == "testing" else ".aero")
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        default = base / ("Aerolytica-Testing" if name == "testing" else "Aerolytica")
+    else:
+        default = Path.home() / (".aero-testing" if name == "testing" else ".aero")
     home = Path(os.environ.get("AERO_HOME", str(default))).expanduser()
     return Path(os.environ.get("AERO_INSTALL_ROOT", str(home / "client"))).expanduser()
 
@@ -79,9 +83,14 @@ def private_dir(path: Path) -> Path:
     if path.is_symlink():
         raise DistributionError("安装目录不能是符号链接。")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if path.stat().st_uid != os.getuid():
+    if os.name != "nt" and path.stat().st_uid != os.getuid():
         raise DistributionError("安装目录不属于当前用户。")
-    path.chmod(0o700)
+    if os.name == "nt":
+        from aero.core.windows_acl import protect_private_directory
+
+        protect_private_directory(path)
+    else:
+        path.chmod(0o700)
     return path
 
 
@@ -100,13 +109,13 @@ def write_state(path: Path, value: dict) -> None:
 
 @contextmanager
 def install_lock():
-    import fcntl
+    from aero.core.file_lock import lock_nonblocking, nofollow_flag
 
     root = private_dir(install_root())
-    fd = os.open(root / "install.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(root / "install.lock", os.O_CREAT | os.O_RDWR | nofollow_flag(), 0o600)
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_nonblocking(fd)
         except BlockingIOError as exc:
             raise DistributionError("另一个安装或更新正在进行。") from exc
         yield
@@ -116,10 +125,17 @@ def install_lock():
 
 def target_platform() -> str:
     machine = platform.machine().lower()
-    arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}.get(machine)
-    system = {"Darwin": "macos", "Linux": "linux"}.get(platform.system())
+    arch = {
+        "arm64": "aarch64",
+        "aarch64": "aarch64",
+        "x86_64": "x86_64",
+        "amd64": "x86_64",
+    }.get(machine)
+    system = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}.get(platform.system())
     if not arch or not system:
-        raise DistributionError("目前仅支持 macOS/Linux 的 x86_64 和 ARM64。")
+        raise DistributionError("目前仅支持 macOS/Linux 的 x86_64/ARM64 和 Windows x64。")
+    if system == "windows" and arch != "x86_64":
+        raise DistributionError("Windows 目前仅支持 x64。")
     if system == "linux" and platform.libc_ver()[0] != "glibc":
         raise DistributionError("目前不支持 musl/Alpine，请使用 glibc Linux。")
     return f"{system}-{arch}"

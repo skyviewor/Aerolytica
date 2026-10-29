@@ -179,16 +179,42 @@ def test_runtime_diagnostics_requires_python_312(monkeypatch, tmp_path):
 
 def test_common_package_files_keep_pip_only_runtime_packages():
     assert "python=3.12" in init_runtime._conda_packages()
+    assert "h5netcdf" in init_runtime._conda_packages()
     assert "cnmaps" not in init_runtime._conda_packages()
-    assert init_runtime._pip_packages() == ("mplfonts", "cnmaps", "cyeva>=0.2.3,<0.3")
+    assert init_runtime._pip_packages() == (
+        "mplfonts",
+        "cnmaps",
+        "cyeva>=0.2.3,<0.3",
+        "pint==0.24.3",
+        "flexparser>=0.3.1,<0.4",
+    )
+    requirements = init_runtime.PIP_REQUIREMENTS_FILE.read_text()
+    assert "pint==0.24.3" in requirements
+    assert "flexparser>=0.3.1,<0.4" in requirements
+
+
+def test_common_packages_retry_official_pypi_when_auto_mirror_misses_package(monkeypatch, tmp_path):
+    _root, micromamba, _env = configure_runtime(monkeypatch, tmp_path)
+    monkeypatch.delenv("PIP_INDEX_URL", raising=False)
+    monkeypatch.setattr(init_runtime, "initialize_mplfonts", lambda _env: True)
+    calls = []
+
+    def fake_run(command, *, timeout):
+        calls.append(command)
+        return completed(command, returncode=1 if len(calls) == 2 else 0)
+
+    monkeypatch.setattr(init_runtime, "_run", fake_run)
+    assert init_runtime.install_common_packages(micromamba)
+    assert len(calls) == 3
+    assert calls[2][-2:] == ["--index-url", "https://pypi.org/simple"]
 
 
 def test_conda_helper_documents_managed_runtime_and_pip_only_cnmaps():
     skill_text = (
         Path(__file__).resolve().parents[1] / "src/aero/skills/builtin/conda-helper/SKILL.md"
     ).read_text()
-    assert "~/.aero/runtime/bin/micromamba" in skill_text
-    assert "~/.aero/runtime/envs/aero-agent/bin/python" in skill_text
+    assert "Micromamba and Python paths are platform-specific" in skill_text
+    assert "aero-agent" in skill_text
     assert "ensure_runtime_tools" in skill_text
     assert "`cnmaps` is always pip-only" in skill_text
     assert "Never run `conda create`, `conda install`, or `conda activate`" in skill_text

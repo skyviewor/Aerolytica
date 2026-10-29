@@ -23,6 +23,14 @@ MODE_BORDER_COLORS: dict[str, str] = {
 }
 
 BLOCKED_IN_PLAN: set[str] = {
+    "run_python_script",
+    "transform_scientific_data",
+    "set_cloud_sync_enabled",
+    "sync_cloud_now",
+    "set_local_sync_directories",
+    "delete_cloud_files",
+    "upload_cloud_file",
+    "download_cloud_file",
     "download_era5",
     "download_gfs",
     "download_ifs",

@@ -3,7 +3,6 @@
 import asyncio
 import inspect
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -14,6 +13,7 @@ import structlog
 
 from aero.core.debug_log import debug_exception, debug_log
 from aero.core.network_region import apply_package_mirrors
+from aero.core.process import isolated_process_kwargs, terminate_process_tree
 from aero.core.runtime_paths import runtime_bin_path, runtime_root
 
 logger = structlog.get_logger()
@@ -166,7 +166,7 @@ class Runtime:
             bash = Path("/bin/bash")
             run_args: list[str] | str = command
             use_shell = True
-            if bash.exists():
+            if os.name != "nt" and bash.exists():
                 run_args = [str(bash), "-o", "pipefail", "-c", command]
                 use_shell = False
             result = subprocess.run(
@@ -228,9 +228,41 @@ class Runtime:
                 duration_ms=duration,
             )
 
+    def run_argv(
+        self, argv: list[str], workdir: str = ".", timeout_ms: int = 120000
+    ) -> ExecutionResult:
+        """Run an argument vector without shell interpretation on every platform."""
+        start = time.monotonic()
+        try:
+            result = subprocess.run(
+                argv,
+                shell=False,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=timeout_ms / 1000,
+                env=self._build_exec_env(),
+            )
+            return ExecutionResult(
+                success=result.returncode == 0,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                stdout_bytes=len(result.stdout.encode(errors="replace")),
+                stderr_bytes=len(result.stderr.encode(errors="replace")),
+                exit_code=result.returncode,
+                duration_ms=(time.monotonic() - start) * 1000,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return ExecutionResult(
+                success=False,
+                error=str(exc),
+                exit_code=-1,
+                duration_ms=(time.monotonic() - start) * 1000,
+            )
+
     async def run_subprocess_streaming(
         self,
-        command: str,
+        command: str | list[str],
         workdir: str = ".",
         timeout_ms: int = 120000,
         output_limit: int = 20000,
@@ -245,7 +277,16 @@ class Runtime:
 
         try:
             bash = Path("/bin/bash")
-            if bash.exists():
+            if isinstance(command, list):
+                proc = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=workdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=self._build_exec_env(),
+                    **isolated_process_kwargs(),
+                )
+            elif os.name != "nt" and bash.exists():
                 proc = await asyncio.create_subprocess_exec(
                     str(bash),
                     "-o",
@@ -256,7 +297,7 @@ class Runtime:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=self._build_exec_env(),
-                    start_new_session=True,
+                    **isolated_process_kwargs(),
                 )
             else:
                 proc = await asyncio.create_subprocess_shell(
@@ -265,7 +306,7 @@ class Runtime:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=self._build_exec_env(),
-                    start_new_session=True,
+                    **isolated_process_kwargs(),
                 )
 
             async def read_stream(
@@ -368,6 +409,10 @@ class Runtime:
                 exit_code=int(proc.returncode or 0),
                 duration_ms=duration,
             )
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                await self._terminate_process_group(proc)
+            raise
         except Exception as e:
             if proc is not None and proc.returncode is None:
                 await self._terminate_process_group(proc)
@@ -393,20 +438,7 @@ class Runtime:
             )
 
     async def _terminate_process_group(self, proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is not None:
-            return
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except Exception:
-            proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=3)
-        except asyncio.TimeoutError:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except Exception:
-                proc.kill()
-            await proc.wait()
+        await terminate_process_tree(proc)
 
     def detect_python_env(self, workdir: str = ".") -> str:
         """Detect the appropriate python command for the project environment.
@@ -420,7 +452,8 @@ class Runtime:
         for parent in [root, *root.parents]:
             if (parent / "pixi.toml").exists():
                 return "pixi run python"
-            venv_python = parent / ".venv" / "bin" / "python"
+            venv_executable = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            venv_python = parent / ".venv" / venv_executable
             if venv_python.exists():
                 return str(venv_python)
             if path := self._find_conda_python():
@@ -435,7 +468,8 @@ class Runtime:
     ) -> ExecutionResult:
         """Execute a Python script using the detected environment."""
         python = self.detect_python_env(workdir)
-        return self.run_subprocess(f"{python} {script_path}", workdir, timeout_ms)
+        argv = ["pixi", "run", "python"] if python == "pixi run python" else [python]
+        return self.run_argv([*argv, script_path], workdir, timeout_ms)
 
     @staticmethod
     def _build_exec_env() -> dict:
@@ -459,7 +493,7 @@ class Runtime:
         for path_env in ["CONDA_PREFIX", "MAMBA_PREFIX"]:
             prefix = os.environ.get(path_env)
             if prefix:
-                py = Path(prefix) / "bin" / "python"
+                py = Path(prefix) / ("python.exe" if os.name == "nt" else "bin/python")
                 if py.exists():
                     return str(py)
         return None

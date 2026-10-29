@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -11,6 +10,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from aero.core.file_lock import lock_nonblocking, nofollow_flag
 from aero.distribution import (
     DistributionError,
     install_root,
@@ -39,9 +39,9 @@ def process_record(kind: str = "foreground", **control):
     key = str(os.getpid())
     lock = directory / f"{key}.lock"
     record = directory / f"{key}.json"
-    fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR | nofollow_flag(), 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(fd)
         write_state(
             record,
             {
@@ -63,12 +63,12 @@ def process_record(kind: str = "foreground", **control):
 
 def lock_is_live(path: Path) -> bool:
     try:
-        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDWR | nofollow_flag())
     except FileNotFoundError:
         return False
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_nonblocking(fd)
             return False
         except BlockingIOError:
             return True

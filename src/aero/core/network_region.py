@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 PYPI_CHINA_MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-CONDA_CHINA_CHANNEL_ALIAS = "https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud"
+CONDA_CHINA_CHANNEL_ALIAS = "https://mirror.nju.edu.cn/anaconda/cloud"
 _COUNTRY_ENDPOINT = "https://api.country.is/"
 
 
@@ -88,4 +88,5 @@ def apply_package_mirrors(env: dict[str, str]) -> dict[str, str]:
     configured.setdefault("PIP_INDEX_URL", PYPI_CHINA_MIRROR)
     configured.setdefault("CONDA_CHANNEL_ALIAS", CONDA_CHINA_CHANNEL_ALIAS)
     configured.setdefault("MAMBA_CHANNEL_ALIAS", CONDA_CHINA_CHANNEL_ALIAS)
+    configured.setdefault("MAMBA_USE_SHARDED_REPODATA", "false")
     return configured

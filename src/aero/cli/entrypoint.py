@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 
@@ -28,6 +29,9 @@ def main() -> None:
         from aero.cli.onboarding import main as setup_main
 
         raise SystemExit(setup_main(sys.argv[2:]))
+    if command == "serve" and os.environ.get("AERO_ENABLE_WEB_PREVIEW") != "1":
+        print("Web 工作台暂未公开；请使用 aero chat。", file=sys.stderr)
+        raise SystemExit(2)
     from aero.cli.main import main as chat_main
     from aero.distribution import DistributionError
     from aero.update_processes import process_record
@@ -46,10 +50,17 @@ def main() -> None:
             print(str(exc), file=sys.stderr)
             raise SystemExit(1) from None
         if isinstance(restart, list):
-            import os
+            import subprocess
 
             from aero.distribution import install_root
 
+            if os.name == "nt":
+                launcher = install_root() / "current" / "Scripts" / "aero.exe"
+                if launcher.is_file():
+                    raise SystemExit(subprocess.call([str(launcher), *restart]))
+                raise SystemExit(
+                    subprocess.call([sys.executable, "-m", "aero.cli.entrypoint", *restart])
+                )
             launcher = str(install_root() / "current/bin/aero")
             os.execv(launcher, [launcher, *restart])
     else:

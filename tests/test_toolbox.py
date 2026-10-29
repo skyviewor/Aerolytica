@@ -545,7 +545,7 @@ async def test_run_shell_allows_python_inside_aero_agent(monkeypatch, tmp_path):
     assert result["stdout"] == "ok"
 
 
-def test_multi_panel_cartopy_plot_validation_requires_extend_and_grid_locations(tmp_path):
+def test_multi_panel_cartopy_plot_validation_defers_visual_checks_until_render(tmp_path):
     from aero.toolbox.tools.runtime import _scientific_plot_script_error
 
     script = tmp_path / "plot_bad.py"
@@ -561,9 +561,7 @@ def test_multi_panel_cartopy_plot_validation_requires_extend_and_grid_locations(
 
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
-    assert result is not None
-    assert result["scientific_plot_validation_failed"] is True
-    assert len(result["violations"]) == 5
+    assert result is None
 
 
 def test_cartopy_plot_validation_rejects_tight_bbox(tmp_path):
@@ -601,6 +599,24 @@ def test_plot_validation_rejects_layout_passed_to_savefig(tmp_path):
 
     assert result is not None
     assert "不能传给 savefig" in result["violations"][0]
+
+
+def test_plot_validation_ignores_comments_and_lambert_data_transform(tmp_path):
+    from aero.toolbox.tools.runtime import _scientific_plot_script_error
+
+    script = tmp_path / "lambert.py"
+    script.write_text(
+        "import cartopy.crs as ccrs\n"
+        "import matplotlib.pyplot as plt\n"
+        "# fig.savefig('bad.png', bbox_inches='tight')\n"
+        "fig, ax = plt.subplots(subplot_kw={'projection': ccrs.LambertConformal()}, "
+        "layout='constrained')\n"
+        "ax.contourf(lon, lat, field, transform=ccrs.PlateCarree())\n"
+        "fig.savefig('lambert.png')\n",
+        encoding="utf-8",
+    )
+
+    assert _scientific_plot_script_error(f"python {script}", str(tmp_path)) is None
 
 
 def test_plot_validation_rejects_raw_string_with_doubled_mathtext_slashes(tmp_path):
@@ -687,7 +703,7 @@ def test_plot_validation_rejects_noncanonical_pvu_unit(tmp_path):
     assert any("PVU 单位格式不规范" in item for item in result["violations"])
 
 
-def test_multi_panel_cartopy_plot_validation_rejects_mixed_layout_owners(tmp_path):
+def test_multi_panel_cartopy_plot_validation_does_not_guess_layout_geometry(tmp_path):
     from aero.toolbox.tools.runtime import _scientific_plot_script_error
 
     script = tmp_path / "plot.py"
@@ -705,11 +721,10 @@ def test_multi_panel_cartopy_plot_validation_rejects_mixed_layout_owners(tmp_pat
 
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
-    assert result is not None
-    assert "只能有一个布局所有者" in result["violations"][0]
+    assert result is None
 
 
-def test_multi_panel_cartopy_plot_validation_rejects_suptitle_outside_canvas(
+def test_multi_panel_cartopy_plot_validation_defers_suptitle_bounds_to_render(
     tmp_path,
 ):
     from aero.toolbox.tools.runtime import _scientific_plot_script_error
@@ -730,8 +745,7 @@ def test_multi_panel_cartopy_plot_validation_rejects_suptitle_outside_canvas(
 
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
-    assert result is not None
-    assert "总标题不得用 y>=1" in result["violations"][0]
+    assert result is None
 
 
 def test_multi_panel_cartopy_plot_validation_accepts_complete_pattern(tmp_path):
@@ -760,7 +774,7 @@ def test_multi_panel_cartopy_plot_validation_accepts_complete_pattern(tmp_path):
     assert _scientific_plot_script_error(f"python {script}", str(tmp_path)) is None
 
 
-def test_multi_panel_platecarree_rejects_missing_outer_coordinate_labels(tmp_path):
+def test_multi_panel_platecarree_defers_coordinate_labels_to_render(tmp_path):
     from aero.toolbox.tools.runtime import _scientific_plot_script_error
 
     script = tmp_path / "plot_no_latitude_labels.py"
@@ -779,11 +793,10 @@ def test_multi_panel_platecarree_rejects_missing_outer_coordinate_labels(tmp_pat
 
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
-    assert result is not None
-    assert any("外侧经纬度标签" in item for item in result["violations"])
+    assert result is None
 
 
-def test_multi_panel_cartopy_plot_validation_requires_canvas_bounds_guard(tmp_path):
+def test_multi_panel_cartopy_plot_validation_does_not_require_named_helper(tmp_path):
     from aero.toolbox.tools.runtime import _scientific_plot_script_error
 
     script = tmp_path / "plot_no_bounds_guard.py"
@@ -800,8 +813,7 @@ def test_multi_panel_cartopy_plot_validation_requires_canvas_bounds_guard(tmp_pa
 
     result = _scientific_plot_script_error(f"python {script}", str(tmp_path))
 
-    assert result is not None
-    assert any("assert_artists_inside_canvas(fig)" in item for item in result["violations"])
+    assert result is None
 
 
 @pytest.mark.asyncio
