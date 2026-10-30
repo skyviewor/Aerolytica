@@ -9,6 +9,12 @@ from aero.cli.main import OfficialLoginApp, OfficialLoginScreen, run_official_lo
 from aero.core.config import load_user_secrets
 
 
+@pytest.fixture(autouse=True)
+def interactive_terminal(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+
 def test_login_command_activates_official_provider(monkeypatch, tmp_path):
     class SuccessfulLoginApp:
         def run(self):
@@ -58,3 +64,29 @@ def test_main_dispatches_login_command(monkeypatch, tmp_path):
     cli_main.main()
 
     assert called == [True]
+
+
+def test_noninteractive_login_requires_explicit_choice(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert run_official_login() == 2
+    assert "--no-browser" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag,mode", [("--browser", "browser"), ("--no-browser", "manual")])
+def test_login_flags_are_explicit_choices(monkeypatch, tmp_path, flag, mode):
+    called = []
+    monkeypatch.setattr(cli_main, "configure_debug_logging", lambda: tmp_path / "debug.log")
+    monkeypatch.setattr(cli_main, "configure_logging", lambda **_: None)
+    monkeypatch.setattr(cli_main, "run_official_login", lambda value: called.append(value) or 0)
+    monkeypatch.setattr("sys.argv", ["aero", "login", flag])
+    cli_main.main()
+    assert called == [mode]
+
+
+def test_login_flags_are_mutually_exclusive(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_main, "configure_debug_logging", lambda: tmp_path / "debug.log")
+    monkeypatch.setattr(cli_main, "configure_logging", lambda **_: None)
+    monkeypatch.setattr("sys.argv", ["aero", "login", "--browser", "--no-browser"])
+    with pytest.raises(SystemExit) as raised:
+        cli_main.main()
+    assert raised.value.code == 2

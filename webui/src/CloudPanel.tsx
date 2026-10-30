@@ -12,6 +12,7 @@ export type CloudAccount = {
 };
 type Project = { project_id: string; name: string };
 type Directory = { directory_id: string; name: string; path?: string };
+type LoginFlow = { flow_id: string; state: string; verification_uri?: string; verification_uri_complete?: string; user_code?: string; expires_in: number; message?: string };
 type SyncStatus = {
   enabled?: boolean;
   state?: string;
@@ -22,13 +23,14 @@ type SyncStatus = {
   conflicts?: Record<string, { path: string; reason?: string }>;
 };
 
-async function cloud<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+async function cloud<T>(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/v1/cloud${path}`, {
     method,
     credentials: "same-origin",
     cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   // Do not render raw upstream errors: they may contain credentials or request bodies.
   if (!response.ok) {
@@ -93,8 +95,10 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
   const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [loginFlow, setLoginFlow] = useState<LoginFlow | null>(null);
+  const loginRef = useRef<LoginFlow | null>(null);
+  const loginSequence = useRef(0);
+  const mounted = useRef(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [directories, setDirectories] = useState<Directory[]>([]);
   const [projectId, setProjectId] = useState("");
@@ -146,15 +150,70 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
     return () => { active = false; };
   }, [projectId, loggedIn]);
 
-  function login(event: FormEvent) {
-    event.preventDefault();
-    const submittedPassword = password;
-    setPassword("");
-    void act(async () => {
-      await cloud("/account/login", "POST", { email: email.trim(), password: submittedPassword });
-      await refreshAccount(); onAccountChanged();
-    }, "已登录官方账户。");
+  async function login(mode: "browser" | "manual") {
+    if (busyRef.current) return;
+    const popup = mode === "browser" ? window.open("about:blank", "_blank") : null;
+    if (popup) popup.opener = null;
+    await act(async () => {
+      try {
+        const next = await cloud<LoginFlow>("/account/device-login/start", "POST", { mode }, AbortSignal.timeout(20000));
+        if (!mounted.current) {
+          popup?.close();
+          await cloud(`/account/device-login/${next.flow_id}/cancel`, "POST", undefined, AbortSignal.timeout(10000));
+          return;
+        }
+        loginRef.current = next; setLoginFlow(next);
+        if (popup && next.verification_uri_complete) popup.location.href = next.verification_uri_complete;
+      } catch (reason) { popup?.close(); throw reason; }
+    }, mode === "browser" && !popup ? "浏览器未能打开，请手动访问下方网址并输入授权码。" : "请在官网确认授权。");
   }
+
+  useEffect(() => {
+    const id = loginFlow?.flow_id;
+    if (!id || ["approved", "cancelled", "expired", "failed", "denied"].includes(loginFlow.state)) return;
+    const current = ++loginSequence.current;
+    let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    const poll = async () => {
+      try {
+        const state = await cloud<LoginFlow>(`/account/device-login/${id}`, "GET", undefined, AbortSignal.timeout(15000));
+        if (current !== loginSequence.current) return;
+        failures = 0;
+        loginRef.current = state; setLoginFlow(state);
+        if (state.state === "approved") { await refreshAccount(); onAccountChanged(); return; }
+        if (["cancelled", "expired", "failed", "denied"].includes(state.state)) return;
+      } catch {
+        if (current !== loginSequence.current) return;
+        failures += 1;
+        setNotice("暂时无法获取授权状态，稍后自动重试。");
+        if (failures >= 3) {
+          const failed: LoginFlow = { ...loginRef.current!, state: "failed", message: "授权结果未确认。请先刷新账户状态，未登录时再重新授权。" };
+          loginRef.current = failed; setLoginFlow(failed);
+          void cloud(`/account/device-login/${id}/cancel`, "POST", undefined, AbortSignal.timeout(10000)).catch(() => {});
+          return;
+        }
+      }
+      if (current === loginSequence.current) timer = setTimeout(() => void poll(), Math.min(30000, 5000 * 2 ** failures));
+    };
+    timer = setTimeout(() => void poll(), 1000);
+    return () => { ++loginSequence.current; clearTimeout(timer); };
+  }, [loginFlow?.flow_id, loginFlow?.state, refreshAccount, onAccountChanged]);
+
+  useEffect(() => {
+    mounted.current = true;
+    const stop = () => {
+      mounted.current = false;
+      ++loginSequence.current;
+      const active = loginRef.current;
+      if (active && !["approved", "cancelled", "expired", "failed", "denied"].includes(active.state)) {
+        void fetch(`/api/v1/cloud/account/device-login/${active.flow_id}/cancel`, {
+          method: "POST", credentials: "same-origin", keepalive: true,
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener("pagehide", stop);
+    return () => { window.removeEventListener("pagehide", stop); stop(); };
+  }, []);
 
   return <dialog ref={dialog} className="cloud-dialog" aria-labelledby="cloud-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <header className="cloud-header"><div><span className="eyebrow">官方云</span><h2 id="cloud-title"><Cloud size={21} />账户与云协作</h2></div>
@@ -176,10 +235,24 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
                 await cloud("/account/logout", "POST", {}); await refreshAccount();
                 setProjects([]); setDirectories([]); setSync(null); onAccountChanged();
               }, "已退出官方账户。")}>退出登录</button></div></> :
-            <form onSubmit={login} className="cloud-form"><label>邮箱<input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-              <label>密码<input type="password" autoComplete="off" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-              <p className="cloud-muted">密码仅用于本次登录，提交后立即从输入框清除，不写入浏览器存储。</p>
-              <button className="primary-button" disabled={busy || !email.trim() || !password}>登录官方账户</button></form>}
+            <div className="cloud-form">
+              <p className="cloud-muted">当前已在浏览器中，推荐打开官网授权。登录方式由你选择，客户端不接收账号密码。</p>
+              {!loginFlow || ["expired", "failed", "denied", "cancelled"].includes(loginFlow.state) ? <div className="cloud-actions">
+                <button disabled={busy} onClick={() => void login("browser")}>在浏览器授权（推荐）</button>
+                <button disabled={busy} onClick={() => void login("manual")}>使用网址和授权码</button>
+              </div> : <>
+                <p>网址：<a href={loginFlow.verification_uri} target="_blank" rel="noopener noreferrer">{loginFlow.verification_uri}</a></p>
+                <p>授权码：<strong>{loginFlow.user_code}</strong> · 剩余 {loginFlow.expires_in} 秒</p>
+                <p role="status">{loginFlow.message}</p>
+                <div className="cloud-actions"><a href={loginFlow.verification_uri_complete} target="_blank" rel="noopener noreferrer">重新打开网页</a>
+                  <button disabled={busy} onClick={() => setNotice("请在其他浏览器或设备上访问同一网址并输入授权码。")}>手动操作</button>
+                  <button disabled={busy} onClick={() => void act(async () => {
+                    const state = await cloud<LoginFlow>(`/account/device-login/${loginFlow.flow_id}/cancel`, "POST");
+                    loginRef.current = state; setLoginFlow(state);
+                  }, "登录已取消。")}>取消登录</button></div>
+              </>}
+              {loginFlow && ["expired", "failed", "denied", "cancelled"].includes(loginFlow.state) && <p role="status">{loginFlow.message} 请选择方式重新获取授权码。</p>}
+            </div>}
         </section>
         <aside className="cloud-security"><ShieldCheck size={19} /><span>本地控制，按需上云。同步白名单、远程权限和加密记忆分别授权，不会因登录自动开启。</span></aside>
       </>}

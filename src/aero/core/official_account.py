@@ -181,30 +181,6 @@ class OfficialAccountSession:
         if self._owns_client:
             await self._client.aclose()
 
-    async def login(self, email: str, password: str) -> OfficialSessionData:
-        async with self._refresh_lock, account_lock():
-            return await self._login(email, password)
-
-    async def _login(self, email: str, password: str) -> OfficialSessionData:
-        try:
-            response = await self._client.post(
-                f"{self.base_url}/v1/auth/login",
-                json={"email": email.strip(), "password": password},
-                headers={
-                    "Cache-Control": "no-store",
-                    "X-Aero-Client": "cli",
-                    "X-Aero-Device": socket.gethostname()[:128],
-                    "X-Aero-OS": platform.system()[:64],
-                },
-            )
-        except httpx.HTTPError as exc:
-            raise OfficialAccountError("无法连接 Aerolytica 官方账户服务。") from exc
-        if response.status_code >= 400:
-            raise OfficialAccountError(_error_message(response, "邮箱或密码错误。"))
-        self._session = _session_from_tokens(response.json())
-        save_official_session(self._session)
-        return self._session
-
     async def access_token(self, *, force_refresh: bool = False) -> str:
         session = self.data
         if not session.is_logged_in:

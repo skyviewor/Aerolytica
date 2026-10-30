@@ -9,9 +9,10 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from aero.core.config import save_llm_profile
+from aero.core.device_login import DeviceLoginController
 from aero.core.official_account import (
     CloudSyncClient,
     OfficialAccountError,
@@ -22,9 +23,9 @@ from aero.core.official_account import (
 from aero.release_environment import user_home
 
 
-class LoginBody(BaseModel):
-    email: str = Field(min_length=1, max_length=320)
-    password: str = Field(min_length=1, max_length=1000)
+class LoginModeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["browser", "manual"]
 
 
 class NameBody(BaseModel):
@@ -77,6 +78,56 @@ class CloudServices:
         self._sync_control_lock = asyncio.Lock()
         self.agents: dict[str, Any] = {}
         self._account_change_lock = asyncio.Lock()
+        self._login_lock = asyncio.Lock()
+        self._login_controller: DeviceLoginController | None = None
+        self._login_task: asyncio.Task | None = None
+
+    async def cancel_login(self) -> None:
+        if self._login_controller:
+            await self._login_controller.cancel()
+        if self._login_task and not self._login_task.done():
+            self._login_task.cancel()
+            try:
+                await self._login_task
+            except asyncio.CancelledError:
+                pass
+
+    async def start_login(self, mode: str) -> dict:
+        async with self._login_lock:
+            await self.cancel_login()
+            controller = DeviceLoginController(self.account, commit=self._commit_login)
+            self._login_controller = controller
+            state = await controller.start(mode, open_browser=False)
+            self._login_task = asyncio.create_task(controller.wait())
+            return state
+
+    async def _commit_login(self, data) -> bool:
+        async with self._account_change_lock:
+            controller = self._login_controller
+            if controller is None or controller._cancelled:
+                return False
+            previous_user = self.account.data.user_id
+            enabled = bool(self._sync and self.sync.status().get("enabled"))
+            await self.pause_cloud()
+            if not await controller.commit_session(data):
+                if enabled:
+                    self.sync.pause(False)
+                    self.start_sync()
+                return False
+            if enabled and previous_user == data.user_id:
+                self.sync.pause(False)
+                self.start_sync()
+            cfg = self.web.config
+            cfg.llm.switch_provider("official")
+            cfg.llm.model, cfg.llm.base_url = "auto", relay_llm_url()
+            cfg.llm.set_active_api_key("")
+            try:
+                save_llm_profile("official", "", "auto", relay_llm_url())
+                cfg.save(self.web.project_dir / "aero.yaml")
+            except OSError:
+                controller._state["message"] = "登录成功，但模型配置未能保存，请检查目录权限。"
+            self.web.sync_active_sessions()
+            return True
 
     @property
     def sync(self):
@@ -208,6 +259,7 @@ class CloudServices:
         self.agents.clear()
 
     async def close(self) -> None:
+        await self.cancel_login()
         await self.pause_cloud()
         await self.account.close()
 
@@ -295,32 +347,37 @@ def cloud_router(require_auth) -> APIRouter:
         return await cloud.account_view()
 
     @router.post("/account/login")
-    async def login(body: LoginBody, cloud=Depends(service)):
-        async with cloud._account_change_lock:
-            previous_user = cloud.account.data.user_id
-            previous_sync_enabled = False
-            if cloud._sync is not None:
-                previous_sync_enabled = bool(cloud.sync.status().get("enabled"))
-            await cloud.pause_cloud()
-            await cloud.account.login(body.email, body.password)
-            if previous_sync_enabled and previous_user == cloud.account.data.user_id:
-                cloud.sync.pause(False)
-                cloud.start_sync()
-            cfg = cloud.web.config
-            cfg.llm.switch_provider("official")
-            cfg.llm.model = "auto"
-            cfg.llm.base_url = relay_llm_url()
-            cfg.llm.set_active_api_key("")
-            save_llm_profile("official", "", "auto", relay_llm_url())
-            cfg.save(cloud.web.project_dir / "aero.yaml")
-            cloud.web.sync_active_sessions()
-        return await cloud.account_view()
+    async def login(cloud=Depends(service)):
+        raise HTTPException(410, "客户端已改用官网授权，不再接收账号密码。")
+
+    @router.post("/account/device-login/start")
+    async def start_login(body: LoginModeBody, cloud=Depends(service)):
+        return await cloud.start_login(body.mode)
+
+    def current_login(cloud, flow_id):
+        controller = cloud._login_controller
+        if controller is None or not secrets.compare_digest(controller.flow_id, flow_id):
+            raise HTTPException(404, "授权请求不存在或已被替换。")
+        return controller
+
+    @router.get("/account/device-login/{flow_id}")
+    async def login_status(flow_id: str, cloud=Depends(service)):
+        return current_login(cloud, flow_id).public_state()
+
+    @router.post("/account/device-login/{flow_id}/cancel")
+    async def cancel_login(flow_id: str, cloud=Depends(service)):
+        async with cloud._login_lock:
+            controller = current_login(cloud, flow_id)
+            await cloud.cancel_login()
+            return controller.public_state()
 
     @router.post("/account/logout")
     async def logout(cloud=Depends(service)):
-        async with cloud._account_change_lock:
-            await cloud.pause_cloud()
-            await cloud.account.logout()
+        async with cloud._login_lock:
+            await cloud.cancel_login()
+            async with cloud._account_change_lock:
+                await cloud.pause_cloud()
+                await cloud.account.logout()
         return await cloud.account_view()
 
     @router.get("/projects")

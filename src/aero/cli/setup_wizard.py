@@ -418,20 +418,13 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             options.highlighted = 0
             options.focus()
         elif self._page == "official":
-            subtitle.update("使用邮箱和密码登录。密码只用于本次请求，不会保存到本地。")
-            form.display = True
-            email = self.query_one("#setup-url", Input)
-            email.placeholder = "邮箱"
-            email.value = ""
-            self.query_one("#setup-model", Input).display = False
-            password = self.query_one("#setup-key", Input)
-            password.placeholder = "密码"
-            password.value = ""
+            subtitle.update("请选择网页授权方式，客户端不接收账号密码。")
+            form.display = False
             self._set_actions(next_visible=True, back_visible=BYOK_UI_ENABLED)
             self.query_one("#setup-next", Static).update("登录并继续")
             if not BYOK_UI_ENABLED:
                 self.query_one("#setup-back", Static).display = False
-            email.focus()
+            self.call_after_refresh(self._submit_form)
         elif self._page == "primary_provider":
             subtitle.update("选择主模型服务商。下一步会列出该服务商支持的模型。")
             assert options is not None
@@ -932,18 +925,13 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
         if self._page == "official":
             if self._verifying_primary:
                 return
-            email = self.query_one("#setup-url", Input).value.strip()
-            password = self.query_one("#setup-key", Input).value
-            if not email or not password:
-                self.query_one("#setup-error", Static).update("请输入邮箱和密码。")
-                return
             self._verifying_primary = True
             status = self.query_one("#setup-error", Static)
             status.remove_class("setup-success")
             status.add_class("setup-progress")
             status.update("正在登录官方账户…")
             self._set_actions(next_visible=False, back_visible=False)
-            self.run_worker(self._verify_official_login(email, password), exclusive=True)
+            self.run_worker(self._verify_official_login(), exclusive=True)
             return
         if self._page == "primary_form":
             if self._verifying_primary:
@@ -996,28 +984,14 @@ class FirstRunSetupScreen(Screen[dict[str, Any] | None]):
             self._set_actions(next_visible=False, back_visible=False)
             self.run_worker(self._verify_web_search_connection(values), exclusive=True)
 
-    async def _verify_official_login(self, email: str, password: str) -> None:
-        from aero.core.official_account import (
-            OfficialAccountError,
-            OfficialAccountSession,
-            relay_llm_url,
-        )
+    async def _verify_official_login(self) -> None:
+        from aero.cli.device_login import OfficialLoginScreen
+        from aero.core.official_account import relay_llm_url
 
-        session = OfficialAccountSession()
-        try:
-            await session.login(email, password)
-        except OfficialAccountError as exc:
-            self._verifying_primary = False
-            self._set_actions(next_visible=True, back_visible=BYOK_UI_ENABLED)
-            self.query_one("#setup-next", Static).update("登录并继续")
-            status = self.query_one("#setup-error", Static)
-            status.remove_class("setup-progress")
-            status.update(str(exc))
-            self.query_one("#setup-key", Input).value = ""
-            self.query_one("#setup-key", Input).focus()
+        account = await self.app.push_screen_wait(OfficialLoginScreen())
+        if account is None:
+            self.dismiss(None)
             return
-        finally:
-            await session.close()
         self._verifying_primary = False
         self._primary = {
             "provider": "official",

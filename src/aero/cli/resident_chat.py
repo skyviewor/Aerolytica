@@ -181,6 +181,7 @@ class ResidentChatApp(ChatTuiApp):
         self._cmd_list: ListView | None = None
         self._filtered_commands: list[tuple[str, str]] = []
         self._commands_list = [
+            ("/login", "在官网授权登录官方账户"),
             ("/update", "检查客户端版本更新"),
             ("/model", "选择后续请求使用的模型"),
             ("/mode", "选择执行、问答或规划模式"),
@@ -430,7 +431,9 @@ class ResidentChatApp(ChatTuiApp):
             except OfficialLoginRequiredError:
                 self._booted = False
                 self._status("登录失效")
-                self._write("connection-error", "请关闭界面，执行 aero login 后重新打开。")
+                self._write(
+                    "connection-error", "请使用 /login 在官网重新授权，或另开终端运行 aero login。"
+                )
                 return
             except (
                 httpx.HTTPError,
@@ -461,7 +464,9 @@ class ResidentChatApp(ChatTuiApp):
             self.exit()
             return
         local = (
-            text.split()[0] in {"/model", "/mode", "/theme", "/copy", "/help"} if text else False
+            text.split()[0] in {"/login", "/model", "/mode", "/theme", "/copy", "/help"}
+            if text
+            else False
         )
         if not text or (not self._booted and not local) or self._sending:
             return
@@ -472,7 +477,13 @@ class ResidentChatApp(ChatTuiApp):
     async def _send(self, text: str):
         try:
             parts = text.split()
-            if text == "/help":
+            if text == "/login":
+                from aero.cli.device_login import OfficialLoginScreen
+
+                account = await self.push_screen_wait(OfficialLoginScreen())
+                if account:
+                    self.run_worker(self._watch(), group="events", exclusive=True)
+            elif text == "/help":
                 self._write(
                     "help",
                     "\n".join(f"{cmd}：{desc}" for cmd, desc in self._commands_list)

@@ -40,14 +40,29 @@ def secrets_path(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_login_persists_tokens_without_password(secrets_path):
+    from aero.core.device_login import DeviceLoginController
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/v1/auth/login"
+        assert "/auth/login" not in request.url.path
+        if request.url.path.endswith("/start"):
+            return httpx.Response(
+                200,
+                json={
+                    "device_code": "secret-device-code-" + "x" * 32,
+                    "user_code": "ABCD-EFGH",
+                    "verification_uri": "https://web.test/activate",
+                    "expires_in": 600,
+                    "interval": 5,
+                },
+            )
         return httpx.Response(200, json=_token_payload(), request=request)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     session = OfficialAccountSession(base_url="https://api.test", client=client)
 
-    result = await session.login("user@example.com", "never-save-this")
+    controller = DeviceLoginController(session)
+    await controller.start("manual")
+    result = await controller.wait()
 
     assert result.email == "user@example.com"
     assert load_official_session().access_token == "jwt-new"

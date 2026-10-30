@@ -29,7 +29,6 @@ from textual.geometry import Offset
 from textual.screen import ModalScreen
 from textual.scrollbar import ScrollBarRender
 from textual.widgets import (
-    Button,
     Input,
     ListItem,
     ListView,
@@ -57,6 +56,7 @@ from aero.application.session_titles import (
 from aero.application.session_titles import (
     session_title_prompt as build_session_title_prompt,
 )
+from aero.cli.device_login import OfficialLoginApp, OfficialLoginScreen
 from aero.cli.image_widget import (
     extract_image_paths,
     image_metadata,
@@ -745,107 +745,6 @@ class UserInputScreen(UserQuestionScreen):
     """Compatibility name for the shared compact question dialog."""
 
 
-class OfficialLoginScreen(ModalScreen[dict[str, str] | None]):
-    """Collect official-account credentials without retaining the password."""
-
-    CSS = """
-    OfficialLoginScreen {
-        align: center middle;
-        background: $background 70%;
-    }
-    #official-login-dialog {
-        width: 64;
-        height: auto;
-        padding: 1 2;
-        border: solid #5dade2;
-        background: $surface;
-    }
-    #official-login-dialog Input {
-        margin: 1 0 0 0;
-    }
-    #official-login-actions {
-        height: 3;
-        margin-top: 1;
-    }
-    #official-login-actions Button {
-        margin-right: 1;
-    }
-    """
-
-    BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="official-login-dialog"):
-            yield Static("登录 Aerolytica 官方账户")
-            yield Static(
-                "登录后可使用官方模型服务并查询账户额度。",
-                classes="setup-label",
-            )
-            yield Input(placeholder="邮箱", id="official-email")
-            yield Input(placeholder="密码", password=True, id="official-password")
-            with Horizontal(id="official-login-actions"):
-                yield Button("登录", id="official-login-submit", variant="primary")
-                yield Button("取消", id="official-login-cancel")
-
-    @on(Button.Pressed, "#official-login-submit")
-    def submit(self) -> None:
-        email = self.query_one("#official-email", Input).value.strip()
-        password = self.query_one("#official-password", Input).value
-        if not email or not password:
-            self.notify("请输入邮箱和密码。", severity="warning")
-            return
-        self.dismiss({"email": email, "password": password})
-
-    @on(Button.Pressed, "#official-login-cancel")
-    def cancel(self) -> None:
-        self.dismiss(None)
-
-    @on(Input.Submitted)
-    def submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "official-email":
-            self.query_one("#official-password", Input).focus()
-        else:
-            self.submit()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class OfficialLoginApp(App[bool]):
-    """A focused official-account login flow without opening the chat UI."""
-
-    CSS = """
-    Screen {
-        background: $background;
-    }
-    """
-
-    def on_mount(self) -> None:
-        self.push_screen(OfficialLoginScreen(), self._handle_credentials)
-
-    def _handle_credentials(self, credentials: dict[str, str] | None) -> None:
-        if credentials is None:
-            self.exit(False)
-            return
-        self.run_worker(self._login(credentials), exclusive=True)
-
-    async def _login(self, credentials: dict[str, str]) -> None:
-        from aero.core.official_account import OfficialAccountError, OfficialAccountSession
-
-        session = OfficialAccountSession()
-        try:
-            account = await session.login(credentials["email"], credentials["password"])
-        except OfficialAccountError as exc:
-            self.notify(str(exc), severity="error", timeout=5)
-            self.push_screen(OfficialLoginScreen(), self._handle_credentials)
-            return
-        finally:
-            await session.close()
-
-        self.notify(f"已登录 {account.email}", severity="information")
-        self.exit(True)
-
-
 def _activate_official_account_provider() -> None:
     """Make future local chat and Agent processes use the official Relay."""
     from aero.core.official_account import relay_llm_url
@@ -853,18 +752,29 @@ def _activate_official_account_provider() -> None:
     save_llm_profile("official", "", "auto", relay_llm_url())
 
 
-def run_official_login() -> int:
+def run_official_login(mode: str | None = None) -> int:
     """Run the standalone official-account login command."""
     if not OFFICIAL_ACCOUNT_UI_ENABLED:
         print("当前版本未启用 Aerolytica 官方账户登录。")
         return 1
-    result = OfficialLoginApp().run()
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        if mode is None:
+            print("非交互终端请明确选择 aero login --browser 或 aero login --no-browser。")
+            return 2
+        from aero.cli.device_login import console_login
+
+        try:
+            result = asyncio.run(console_login(mode))
+        except KeyboardInterrupt:
+            result = False
+    else:
+        result = OfficialLoginApp(mode).run() if mode else OfficialLoginApp().run()
     if result:
         _activate_official_account_provider()
         print("登录成功，已启用 Aerolytica 官方模型。")
         print("现在可直接运行 aero agent register 或 aero agent run。")
         return 0
-    print("登录已取消。")
+    print("登录未完成，原有账户保持不变。")
     return 1
 
 
@@ -3731,24 +3641,10 @@ class AeroApp(ChatTuiApp):
         self._set_footer_status(f"已切换到 BYOK 模式：{_display_provider_name(provider)}。")
 
     async def _handle_official_login(self) -> None:
-        from aero.core.official_account import (
-            OfficialAccountError,
-            OfficialAccountSession,
-        )
 
-        credentials = await self.push_screen_wait(OfficialLoginScreen())
-        if credentials is None:
+        account = await self.push_screen_wait(OfficialLoginScreen())
+        if account is None:
             return
-        session = OfficialAccountSession()
-        self._set_footer_status("正在登录 Aerolytica 官方账户…")
-        try:
-            account = await session.login(credentials["email"], credentials["password"])
-        except OfficialAccountError as exc:
-            self.notify(str(exc), severity="error", timeout=5)
-            self._set_footer_status(str(exc))
-            return
-        finally:
-            await session.close()
 
         self._set_ai_mode("official")
         await self._refresh_official_credits()
@@ -9220,10 +9116,12 @@ def main():
             return arguments
 
     elif cmd == "login":
-        if sys.argv[2:]:
-            print("用法: aero login")
+        arguments = sys.argv[2:]
+        if arguments not in ([], ["--browser"], ["--no-browser"]):
+            print("用法: aero login [--browser | --no-browser]")
             sys.exit(2)
-        exit_code = run_official_login()
+        mode = "browser" if arguments == ["--browser"] else "manual" if arguments else None
+        exit_code = run_official_login(mode) if mode else run_official_login()
         if exit_code:
             sys.exit(exit_code)
 
