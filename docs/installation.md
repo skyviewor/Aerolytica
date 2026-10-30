@@ -10,8 +10,8 @@ curl -LsSf https://aero.skyviewor.com/download/install.sh | sh
 
 1. 脚本下载带校验值的私有 uv 和 Python 3.12，再安装签名清单指定的
    `aerolytica` wheel 与锁定依赖，无需用户预装 Python、Conda、mamba 或 uv。
-2. 安装成功后提示用户手动运行 `aero setup`：复用现有账户/模型配置向导，
-   然后将 Micromamba 和科学计算环境安装到 `~/.aero/runtime/`。
+2. 安装成功后提示用户手动运行 `aero setup`，将 Micromamba 和科学计算环境安装到
+   `~/.aero/runtime/`。此步骤不登录、不配置模型，也不初始化研究项目。
 
 Aero 不使用系统 Python，不向 Conda base 安装包，也不会复用或修改用户已有的
 Miniconda、Anaconda、Miniforge 环境。
@@ -59,14 +59,19 @@ Aero 项目配置。
 ## 运行时模式
 
 ```bash
-aero setup          # 账号/模型向导 + 私有 Python 3.12 科学运行时
-aero setup --runtime-only --yes  # 自动化仅安装运行时，不启动 Agent
+aero setup          # 只准备私有 Python 3.12 科研运行环境，无需登录
+aero setup --yes    # 自动化准备环境，不弹出登录或模型配置向导
+aero setup --runtime-only --yes  # 兼容旧命令，行为与 setup --yes 相同
 aero setup --full   # 预装 CDO、NCO、ecCodes、GDAL、绘图等完整工具集
 aero doctor         # 检查 Micromamba、环境 Python 和版本
 aero runtime clean  # 删除 ~/.aero/runtime，项目数据不受影响
 ```
 
 可通过 `AERO_RUNTIME_ROOT` 自定义运行时根目录。清理后再次执行 `aero setup` 即可重建。
+
+官方账号登录由 `aero login` 或首次进入 `aero chat` 时的网页授权流程负责。
+`setup` 不读取或修改账号、模型设置；已有登录保留，未登录也可以完成环境准备。
+测试发行对应使用 `aero-testing setup` / `aero-testing login` / `aero-testing chat`。
 
 ## 自动化安装
 

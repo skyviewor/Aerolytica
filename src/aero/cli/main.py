@@ -7287,7 +7287,7 @@ def _save_user_theme(theme: str) -> None:
 def persist_first_run_setup(
     config: AeroConfig, result: dict, *, save_workspace: bool = True
 ) -> None:
-    """Persist the same onboarding result for setup and first chat."""
+    """Persist account/model configuration from the chat onboarding wizard."""
     primary = result["primary"]
     config.llm.provider = str(primary["provider"])
     config.llm.model = str(primary["model"])
@@ -9224,8 +9224,8 @@ Aero — 气象科研 AI Agent IDE
 
 命令:
   aero init            初始化当前目录的项目配置与工作目录
-  aero setup           配置账号/模型并准备私有科学运行时（Python 3.12）
-  aero setup --runtime-only  仅准备运行时，不修改账号或项目
+  aero setup           安装或修复私有科学运行时（Python 3.12），无需登录
+  aero setup --runtime-only  兼容旧命令；与默认 setup 相同
   aero setup --full    预装完整科学计算工具集
   aero setup --full --china-mirror  强制使用国内 Conda/PyPI 镜像
   aero update --check  检查稳定版更新

@@ -20,8 +20,8 @@ Aerolytica（命令行工具名：`aero`）是面向气象与地球科学研究�
 curl -LsSf https://aero.skyviewor.com/download/install.sh | sh
 ```
 
-安装完成后运行 `aero setup` 配置账号/模型，并准备 `~/.aero/runtime/` 中的
-私有科学计算运行时，再用 `aero doctor` 检查。项目初始化仍由 `aero init` 单独完成。
+安装完成后运行 `aero setup` 准备 `~/.aero/runtime/` 中的私有科学计算运行时，
+不需要登录或配置模型，再用 `aero doctor` 检查。项目初始化仍由 `aero init` 单独完成。
 需要提前准备完整工具集时运行 `aero setup --full`。
 
 已有 Python 3.12+ 环境的用户也可运行 `pip install aerolytica`（正式发布后）。
@@ -61,7 +61,9 @@ literature/ # 文献与 PDF
 aero chat
 ```
 
-首次启动时，程序会引导配置模型服务商与 API Key；密钥保存于 `~/.aero/secrets.yaml`，不会写入项目的 `aero.yaml`。内置 DeepSeek、阿里云百炼、Kimi 与 OpenAI 的 OpenAI-compatible 配置，也支持在 `aero.yaml` 中自定义兼容服务。
+首次使用官方模型时，`chat` 会引导在官网授权登录；也可提前运行 `aero login`。
+客户端不输入官方账号密码，登录凭据保存在用户私有目录，不写入项目的 `aero.yaml`。
+`setup` 仅准备环境，与账号授权分开。
 
 可以直接提出研究任务，例如：
 
@@ -76,10 +78,11 @@ aero chat
 | 命令 | 说明 |
 |---|---|
 | `aero init` | 初始化当前目录的项目配置与工作目录 |
-| `aero setup` | 配置账号/模型，安装或修复私有科学运行时 |
-| `aero setup --runtime-only` | 仅准备运行时，不修改账号或项目 |
+| `aero setup` | 安装或修复私有科学运行时，无需登录 |
+| `aero setup --runtime-only` | 兼容旧命令，与默认 `setup` 相同 |
 | `aero setup --full` | 预装完整科学计算工具集 |
 | `aero doctor` | 检查私有运行时及 Python 版本 |
+| `aero login` | 通过官网授权登录官方账户 |
 | `aero update --check` | 检查稳定版更新 |
 | `aero update` | 经确认后安全更新官网托管安装 |
 | `aero update --rollback` | 恢复上一版客户端 |

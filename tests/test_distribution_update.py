@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from aero import distribution as dist
 from aero import update_processes
-from aero.cli import onboarding, update
+from aero.cli import update
 
 
 def test_windows_amd64_reports_x64_platform(monkeypatch):
@@ -287,25 +287,6 @@ def test_new_process_cannot_start_during_update(release, monkeypatch):
     with pytest.raises(dist.DistributionError, match="正在更新"):
         with update_processes.process_record():
             pytest.fail("Must not start")
-
-
-def test_runtime_only_setup_does_not_configure_account(monkeypatch):
-    account = Mock()
-    runtime = Mock(return_value=True)
-    monkeypatch.setattr(onboarding, "configure_account", account)
-    monkeypatch.setattr("aero.cli.init_runtime.setup_runtime", runtime)
-    assert onboarding.main(["--runtime-only", "--yes"]) == 0
-    account.assert_not_called()
-    runtime.assert_called_once_with(full=False, assume_yes=True, china_mirror=False)
-
-
-def test_setup_cancellation_does_not_install_runtime(monkeypatch):
-    monkeypatch.setattr(onboarding.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(onboarding, "configure_account", lambda: False)
-    runtime = Mock()
-    monkeypatch.setattr("aero.cli.init_runtime.setup_runtime", runtime)
-    assert onboarding.main([]) == 1
-    runtime.assert_not_called()
 
 
 def test_external_install_is_never_overwritten(release, monkeypatch):
