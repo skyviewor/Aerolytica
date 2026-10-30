@@ -32,17 +32,17 @@ TERMINAL_STATES = {"approved", "denied", "expired", "cancelled", "failed"}
 def login_recommendation() -> tuple[str, str]:
     """Heuristics recommend; only an explicit user action ever opens a browser."""
     if any(os.environ.get(key) for key in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
-        return "manual", "检测到 SSH 连接，推荐使用网址和授权码。"
+        return "manual", "检测到 SSH 连接，推荐验证码授权。"
     if os.environ.get("CI") or not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return "manual", "检测到非交互环境，推荐使用网址和授权码。"
+        return "manual", "检测到非交互环境，推荐验证码授权。"
     system = platform.system()
     if (
         (system == "Darwin" and bool(os.environ.get("TERM_PROGRAM")))
         or (system == "Windows" and os.environ.get("SESSIONNAME", "").lower() == "console")
         or (system == "Linux" and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
     ):
-        return "browser", "检测到本机桌面终端，可在本机浏览器授权。"
-    return "manual", "无法确认桌面浏览器可用，推荐使用网址和授权码。"
+        return "browser", "检测到本机桌面终端，推荐浏览器授权。"
+    return "manual", "无法确认桌面浏览器可用，推荐验证码授权。"
 
 
 class DeviceLoginController:
@@ -130,7 +130,9 @@ class DeviceLoginController:
                 mode=mode,
                 verification_uri=url,
                 user_code=short,
-                verification_uri_complete=url + "?" + urlencode({"user_code": short}),
+                verification_uri_complete=url + "?" + urlencode(
+                    {"user_code": short, "mode": "browser"}
+                ),
                 message="请在官网确认授权，正在等待…",
             )
             if self._cancelled:
@@ -154,11 +156,15 @@ class DeviceLoginController:
             )
         except Exception:
             opened = False
-        self._state["message"] = (
-            "已尝试打开浏览器；也可手动访问网址并输入授权码。"
-            if opened
-            else "未能打开浏览器，请手动访问网址并输入授权码。"
-        )
+        if opened:
+            self._state.update(mode="browser", message="请在已打开的网页中批准登录，正在等待…")
+        else:
+            self.use_code_authorization("未能打开浏览器，已切换为验证码授权。")
+
+    def use_code_authorization(self, message: str = "请访问下方网址并输入验证码。") -> None:
+        """Change presentation without creating a new authorization request."""
+        if not self._cancelled and self._state["state"] not in TERMINAL_STATES:
+            self._state.update(mode="manual", message=message)
 
     async def cancel(self) -> None:
         if self._state["state"] == "approved":
@@ -174,7 +180,7 @@ class DeviceLoginController:
                     timeout=3,
                 )
             except httpx.HTTPError:
-                self._state["message"] = "已停止等待；服务端取消状态未确认，请勿继续批准该授权码。"
+                self._state["message"] = "已停止等待；服务端取消状态未确认，请勿继续批准本次请求。"
 
     async def wait(
         self, on_update: Callable[[dict], object] | None = None
@@ -198,7 +204,7 @@ class DeviceLoginController:
                             return None
                         if time.monotonic() >= self._deadline:
                             self._state.update(
-                                state="expired", message="授权码已过期，请重新获取。"
+                                state="expired", message="授权请求已过期，请重新发起登录。"
                             )
                             await self._revoke_failed()
                             return None
@@ -234,8 +240,8 @@ class DeviceLoginController:
                             state=state,
                             message={
                                 "denied": "网页已拒绝授权。",
-                                "expired": "授权码已过期，请重新获取。",
-                                "failed": "授权结果无法确认或已被使用，请重新获取授权码。",
+                                "expired": "授权请求已过期，请重新发起登录。",
+                                "failed": "授权结果无法确认或已被使用，请重新发起登录。",
                             }[state],
                         )
                         await self._revoke_failed()
@@ -264,7 +270,7 @@ class DeviceLoginController:
                     min(self._interval * 2**failures, max(0, self._deadline - time.monotonic()))
                 )
             if not self._cancelled:
-                self._state.update(state="expired", message="授权码已过期，请重新获取。")
+                self._state.update(state="expired", message="授权请求已过期，请重新发起登录。")
                 await self._revoke_failed()
             return None
         except asyncio.CancelledError:

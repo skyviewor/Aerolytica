@@ -19,6 +19,18 @@ from aero.core.official_account import (
 )
 
 
+def authorization_status(state: dict) -> str:
+    """Browser authorization has no visible URL or code-entry step."""
+    details = ""
+    if state.get("verification_uri"):
+        if state.get("mode") == "manual":
+            details = f"网址：{state['verification_uri']}\n验证码：{state.get('user_code', '')}\n"
+        else:
+            details = "浏览器授权：请在网页中批准登录，无需输入验证码。\n"
+        details += f"有效期剩余：{state.get('expires_in', 0)} 秒\n"
+    return details + state.get("message", "正在等待官网授权…")
+
+
 class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
     CSS = """
     OfficialLoginScreen { align: center middle; background: $background 90%; }
@@ -35,7 +47,11 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
     }
     #official-login-actions QuestionAction:focus { background: #1676b8; color: #ffffff; }
     """
-    BINDINGS = [Binding("escape", "cancel", "取消登录", priority=True)]
+    BINDINGS = [
+        Binding("escape", "cancel", "取消登录", priority=True),
+        Binding("tab,right", "login_focus(1)", "下一项", priority=True),
+        Binding("shift+tab,left", "login_focus(-1)", "上一项", priority=True),
+    ]
 
     def __init__(self, mode: str | None = None):
         super().__init__()
@@ -50,11 +66,11 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
             yield Static(reason + " 登录方式由你决定。", markup=False)
             yield OptionList(
                 Option(
-                    "在本机浏览器授权" + ("（推荐）" if recommendation == "browser" else ""),
+                    "浏览器授权" + ("（推荐）" if recommendation == "browser" else ""),
                     id="browser",
                 ),
                 Option(
-                    "使用网址和授权码" + ("（推荐）" if recommendation == "manual" else ""),
+                    "验证码授权" + ("（推荐）" if recommendation == "manual" else ""),
                     id="manual",
                 ),
                 Option("取消", id="cancel"),
@@ -67,9 +83,24 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
             )
             with Horizontal(id="official-login-actions"):
                 yield QuestionAction("打开网页", id="login-open")
-                yield QuestionAction("手动操作", id="login-manual")
-                yield QuestionAction("重新获取", id="login-retry")
+                yield QuestionAction("验证码授权", id="login-manual")
+                yield QuestionAction("重新授权", id="login-retry")
                 yield QuestionAction("取消", id="login-cancel")
+
+    def action_login_focus(self, direction: int) -> None:
+        controls = []
+        options = self.query_one("#official-login-options")
+        if options.display:
+            controls.append(options)
+        controls.extend(
+            button for button in self.query_one("#official-login-actions").query(QuestionAction)
+            if button.display and not button.disabled
+        )
+        if controls:
+            index = controls.index(self.focused) if self.focused in controls else (
+                -1 if direction > 0 else 0
+            )
+            controls[(index + direction) % len(controls)].focus()
 
     def on_mount(self) -> None:
         for name in ("open", "manual", "retry"):
@@ -94,8 +125,10 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
             return
         self.mode = mode
         self.query_one("#official-login-options").display = False
-        self.query_one("#login-retry").display = False
-        self.query_one("#official-login-status", Static).update("正在获取授权码…")
+        for name in ("open", "manual", "retry"):
+            self.query_one("#login-" + name).display = False
+        self.query_one("#login-cancel").focus()
+        self.query_one("#official-login-status", Static).update("正在准备登录授权…")
         self._login_worker = self.run_worker(
             self._authorize(mode), exclusive=True, group="device-login"
         )
@@ -104,19 +137,14 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
         if not self.is_mounted:
             return
         terminal = state["state"] in TERMINAL_STATES
+        self.mode = state.get("mode", self.mode)
         url = state.get("verification_uri", "")
-        self.query_one("#official-login-status", Static).update(
-            (
-                f"网址：{url}\n授权码：{state.get('user_code', '')}\n"
-                f"有效期剩余：{state.get('expires_in', 0)} 秒\n"
-                if url
-                else ""
-            )
-            + state.get("message", "正在等待官网授权…")
-        )
+        self.query_one("#official-login-status", Static).update(authorization_status(state))
         for name in ("open", "manual"):
             self.query_one("#login-" + name).display = bool(url) and not terminal
         self.query_one("#login-retry").display = terminal and state["state"] != "approved"
+        if terminal and state["state"] != "approved":
+            self.query_one("#login-retry").focus()
 
     async def _authorize(self, mode: str) -> None:
         session = OfficialAccountSession()
@@ -131,8 +159,7 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
                 self._update(self.controller.public_state())
         except OfficialAccountError as exc:
             if self.is_mounted:
-                self.query_one("#official-login-status", Static).update(str(exc))
-                self.query_one("#login-retry").display = True
+                self._update({**self.controller.public_state(), "message": str(exc)})
         finally:
             await session.close()
 
@@ -148,9 +175,7 @@ class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
             await self.controller.open_browser()
             self._update(self.controller.public_state())
         elif self.controller and action == "login-manual":
-            self.controller._state.update(
-                mode="manual", message="请手动访问网址并输入同一个授权码。"
-            )
+            self.controller.use_code_authorization()
             self._update(self.controller.public_state())
 
     async def action_cancel(self) -> None:
@@ -181,11 +206,7 @@ async def console_login(mode: str) -> bool:
     controller = DeviceLoginController(session)
     try:
         state = await controller.start(mode)
-        print(
-            f"网址：{state['verification_uri']}\n授权码：{state['user_code']}\n"
-            f"有效期：{state['expires_in']} 秒；正在等待官网授权…",
-            flush=True,
-        )
+        print(authorization_status(state), flush=True)
         result = await controller.wait()
         print(controller.public_state().get("message", ""))
         return result is not None

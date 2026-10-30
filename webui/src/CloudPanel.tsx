@@ -96,6 +96,7 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loginFlow, setLoginFlow] = useState<LoginFlow | null>(null);
+  const [loginMode, setLoginMode] = useState<"browser" | "manual">("browser");
   const loginRef = useRef<LoginFlow | null>(null);
   const loginSequence = useRef(0);
   const mounted = useRef(true);
@@ -152,20 +153,40 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
 
   async function login(mode: "browser" | "manual") {
     if (busyRef.current) return;
-    const popup = mode === "browser" ? window.open("about:blank", "_blank") : null;
-    if (popup) popup.opener = null;
+    let popup: Window | null = null;
+    try {
+      if (mode === "browser") popup = window.open("about:blank", "_blank");
+      if (popup) popup.opener = null;
+    } catch { popup?.close(); popup = null; }
+    let browserFailed = mode === "browser" && !popup;
     await act(async () => {
       try {
-        const next = await cloud<LoginFlow>("/account/device-login/start", "POST", { mode }, AbortSignal.timeout(20000));
+        const next = await cloud<LoginFlow>("/account/device-login/start", "POST", { mode: popup ? "browser" : "manual" }, AbortSignal.timeout(20000));
         if (!mounted.current) {
           popup?.close();
           await cloud(`/account/device-login/${next.flow_id}/cancel`, "POST", undefined, AbortSignal.timeout(10000));
           return;
         }
         loginRef.current = next; setLoginFlow(next);
-        if (popup && next.verification_uri_complete) popup.location.href = next.verification_uri_complete;
+        setLoginMode("manual");
+        if (popup && next.verification_uri_complete) {
+          try { popup.location.href = next.verification_uri_complete; setLoginMode("browser"); }
+          catch { popup.close(); browserFailed = true; }
+        }
       } catch (reason) { popup?.close(); throw reason; }
-    }, mode === "browser" && !popup ? "浏览器未能打开，请手动访问下方网址并输入授权码。" : "请在官网确认授权。");
+    }, mode === "browser" && !popup ? "浏览器未能打开，已切换为验证码授权。" : "请在官网确认授权。");
+    if (browserFailed) setNotice("浏览器未能打开，已切换为验证码授权。");
+  }
+
+  function reopenLoginPage() {
+    try {
+      const popup = window.open(loginFlow?.verification_uri_complete, "_blank");
+      if (!popup) throw new Error("popup blocked");
+      popup.opener = null;
+      setLoginMode("browser"); setNotice("请在网页中批准登录。");
+    } catch {
+      setLoginMode("manual"); setNotice("浏览器未能打开，已切换为验证码授权。");
+    }
   }
 
   useEffect(() => {
@@ -238,20 +259,23 @@ export function CloudPanel({ account, accountError, refreshAccount, sessionId, o
             <div className="cloud-form">
               <p className="cloud-muted">当前已在浏览器中，推荐打开官网授权。登录方式由你选择，客户端不接收账号密码。</p>
               {!loginFlow || ["expired", "failed", "denied", "cancelled"].includes(loginFlow.state) ? <div className="cloud-actions">
-                <button disabled={busy} onClick={() => void login("browser")}>在浏览器授权（推荐）</button>
-                <button disabled={busy} onClick={() => void login("manual")}>使用网址和授权码</button>
+                <button disabled={busy} onClick={() => void login("browser")}>浏览器授权（推荐）</button>
+                <button disabled={busy} onClick={() => void login("manual")}>验证码授权</button>
               </div> : <>
-                <p>网址：<a href={loginFlow.verification_uri} target="_blank" rel="noopener noreferrer">{loginFlow.verification_uri}</a></p>
-                <p>授权码：<strong>{loginFlow.user_code}</strong> · 剩余 {loginFlow.expires_in} 秒</p>
+                {loginMode === "manual" ? <>
+                  <p>网址：<a href={loginFlow.verification_uri} target="_blank" rel="noopener noreferrer">{loginFlow.verification_uri}</a></p>
+                  <p>验证码：<strong>{loginFlow.user_code}</strong></p>
+                </> : <p>请在已打开的网页中批准登录，无需输入验证码。</p>}
+                <p>有效期剩余 {loginFlow.expires_in} 秒</p>
                 <p role="status">{loginFlow.message}</p>
-                <div className="cloud-actions"><a href={loginFlow.verification_uri_complete} target="_blank" rel="noopener noreferrer">重新打开网页</a>
-                  <button disabled={busy} onClick={() => setNotice("请在其他浏览器或设备上访问同一网址并输入授权码。")}>手动操作</button>
+                <div className="cloud-actions"><button disabled={busy} onClick={reopenLoginPage}>重新打开网页</button>
+                  <button disabled={busy} onClick={() => { setLoginMode("manual"); setNotice("请访问上方网址并输入验证码。"); }}>验证码授权</button>
                   <button disabled={busy} onClick={() => void act(async () => {
                     const state = await cloud<LoginFlow>(`/account/device-login/${loginFlow.flow_id}/cancel`, "POST");
                     loginRef.current = state; setLoginFlow(state);
                   }, "登录已取消。")}>取消登录</button></div>
               </>}
-              {loginFlow && ["expired", "failed", "denied", "cancelled"].includes(loginFlow.state) && <p role="status">{loginFlow.message} 请选择方式重新获取授权码。</p>}
+              {loginFlow && ["expired", "failed", "denied", "cancelled"].includes(loginFlow.state) && <p role="status">{loginFlow.message} 请选择方式重新授权。</p>}
             </div>}
         </section>
         <aside className="cloud-security"><ShieldCheck size={19} /><span>本地控制，按需上云。同步白名单、远程权限和加密记忆分别授权，不会因登录自动开启。</span></aside>

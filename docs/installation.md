@@ -73,6 +73,15 @@ aero runtime clean  # 删除 ~/.aero/runtime，项目数据不受影响
 `setup` 不读取或修改账号、模型设置；已有登录保留，未登录也可以完成环境准备。
 测试发行对应使用 `aero-testing setup` / `aero-testing login` / `aero-testing chat`。
 
+登录提供两种方式，每次由用户选择（环境检测只影响推荐项）：
+
+- **浏览器授权**：打开官网后直接点击“批准”，客户端和网页均不展示验证码。
+- **验证码授权**：终端显示网址与验证码，可在其他设备打开网页并输入验证码，适合 SSH。
+
+浏览器打开失败时会切换为验证码授权，复用同一个请求；也可主动切换。
+自动化调用可用 `aero login --browser` 或 `aero login --no-browser` 明确选择。
+登录框支持 Tab / Shift+Tab、左右键切换按钮，Enter 执行当前按钮，Esc 取消。
+
 ## 自动化安装
 
 ```bash

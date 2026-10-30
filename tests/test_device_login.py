@@ -11,10 +11,11 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 from textual.app import App, ComposeResult
+from textual.color import Color
 from textual.containers import Vertical
 from textual.widgets import OptionList, Static
 
-from aero.cli.device_login import OfficialLoginApp, OfficialLoginScreen
+from aero.cli.device_login import OfficialLoginApp, OfficialLoginScreen, authorization_status
 from aero.core.device_login import DeviceLoginController, login_recommendation
 from aero.core.official_account import (
     OfficialAccountSession,
@@ -105,12 +106,106 @@ async def test_browser_failure_keeps_same_request_and_hides_secrets(monkeypatch)
         flow = DeviceLoginController(OfficialAccountSession(client=http))
         assert flow.public_state()["state"] == "idle" and not requests
         public = await flow.start("browser")
-        assert "手动" in public["message"]
+        assert "验证码授权" in public["message"]
+        assert public["mode"] == "manual"
         assert "device_code" not in json.dumps(public) and "access_token" not in public
         assert START["device_code"] not in json.dumps(public)
-        assert public["verification_uri_complete"].endswith("user_code=ABCD-EFGH")
+        assert public["verification_uri_complete"].endswith("user_code=ABCD-EFGH&mode=browser")
         assert json.loads(requests[0].content)["client_version"] == get_version()
         assert len(requests) == 1
+
+
+async def test_browser_and_code_modes_reuse_one_request(monkeypatch):
+    opened = Mock(return_value=True)
+    monkeypatch.setattr("webbrowser.open", opened)
+    responses = []
+
+    def handle(request):
+        responses.append(request)
+        return httpx.Response(200, json=START)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        flow = DeviceLoginController(OfficialAccountSession(client=http))
+        browser = await flow.start("browser")
+        assert browser["mode"] == "browser"
+        assert START["user_code"] not in authorization_status(browser)
+        assert START["verification_uri"] not in authorization_status(browser)
+        opened.assert_called_once_with(browser["verification_uri_complete"])
+        flow.use_code_authorization()
+        manual = flow.public_state()
+        assert manual["flow_id"] == browser["flow_id"]
+        assert START["user_code"] in authorization_status(manual)
+        assert START["verification_uri"] in authorization_status(manual)
+        await flow.open_browser()
+        assert flow.public_state()["mode"] == "browser"
+        assert len(responses) == 1
+
+
+async def test_manual_choice_does_not_open_browser(monkeypatch):
+    opened = Mock(side_effect=AssertionError("manual mode must not open a browser"))
+    monkeypatch.setattr("webbrowser.open", opened)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=START))
+    ) as http:
+        flow = DeviceLoginController(OfficialAccountSession(client=http))
+        manual = await flow.start("manual")
+        assert START["user_code"] in authorization_status(manual)
+        opened.assert_not_called()
+
+
+@pytest.mark.parametrize("host", ["standalone", "chat"])
+async def test_login_action_keys_move_visible_focus_and_enter_runs_selected_action(
+    monkeypatch, host
+):
+    never = asyncio.Event()
+
+    async def waiting(*args):
+        await never.wait()
+
+    monkeypatch.setattr(
+        DeviceLoginController, "_post", AsyncMock(return_value=httpx.Response(200, json=START))
+    )
+    monkeypatch.setattr(DeviceLoginController, "wait", waiting)
+    monkeypatch.setattr(DeviceLoginController, "cancel", AsyncMock())
+    monkeypatch.setattr("webbrowser.open", Mock(return_value=True))
+    if host == "chat":
+        from aero.cli.main import AeroApp
+        from aero.core.config import AeroConfig
+
+        app = AeroApp(AeroConfig.create_default(), persist_config=False)
+        monkeypatch.setattr(app, "on_mount", lambda: None)
+        monkeypatch.setattr(app, "action_cycle_mode", Mock(side_effect=AssertionError("chat key")))
+    else:
+        app = OfficialLoginApp("browser")
+    async with app.run_test(size=(100, 32)) as pilot:
+        if host == "chat":
+            app.push_screen(OfficialLoginScreen("browser"))
+        await pilot.pause()
+        screen = app.screen
+        assert app.focused.id == "login-cancel"
+        for key, expected in [
+            ("tab", "login-open"), ("right", "login-manual"),
+            ("left", "login-open"), ("shift+tab", "login-cancel"),
+            ("left", "login-manual"),
+        ]:
+            await pilot.press(key)
+            assert app.focused.id == expected
+            assert app.focused.has_pseudo_class("focus")
+            assert app.focused.styles.background == Color.parse("#1676b8")
+        await pilot.press("enter")
+        assert screen.controller.public_state()["mode"] == "manual"
+        assert START["user_code"] in str(screen.query_one("#official-login-status").render())
+        await pilot.press("left", "enter")
+        assert screen.controller.public_state()["mode"] == "browser"
+        assert START["user_code"] not in str(screen.query_one("#official-login-status").render())
+        screen._update({"state": "expired", "mode": "browser", "message": "授权请求已过期"})
+        await pilot.pause()
+        assert app.focused.id == "login-retry"
+        await pilot.press("tab")
+        assert app.focused.id == "login-cancel"
+        await pilot.press("shift+tab")
+        assert app.focused.id == "login-retry"
+        await pilot.press("escape")
 
 
 async def test_cancelled_late_token_does_not_replace_existing_login():
