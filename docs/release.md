@@ -104,6 +104,22 @@ CI 将环境名、API/LLM 地址和下载入口写入 wheel 的 `release_environ
 每个 bucket 的 `download/` 内不可覆盖同版本产物，不添加 `testing/` 子目录。
 下载域名须映射到对应环境 bucket。仍不向 PyPI 发布。
 
+测试分支按提交 SHA 保存修订：`releases/<版本>/revisions/<完整提交 SHA>/`。
+这允许测试环境在不改版本号时重新发布：新修订仍走签名、上传、公网哈希校验及四平台
+安装测试，最后才替换测试环境的 `stable.json` 和默认安装脚本。旧修订及旧版平铺目录
+保持不可变，失败时默认入口不变。生产环境仍使用原布局并要求递增版本。
+
+同版本测试修订不会触发普通自动更新。新客户端可显式执行 `aero-testing update --reinstall`；
+已安装旧版 0.1.2（尚不认识该参数）的用户可重跑官网安装脚本：
+
+```sh
+curl -fLsS https://aerolytica.skyviewor.team/download/install.sh | AERO_REINSTALL=1 sh
+```
+
+安装器只为同版本、同测试环境的修订启用此入口，先在独立目录验证，再由正常升级器
+检查空闲、切换和恢复后台进程。不会覆盖正在运行的环境，也不会强制杀进程。
+仍打开的其他 TUI 或不支持交接的旧服务必须先关闭。账号、项目和科研环境不清理。
+
 首次验证可直接从 develop 创建 testing 分支并推送，自动跑完整流程。
 这不需要把 workflow 或客户端代码合入 main，也不修改仓库默认分支。
 GitHub 的网页手动运行按钮依赖默认分支存在 workflow；尚未合入 main 时，

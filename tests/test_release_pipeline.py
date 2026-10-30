@@ -183,14 +183,19 @@ def test_offline_build_test_dependencies_are_warmed_before_pytest(workflow_name)
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required for a real release build")
-@pytest.mark.parametrize("environment", ["production", "testing"])
-def test_real_signed_wheel_sdist_and_manifest_are_consistent(monkeypatch, tmp_path, environment):
+@pytest.mark.parametrize(
+    "environment,revision", [("production", ""), ("testing", ""), ("testing", "a" * 40)]
+)
+def test_real_signed_wheel_sdist_and_manifest_are_consistent(
+    monkeypatch, tmp_path, environment, revision
+):
     key = Ed25519PrivateKey.generate()
     seed = base64.b64encode(key.private_bytes_raw()).decode()
     monkeypatch.setenv("RELEASE_SIGNING_KEY", seed)
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1728000000")
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("AERO_ENVIRONMENT", environment)
+    monkeypatch.setenv("AERO_RELEASE_REVISION", revision)
     for variable in ("AERO_OFFICIAL_API_URL", "AERO_OFFICIAL_LLM_URL", "AERO_DOWNLOAD_BASE"):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.delenv("AERO_RELEASE_REQUIRE_CONFIG", raising=False)
@@ -206,6 +211,9 @@ def test_real_signed_wheel_sdist_and_manifest_are_consistent(monkeypatch, tmp_pa
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     output = tmp_path / "release"
     envelope = prepare.build(output, "v" + version, mirror=False)
+    if revision:
+        assert envelope["manifest"]["revision"] == revision
+        assert f"/revisions/{revision}/" in envelope["manifest"]["wheel"]["path"]
     wheel = next((output / "pypi").glob("*.whl"))
     assert wheel.name.endswith("-py3-none-any.whl")
     with zipfile.ZipFile(wheel) as bundle:
@@ -258,8 +266,18 @@ def test_real_signed_wheel_sdist_and_manifest_are_consistent(monkeypatch, tmp_pa
     second = tmp_path / "repeat"
     repeated = prepare.build(second, "v" + version, mirror=False)
     assert repeated == envelope
-    for archive in (output / "download/releases" / version).glob("*.tar.gz"):
-        assert (
-            archive.read_bytes()
-            == (second / "download/releases" / version / archive.name).read_bytes()
-        )
+    relative = Path(envelope["manifest"]["wheel"]["path"]).parent
+    for archive in (output / "download" / relative).glob("*.tar.gz"):
+        assert archive.read_bytes() == (second / "download" / relative / archive.name).read_bytes()
+
+
+def test_testing_smoke_uses_the_exact_signed_revision_and_retries_transport_errors():
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    smoke = workflow["jobs"]["install-smoke"]
+    assert smoke["env"]["RELEASE_ARTIFACT_PREFIX"] == "${{ needs.build.outputs.artifact_prefix }}"
+    script = smoke["steps"][0]["run"]
+    assert "$RELEASE_ARTIFACT_PREFIX/release.json" in script
+    assert "$RELEASE_ARTIFACT_PREFIX/install.sh" in script
+    assert "--retry-all-errors" in script

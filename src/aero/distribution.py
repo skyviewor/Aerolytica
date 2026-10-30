@@ -256,6 +256,12 @@ def validate_manifest(manifest: dict) -> dict:
             raise ValueError
         if "runtime" in manifest:
             validate_runtime_profile(manifest["runtime"])
+        if "revision" in manifest:
+            if (
+                manifest.get("runtime", {}).get("environment") != "testing"
+                or not re.fullmatch(r"[0-9a-f]{40}", manifest["revision"])
+            ):
+                raise ValueError
         for key in ("wheel", "requirements"):
             item = manifest[key]
             artifact_url(DOWNLOAD_BASE, item["path"])
@@ -438,7 +444,8 @@ def stage_release(envelope: dict, uv: Path, base: str, *, bootstrap: bool = Fals
         raise DistributionError("引导脚本与发行清单的 Python 版本不同，请重新下载官方安装脚本。")
     root = private_dir(install_root())
     version = manifest["version"]
-    environment = root / "versions" / version
+    directory_name = version + ("-" + manifest["revision"] if manifest.get("revision") else "")
+    environment = root / "versions" / directory_name
     python = environment / "bin" / "python"
     marker = environment / "aero-install.json"
     fingerprint = hashlib.sha256(canonical_manifest(manifest)).hexdigest()

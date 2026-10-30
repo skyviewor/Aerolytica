@@ -101,6 +101,28 @@ def test_existing_version_cannot_be_overwritten(publisher):
     bucket.put_object_from_file.assert_not_called()
 
 
+def test_new_testing_revision_preserves_the_existing_flat_release(publisher, tmp_path):
+    module, _, bucket, objects = publisher
+    old_key = "download/releases/0.1.0/client.whl"
+    objects[old_key] = b"previous signed wheel"
+    revision = "a" * 40
+    old = tmp_path / "releases/0.1.0/client.whl"
+    new = old.parent / "revisions" / revision / old.name
+    new.parent.mkdir(parents=True)
+    old.rename(new)
+    release = json.loads((tmp_path / "stable.json").read_text())
+    release["manifest"]["revision"] = revision
+    for name in ("wheel", "requirements"):
+        release["manifest"][name]["path"] = release["manifest"][name]["path"].replace(
+            "releases/0.1.0/", "releases/0.1.0/revisions/" + revision + "/"
+        )
+    (tmp_path / "stable.json").write_text(json.dumps(release))
+    module.main()
+    assert objects[old_key] == b"previous signed wheel"
+    assert objects["download/" + release["manifest"]["wheel"]["path"]] == b"test wheel"
+    assert bucket.put_object_from_file.call_count == 1
+
+
 @pytest.mark.parametrize("field", ["AERO_ENVIRONMENT", "AERO_DOWNLOAD_BASE"])
 def test_release_environment_and_download_mapping_still_checked(publisher, monkeypatch, field):
     module, sdk, bucket, objects = publisher

@@ -9,6 +9,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -102,6 +103,11 @@ def build(output: Path, tag: str, *, mirror: bool = True) -> dict:
     key = get_signing_key()
     module = distribution_module()
     profile = release_profile(module)
+    revision = os.environ.get("AERO_RELEASE_REVISION", "")
+    if revision and (
+        profile["environment"] != "testing" or not re.fullmatch(r"[0-9a-f]{40}", revision)
+    ):
+        raise RuntimeError("Only testing releases may use a full commit SHA revision")
     identifier, keys = signing_keys(key)
     toolchain = json.loads((ROOT / "scripts/release/toolchain.json").read_text())
     installer = (ROOT / "install.sh").read_text()
@@ -115,6 +121,8 @@ def build(output: Path, tag: str, *, mirror: bool = True) -> dict:
     pypi = output / "pypi"
     downloads = output / "download"
     release = downloads / "releases" / version
+    if revision:
+        release = release / "revisions" / revision
     pypi.mkdir(parents=True, exist_ok=True)
     release.mkdir(parents=True, exist_ok=True)
     if any(pypi.iterdir()):
@@ -171,6 +179,8 @@ def build(output: Path, tag: str, *, mirror: bool = True) -> dict:
         "runtime": profile,
         "platforms": {},
     }
+    if revision:
+        manifest["revision"] = revision
     for field, path in (
         ("wheel", release / wheel.name),
         ("requirements", requirements),

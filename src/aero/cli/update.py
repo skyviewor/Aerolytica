@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -19,6 +20,7 @@ from aero.distribution import (
     DistributionError,
     activate,
     assert_release_environment,
+    canonical_manifest,
     current_environment,
     default_download_base,
     fetch_release,
@@ -35,7 +37,7 @@ from aero.update_processes import live_records, lock_is_live
 from aero.version import get_version
 
 
-def check_update(*, force: bool = False) -> dict | None:
+def check_update(*, force: bool = False, reinstall: bool = False) -> dict | None:
     """Cache failures too: a bad network must not trigger a check on every chat."""
     path = install_root() / "update-check.json"
     try:
@@ -73,6 +75,25 @@ def check_update(*, force: bool = False) -> dict | None:
                 },
             )
     manifest = verify_manifest(envelope)
+    if reinstall:
+        if (
+            environment_name() != "testing"
+            or manifest.get("runtime", {}).get("environment") != "testing"
+            or not manifest.get("revision")
+        ):
+            raise DistributionError("同版本重装只允许已签名的测试修订，不适用于生产环境。")
+        current = current_environment()
+        if current is None or current.parent != (install_root() / "versions").resolve():
+            raise DistributionError("未找到本安装的当前版本，请使用官网安装脚本。")
+        marker = json.loads((current / "aero-install.json").read_text())
+        if (
+            marker.get("managed") is not True
+            or marker.get("version") != manifest["version"]
+            or marker.get("runtime", {}).get("environment") != "testing"
+        ):
+            raise DistributionError("同版本重装不能跨版本，请使用常规更新命令。")
+        fingerprint = hashlib.sha256(canonical_manifest(manifest)).hexdigest()
+        return envelope if marker.get("manifest_hash") != fingerprint else None
     try:
         newer = Version(manifest["version"]) > Version(get_version())
     except InvalidVersion as exc:
@@ -336,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--check", action="store_true")
     group.add_argument("--rollback", action="store_true")
+    group.add_argument("--reinstall", action="store_true", help="显式重装同版本测试修订")
     parser.add_argument("--yes", "-y", action="store_true")
     parser.add_argument("--wait", type=float, default=60, help="等待后台空闲的秒数（默认 60）")
     args = parser.parse_args(argv)
@@ -350,12 +372,15 @@ def main(argv: list[str] | None = None) -> int:
             rollback(wait=args.wait)
             print("已回滚到上一版本。")
             return 0
-        release = check_update(force=True)
+        release = (
+            check_update(force=True, reinstall=True) if args.reinstall else check_update(force=True)
+        )
         if release is None:
             print(f"当前版本 {get_version()}，没有更新的稳定版。")
             return 0
         version = release["manifest"]["version"]
-        print(f"发现新版本 {version}（当前 {get_version()}）。")
+        label = "发现同版本测试修订" if args.reinstall else "发现新版本"
+        print(f"{label} {version}（当前 {get_version()}）。")
         if not managed_install():
             print(external_update_command())
             return 0 if args.check else 2

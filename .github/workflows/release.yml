@@ -29,6 +29,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.release_identity.outputs.release_tag }}
       source_sha: ${{ steps.release_identity.outputs.source_sha }}
+      artifact_prefix: ${{ steps.release_identity.outputs.artifact_prefix }}
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
       RELEASE_NOTES: ${{ github.event.release.body }}
@@ -61,6 +62,12 @@ jobs:
           printf 'RELEASE_TAG=%s\n' "$RELEASE_TAG" >> "$GITHUB_ENV"
           printf 'release_tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           printf 'source_sha=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          artifact_prefix="releases/${RELEASE_TAG#v}"
+          if [ "$RELEASE_ENVIRONMENT" = testing ]; then
+            printf 'testing_revision=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            artifact_prefix="$artifact_prefix/revisions/$(git rev-parse HEAD)"
+          fi
+          printf 'artifact_prefix=%s\n' "$artifact_prefix" >> "$GITHUB_OUTPUT"
           printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
       - run: uv run --locked ruff check src tests scripts/release
       - name: Warm build dependencies for offline release tests
@@ -77,12 +84,15 @@ jobs:
           AERO_OFFICIAL_API_URL: ${{ secrets.AERO_OFFICIAL_API_URL || vars.AERO_OFFICIAL_API_URL }}
           AERO_OFFICIAL_LLM_URL: ${{ secrets.AERO_OFFICIAL_LLM_URL || vars.AERO_OFFICIAL_LLM_URL }}
           AERO_DOWNLOAD_BASE: ${{ secrets.AERO_DOWNLOAD_BASE || vars.AERO_DOWNLOAD_BASE }}
+          AERO_RELEASE_REVISION: ${{ steps.release_identity.outputs.testing_revision }}
         run: uv run --locked python scripts/release/prepare.py --tag "$RELEASE_TAG"
       - run: uv run --locked python scripts/release/validate_artifacts.py dist/release/pypi
       - name: Install the exact locked release
+        env:
+          RELEASE_ARTIFACT_PREFIX: ${{ steps.release_identity.outputs.artifact_prefix }}
         run: |
           uv venv --python 3.12 dist/smoke
-          uv pip sync --python dist/smoke/bin/python --require-hashes --only-binary :all: dist/release/download/releases/*/requirements.txt
+          uv pip sync --python dist/smoke/bin/python --require-hashes --only-binary :all: "dist/release/download/$RELEASE_ARTIFACT_PREFIX/requirements.txt"
           uv pip install --python dist/smoke/bin/python --no-deps dist/release/pypi/*.whl
           dist/smoke/bin/python -c 'from aero.distribution import smoke; from aero.version import get_version; from pathlib import Path; import sys; smoke(Path(sys.prefix), get_version())'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -132,6 +142,7 @@ jobs:
       RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
       AERO_ENVIRONMENT: ${{ github.event_name == 'release' && 'production' || inputs.environment || 'testing' }}
       AERO_DOWNLOAD_BASE: ${{ secrets.AERO_DOWNLOAD_BASE || vars.AERO_DOWNLOAD_BASE }}
+      RELEASE_ARTIFACT_PREFIX: ${{ needs.build.outputs.artifact_prefix }}
     steps:
       - name: Install the staged release using only the shell bootstrap
         shell: bash
@@ -139,8 +150,8 @@ jobs:
           export AERO_HOME="$RUNNER_TEMP/aero-home"
           export AERO_INSTALL_ROOT="$AERO_HOME/client"
           export AERO_BIN_DIR="$RUNNER_TEMP/aero-bin"
-          export AERO_RELEASE_MANIFEST="releases/${RELEASE_TAG#v}/release.json"
-          curl -fLsS --proto '=https' --proto-redir '=https' "$AERO_DOWNLOAD_BASE/releases/${RELEASE_TAG#v}/install.sh" -o "$RUNNER_TEMP/aero-install.sh"
+          export AERO_RELEASE_MANIFEST="$RELEASE_ARTIFACT_PREFIX/release.json"
+          curl -fLsS --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 --proto '=https' --proto-redir '=https' "$AERO_DOWNLOAD_BASE/$RELEASE_ARTIFACT_PREFIX/install.sh" -o "$RUNNER_TEMP/aero-install.sh"
           sh "$RUNNER_TEMP/aero-install.sh"
           AERO_COMMAND=aero
           if [ "$AERO_ENVIRONMENT" = testing ]; then AERO_COMMAND=aero-testing; fi

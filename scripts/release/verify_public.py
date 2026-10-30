@@ -17,6 +17,9 @@ with tempfile.TemporaryDirectory(prefix="aero-public-check-") as temporary:
             "stable.json",
             "install.sh",
         }:
+            print(
+                "Verifying public artifact: " + file.relative_to(directory).as_posix(), flush=True
+            )
             module.download(
                 module.artifact_url(base, file.relative_to(directory).as_posix()),
                 Path(temporary) / "check",
