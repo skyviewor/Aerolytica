@@ -35,7 +35,9 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 case "${AERO_NETWORK_REGION:-${TZ:-$(readlink /etc/localtime 2>/dev/null || true)}}" in
     cn|china|mainland|mainland_china|*Asia/Shanghai|*Asia/Chongqing|*Asia/Harbin)
-        export UV_DEFAULT_INDEX="${UV_DEFAULT_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}" ;;
+        # Pass the region, not an implicit index override: the verified installer
+        # can then fail over between mirrors while respecting explicit UV_* settings.
+        export AERO_NETWORK_REGION="${AERO_NETWORK_REGION:-mainland_china}" ;;
 esac
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aero-install.XXXXXX")"
 trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM

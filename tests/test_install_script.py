@@ -23,7 +23,8 @@ def test_install_script_uses_uv_and_never_initializes_a_project():
     assert "conda base" not in script
     assert "curl -fk" not in script
     assert "github.com" not in script.lower()
-    assert "UV_DEFAULT_INDEX" in script
+    assert 'export AERO_NETWORK_REGION="${AERO_NETWORK_REGION:-mainland_china}"' in script
+    assert "export UV_DEFAULT_INDEX=" not in script
 
 
 def test_install_script_selects_each_supported_platform():

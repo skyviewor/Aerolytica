@@ -36,6 +36,14 @@ class DistributionError(RuntimeError):
     """An install failed before it was safe to activate it."""
 
 
+class InstallCommandError(DistributionError):
+    """A redacted command failure, optionally eligible for registry failover."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
 def installed_runtime_profile() -> dict:
     try:
         profile = json.loads(Path(__file__).with_name("release_environment.json").read_text())
@@ -285,18 +293,128 @@ def fetch_release(base: str | None = None) -> dict:
     return envelope
 
 
-def _run(command: list[str], *, timeout: int = 900) -> None:
+def _command_failure(output: str) -> tuple[str, bool]:
+    """Classify without exposing arbitrary subprocess output, credentials or paths."""
+    value = output.lower()
+    if "hash mismatch" in value or "hashes do not match" in value:
+        return "依赖 SHA256 校验失败", False
+    if "no space left" in value or "disk quota exceeded" in value:
+        return "磁盘空间不足", False
+    if "permission denied" in value:
+        return "文件访问权限不足", False
+    status = re.search(
+        r"\b(401|403|404|408|429|5\d\d)\s+(?:unauthorized|forbidden|not found|"
+        r"request timeout|too many requests|[a-z ]*error|service unavailable|"
+        r"gateway timeout|bad gateway)",
+        value,
+    )
+    if status:
+        return f"依赖源返回 HTTP {status[1]}", True
+    if any(
+        word in value
+        for word in (
+            "connection",
+            "timed out",
+            "timeout",
+            "dns",
+            "certificate",
+            "tls",
+            "ssl",
+            "failed to fetch",
+            "failed to download",
+            "not found in the package registry",
+            "no matching distribution",
+        )
+    ):
+        return "依赖源连接失败、超时或缺少锁定的软件包", True
+    if "no solution found" in value:
+        return "锁定依赖无法解析", False
+    return "子进程执行失败", False
+
+
+def _run(
+    command: list[str],
+    *,
+    timeout: int = 900,
+    step: str = "准备客户端环境",
+    env: dict[str, str] | None = None,
+) -> None:
     environment = os.environ.copy()
     for name in ("VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONPATH", "PYTHONHOME"):
         environment.pop(name, None)
+    environment.update(env or {})
     try:
         result = subprocess.run(
-            command, env=environment, check=False, timeout=timeout, capture_output=True, text=True
+            command,
+            env=environment,
+            check=False,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            errors="replace",
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise DistributionError("新环境准备失败或超时，旧版本未被覆盖。") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise InstallCommandError(
+            f"{step}超时（{timeout} 秒）；旧版本未被覆盖。", retryable=True
+        ) from exc
+    except OSError as exc:
+        raise InstallCommandError(f"{step}无法启动；旧版本未被覆盖。") from exc
     if result.returncode:
-        raise DistributionError("新环境准备失败，旧版本未被覆盖。")
+        reason, retryable = _command_failure((result.stderr or "") + (result.stdout or ""))
+        raise InstallCommandError(
+            f"{step}失败（{reason}；退出码 {result.returncode}）；旧版本未被覆盖。",
+            retryable=retryable,
+        )
+
+
+def _dependency_indexes() -> list[str | None]:
+    # An explicitly configured registry must never silently send requests elsewhere.
+    overrides = (
+        "UV_DEFAULT_INDEX",
+        "UV_INDEX_URL",
+        "UV_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_NO_INDEX",
+    )
+    if any(os.environ.get(name) for name in overrides):
+        return [None]
+    region = os.environ.get("AERO_NETWORK_REGION")
+    if not region:
+        region = os.environ.get("TZ", "") or str(Path("/etc/localtime").resolve())
+    mainland = region.lower() in {"cn", "china", "mainland", "mainland_china"} or any(
+        city in region for city in ("Asia/Shanghai", "Asia/Chongqing", "Asia/Harbin")
+    )
+    mirrors = ["https://mirrors.aliyun.com/pypi/simple", "https://pypi.org/simple"]
+    return ["https://pypi.tuna.tsinghua.edu.cn/simple", *mirrors] if mainland else mirrors[::-1]
+
+
+def _sync_dependencies(uv: Path, python: Path, requirements: Path) -> None:
+    command = [
+        str(uv),
+        "pip",
+        "sync",
+        "--no-config",
+        "--python",
+        str(python),
+        "--require-hashes",
+        "--only-binary",
+        ":all:",
+        str(requirements),
+    ]
+    indexes = _dependency_indexes()
+    for attempt, index in enumerate(indexes):
+        # Bound each source attempt; do not multiply uv's internal HTTP retries.
+        environment = {"UV_HTTP_TIMEOUT": "20", "UV_HTTP_RETRIES": "0"}
+        if index:
+            environment["UV_DEFAULT_INDEX"] = index
+        try:
+            _run(command, timeout=180, step="安装锁定依赖", env=environment)
+            return
+        except InstallCommandError as exc:
+            if not exc.retryable or attempt == len(indexes) - 1:
+                raise
+            print(f"{exc} 正在切换备用依赖源…", file=sys.stderr, flush=True)
 
 
 def interpreter_version() -> str:
@@ -357,21 +475,32 @@ def stage_release(envelope: dict, uv: Path, base: str, *, bootstrap: bool = Fals
                     os.rename(temporary, prefix)
                     # TemporaryDirectory tolerates an already moved directory.
             interpreter = prefix / "python" / "bin" / "python3.12"
-        _run([str(uv), "venv", "--clear", "--python", str(interpreter), str(environment)])
+        _run(
+            [
+                str(uv),
+                "venv",
+                "--no-config",
+                "--clear",
+                "--python",
+                str(interpreter),
+                str(environment),
+            ],
+            step="创建私有虚拟环境",
+        )
+        _sync_dependencies(uv, python, requirements)
         _run(
             [
                 str(uv),
                 "pip",
-                "sync",
+                "install",
+                "--no-config",
                 "--python",
                 str(python),
-                "--require-hashes",
-                "--only-binary",
-                ":all:",
-                str(requirements),
-            ]
+                "--no-deps",
+                str(wheel),
+            ],
+            step="安装客户端发行包",
         )
-        _run([str(uv), "pip", "install", "--python", str(python), "--no-deps", str(wheel)])
         signed = files / "release.json"
         signed.write_text(json.dumps(envelope))
         # Bootstrap initially trusts the HTTPS script, but activation requires
@@ -385,7 +514,8 @@ def stage_release(envelope: dict, uv: Path, base: str, *, bootstrap: bool = Fals
                 "manifest=verify_manifest(json.load(open(sys.argv[1]))); "
                 "assert distribution_profile() == manifest.get('runtime', distribution_profile())",
                 str(signed),
-            ]
+            ],
+            step="验证发行签名",
         )
         smoke(environment, version)
     write_state(
@@ -416,8 +546,9 @@ def smoke(environment: Path, version: str) -> None:
             version,
         ],
         timeout=60,
+        step="检查客户端资源与依赖",
     )
-    _run([str(environment / "bin/aero"), "version"], timeout=15)
+    _run([str(environment / "bin/aero"), "version"], timeout=15, step="检查客户端启动")
 
 
 def current_environment() -> Path | None:

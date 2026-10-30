@@ -78,6 +78,13 @@ AERO_DOWNLOAD_BASE=https://mirror.example.com/download ./install.sh
 中国大陆网络会沿用项目的 PyPI 与 Conda 镜像检测，也可用
 `AERO_NETWORK_REGION=mainland_china` 显式指定。
 
+客户端锁定依赖在大陆默认依次尝试清华镜像、阿里云镜像、官方 PyPI；其他地区
+先使用官方 PyPI，再尝试阿里云。连接失败、镜像拒绝访问或缺包时有界切换，每次
+仍强制 SHA256 校验、仅安装二进制 wheel，不关闭 TLS 校验。校验失败、磁盘或
+权限错误直接停止。安装失败会显示步骤和脱敏后的原因，不输出凭据或私人路径。
+显式设置 `UV_DEFAULT_INDEX` 等依赖源环境变量时尊重该配置，不自动改投其他源；
+官方私有安装不读取当前研究目录的 uv 配置，以免项目配置意外影响客户端安装。
+
 ## 更新与回滚
 
 ```bash
