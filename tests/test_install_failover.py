@@ -3,12 +3,37 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from aero import distribution as dist
+
+
+def test_first_install_lock_works_without_aero_or_site_packages(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            "import importlib.util,os,sys; "
+            "os.environ['AERO_INSTALL_ROOT']=sys.argv[2]; "
+            "s=importlib.util.spec_from_file_location('bootstrap_distribution',sys.argv[1]); "
+            "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+            'exec(\'with m.install_lock():\\n assert not any(n == \\"aero\\" or '
+            'n.startswith(\\"aero.\\") for n in sys.modules)\'); '
+            "print('bootstrap lock OK')",
+            str(Path(dist.__file__).resolve()),
+            str(tmp_path / "client"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "bootstrap lock OK" in result.stdout
 
 
 @pytest.fixture(autouse=True)

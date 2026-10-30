@@ -117,13 +117,22 @@ def write_state(path: Path, value: dict) -> None:
 
 @contextmanager
 def install_lock():
-    from aero.core.file_lock import lock_nonblocking, nofollow_flag
-
     root = private_dir(install_root())
-    fd = os.open(root / "install.lock", os.O_CREAT | os.O_RDWR | nofollow_flag(), 0o600)
+    fd = os.open(
+        root / "install.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     try:
         try:
-            lock_nonblocking(fd)
+            if os.name == "nt":
+                from aero.core.file_lock import lock_nonblocking
+
+                lock_nonblocking(fd)
+            else:
+                # The shell bootstrap extracts only this module before Aero or
+                # its dependencies exist. Keep the POSIX path stdlib-only.
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise DistributionError("另一个安装或更新正在进行。") from exc
         yield
