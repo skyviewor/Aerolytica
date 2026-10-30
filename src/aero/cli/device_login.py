@@ -1,4 +1,4 @@
-"""Input-aligned account authorization; never collects an account password."""
+"""Centered account authorization; never collects an account password."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
-from aero.cli.input_dialog import InputAlignedScreen
 from aero.cli.question_screen import QuestionAction
 from aero.core.device_login import TERMINAL_STATES, DeviceLoginController, login_recommendation
 from aero.core.official_account import (
@@ -19,13 +19,12 @@ from aero.core.official_account import (
 )
 
 
-class OfficialLoginScreen(InputAlignedScreen[OfficialSessionData | None]):
-    DIALOG_SELECTOR = "#official-login-dialog"
+class OfficialLoginScreen(ModalScreen[OfficialSessionData | None]):
     CSS = """
-    OfficialLoginScreen { layout: grid; grid-size: 1; align: left bottom; background: transparent; }
+    OfficialLoginScreen { align: center middle; background: $background 90%; }
     #official-login-dialog {
-        dock: bottom; width: 1fr; height: auto; max-height: 25;
-        border: solid #5dade2; background: $surface; padding: 1 2; margin: 0 2 1 2;
+        width: 90%; max-width: 100; height: auto; max-height: 90%; overflow-y: auto;
+        border: solid #5dade2; background: $surface; padding: 1 2; margin: 0;
     }
     #official-login-options { height: auto; max-height: 6; border: none; }
     #official-login-status { height: auto; margin: 1 0; }
@@ -73,7 +72,6 @@ class OfficialLoginScreen(InputAlignedScreen[OfficialSessionData | None]):
                 yield QuestionAction("取消", id="login-cancel")
 
     def on_mount(self) -> None:
-        self.setup_input_alignment()
         for name in ("open", "manual", "retry"):
             self.query_one("#login-" + name).display = False
         options = self.query_one("#official-login-options", OptionList)
@@ -81,13 +79,6 @@ class OfficialLoginScreen(InputAlignedScreen[OfficialSessionData | None]):
         options.focus()
         if self.mode:
             self._begin(self.mode)
-
-    def align_with_input(self) -> None:
-        # Standalone login has no underlying composer to supply its geometry.
-        dialog = self.query_one(self.DIALOG_SELECTOR)
-        dialog.styles.width = max(1, self.size.width - 4)
-        dialog.styles.margin = (0, 2, 1, 2)
-        super().align_with_input()
 
     @on(OptionList.OptionSelected, "#official-login-options")
     async def selected(self, event: OptionList.OptionSelected) -> None:

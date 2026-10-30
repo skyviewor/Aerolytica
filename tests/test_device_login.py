@@ -254,7 +254,8 @@ async def test_screen_focus_navigation_and_no_request_before_choice(monkeypatch)
     start.assert_not_awaited()
 
 
-async def test_login_dialog_matches_chat_input_geometry():
+@pytest.mark.parametrize("size", [(80, 22), (160, 48)])
+async def test_login_dialog_is_centered_above_chat_and_after_resize(size):
     class Host(App):
         def compose(self) -> ComposeResult:
             with Vertical():
@@ -266,12 +267,17 @@ async def test_login_dialog_matches_chat_input_geometry():
             self.push_screen(OfficialLoginScreen())
 
     app = Host()
-    async with app.run_test(size=(100, 32)) as pilot:
+    async with app.run_test(size=size) as pilot:
         await pilot.pause()
-        previous = app.screen_stack[-2].query_one("#input-box").region
         region = app.screen.query_one("#official-login-dialog").region
-        assert region.width == previous.width and region.x == previous.x
-        assert region.bottom == previous.bottom
+        assert abs(region.x * 2 + region.width - size[0]) <= 1
+        assert abs(region.y * 2 + region.height - size[1]) <= 1
+        assert region.bottom < size[1]
+        await pilot.resize_terminal(120, 36)
+        await pilot.pause()
+        region = app.screen.query_one("#official-login-dialog").region
+        assert abs(region.x * 2 + region.width - 120) <= 1
+        assert abs(region.y * 2 + region.height - 36) <= 1
         await pilot.press("escape")
 
 
