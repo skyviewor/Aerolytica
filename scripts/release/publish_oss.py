@@ -89,15 +89,40 @@ def main():
                 raise RuntimeError("OSS upload verification failed: " + relative)
         print("Immutable release artifacts uploaded and verified.")
     else:
+        # Mutable, signed per-version pointer, published only after the same
+        # install/public checks as stable. Immutable revision artifacts remain.
+        bucket.put_object_from_file(
+            f"{prefix}/releases/{version}/latest.json",
+            str(directory / "stable.json"),
+            headers={
+                "Cache-Control": "no-cache,no-store,must-revalidate",
+                "Content-Type": "application/json",
+            },
+        )
         key = f"{prefix}/stable.json"
         if bucket.object_exists(key):
-            previous = json.loads(bucket.get_object(key).read())
+            previous_bytes = bucket.get_object(key).read()
+            previous = json.loads(previous_bytes)
+            module.validate_manifest(previous["manifest"])
             module.assert_release_environment(
                 previous["manifest"], os.environ.get("AERO_ENVIRONMENT", "production")
             )
             if Version(previous["manifest"]["version"]) > Version(version):
                 print("Older release retained; stable entry was not downgraded.")
                 return
+            # Preserve the last accepted revision of releases published before
+            # version pointers existed, before stable advances to a new version.
+            previous_version = previous["manifest"]["version"]
+            previous_key = f"{prefix}/releases/{previous_version}/latest.json"
+            if previous_version != version and not bucket.object_exists(previous_key):
+                bucket.put_object(
+                    previous_key,
+                    previous_bytes,
+                    headers={
+                        "Cache-Control": "no-cache,no-store,must-revalidate",
+                        "Content-Type": "application/json",
+                    },
+                )
         for name in ("install.sh", "stable.json"):
             bucket.put_object_from_file(
                 f"{prefix}/{name}",

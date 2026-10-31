@@ -68,6 +68,19 @@ def build_system_prompt(
         )
     if lang == "zh":
         prompt += (
+            "\n\n## 账户权益与客户端升级\n"
+            "用 list_my_coupons 查询本人券，用 get_my_invitation 查询已生成的邀请信息和奖励，"
+            "未生成时引导官网邀请好友页面，不代替用户生成或绑定。用户想激活券时用"
+            "activate_my_coupon，必须等待逐次审批，展示金额/容量、限制和连续计时规则。"
+            "自备模型及问答/规划模式也可使用官方账户权益工具，不索要密码。"
+            "免费身份每自然月20点且官方模型仅 qwen3.8-flash，券不会改变身份。"
+            "用户明确要求升级客户端时用 prepare_client_update；只讨论版本先询问。"
+            "check_client_update 仅检查，get_client_update_status 仅读本机状态，勿持续轮询。"
+            "准备后当前版本未改变，告知用户手动点击重启并应用或执行 /restart；"
+            "不得通过 shell、exec、kill、重启 daemon 或任意下载链接绕过手动重启。"
+            "同版本测试修订重装需要用户明确授权，不能自动重装或覆盖生产同版本。"
+        )
+        prompt += (
             "\n\n## Aerolytica 官方云空间\n"
             "用 get_cloud_sync_status 查看文件同步的实际后台状态和 configuration.revision。"
             "用户要求开关自动同步或调整间隔时，用 set_cloud_sync_enabled；"
@@ -652,6 +665,17 @@ redirect >, etc.).
   For destructive commands, briefly explain what you're doing and proceed.
 
 ## File storage conventions
+- Account benefits: list_my_coupons and get_my_invitation are read-only official-account
+  tools, available with BYOK and in QA/plan modes. activate_my_coupon always needs a fresh
+  approval showing value, eligibility and continuous duration. Never bypass it using shell.
+  Free monthly 20 credits and coupons do not unlock paid models; free accounts use only
+  qwen3.8-flash. Guide users to the website to generate/bind an invitation.
+- Client updates: explicit upgrade requests authorize prepare_client_update; mere discussion
+  needs consent. check_client_update checks only, get_client_update_status reads local state;
+  do not poll continuously. Preparation does NOT activate or restart anything. Ask the user
+  to click Restart and apply or type /restart. Never use shell, kill, daemon restart or
+  arbitrary download URLs to bypass manual restart. Same-version testing reinstall needs
+  explicit consent and must never overwrite a production release.
 - Use get_cloud_sync_status for actual file-sync runtime status; use approved
   set_cloud_sync_enabled or sync_cloud_now for settings/one-shot requests. queued means
   queued, not completed. End the turn so the workspace lock can be released; never poll

@@ -153,6 +153,7 @@ download/
   install.sh                         # 成功发布后才推进
   stable.json                        # 签名清单，最后一步推进
   releases/<版本>/
+    latest.json                      # 此版本最近验收修订的签名清单；promote 后更新，不设 immutable
     aerolytica-<版本>-py3-none-any.whl
     requirements.txt                 # uv.lock 导出的平台标记 + SHA256 锁
     bootstrap.py
@@ -163,6 +164,14 @@ download/
   bootstrap/uv/<固定版本>/<target>.tar.gz
   bootstrap/python/<固定构建>/<平台>.tar.gz
 ```
+
+`--version` 优先读取版本自己的 `latest.json`；当前 stable 恰好是该版本时直接使用 stable，
+兼容旧发行时回退到原有的平铺 `release.json`。只有 404/410 才尝试旧布局，网络/服务错误
+不改投其他版本。`--revision` 直接读取不可变的修订清单，不跟随任何版本指针。
+版本指针只在安装和公网验收后的 promote 阶段更新；发布旧版本可记录其指针，但不能
+将全局 stable 降级。旧发行文件、修订与签名不修改，也不将选择的版本永久写成更新源。
+首次使用新发布器推进 stable 到新版本时，会为上一版缺失的版本指针保留原 stable
+签名清单，因此既有测试修订也能在后续发布后通过 `--version` 选回，不必重打旧包。
 
 归档的固定平台名不表示客户端有四种二进制 wheel：客户端是一个跨平台 wheel；
 私有 Python/uv 和依赖中的原生 wheel 按平台选择。引导工具版本由

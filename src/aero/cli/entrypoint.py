@@ -6,6 +6,26 @@ import os
 import sys
 
 
+def _restart_current(arguments: list[str]) -> None:
+    from aero.cli.update import rollback
+    from aero.distribution import DistributionError, install_root
+
+    launcher = str(install_root() / "current/bin/aero")
+    try:
+        os.execv(launcher, [launcher, *arguments])
+    except OSError:
+        # The smoke test has already checked the complete CLI import and entry
+        # point. If exec itself still fails, use the same idle-only rollback;
+        # never kill a replacement worker that has accepted a new task.
+        rollback(wait=0)
+        try:
+            os.execv(launcher, [launcher, *arguments])
+        except OSError as exc:
+            raise DistributionError(
+                "新旧启动入口均无法执行，请使用 aero update --rollback 检查安装。"
+            ) from exc
+
+
 def main() -> None:
     from aero.distribution import DistributionError
     from aero.release_environment import configure_runtime
@@ -29,6 +49,22 @@ def main() -> None:
         from aero.cli.onboarding import main as setup_main
 
         raise SystemExit(setup_main(sys.argv[2:]))
+    # Only an explicit foreground chat launch applies a staged release.
+    # Background agent/daemon startup and internal handoffs never enter here.
+    if (
+        command in {"", "chat"}
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+        and not os.environ.get("AERO_UPDATE_RESTART_TOKEN")
+    ):
+        from aero.cli.pending_update import apply_pending
+
+        try:
+            if apply_pending():
+                _restart_current(sys.argv[1:])
+        except (DistributionError, OSError, ValueError) as exc:
+            message = str(exc) if isinstance(exc, DistributionError) else "待更新环境无法启动。"
+            print("未应用待更新版本，继续使用当前版本：" + message, file=sys.stderr)
     if command == "serve" and os.environ.get("AERO_ENABLE_WEB_PREVIEW") != "1":
         print("Web 工作台暂未公开；请使用 aero chat。", file=sys.stderr)
         raise SystemExit(2)
@@ -61,8 +97,7 @@ def main() -> None:
                 raise SystemExit(
                     subprocess.call([sys.executable, "-m", "aero.cli.entrypoint", *restart])
                 )
-            launcher = str(install_root() / "current/bin/aero")
-            os.execv(launcher, [launcher, *restart])
+            _restart_current(restart)
     else:
         chat_main()
 

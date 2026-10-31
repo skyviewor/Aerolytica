@@ -26,6 +26,51 @@ Miniconda、Anaconda、Miniforge 环境。
 Python/uv 是按平台选择的私有引导工具；客户端本身是统一的 `py3-none-any` wheel。
 支持 glibc Linux x86_64/ARM64 和 macOS Intel/Apple Silicon，不支持 Alpine/musl。
 
+### 指定版本安装
+
+默认安装最新版；要安装保留在官方源中的某个历史版本，给安装脚本传入 `--version`：
+
+```bash
+curl -LsSf https://aero.skyviewor.com/download/install.sh | sh -s -- --version 0.1.1
+```
+
+测试环境使用测试域名，入口仍为 `aero-testing`：
+
+```bash
+curl -LsSf https://aerolytica.skyviewor.team/download/install.sh | sh -s -- --version 0.1.2
+```
+
+这里只能安装实际已发布且验签通过的版本；不存在或版本不符会报错，不会悄悄换成最新版。
+支持 `v0.1.1` 写法；`--version latest` 等同于不指定。也可用 `AERO_VERSION` 环境变量，
+通过管道安装时变量必须放在 `sh` 一侧，不是 `curl` 一侧。
+
+已安装较新版本时，降级必须再显式加 `--allow-downgrade`。请先退出其他前台客户端，
+等待后台任务空闲；切换复用原有暂停、空闲握手及回滚机制，不强杀任务，不删除账号、
+研究项目、对话或科研环境。源码和 pip 安装不由此脚本覆盖。
+
+```bash
+curl -LsSf https://aerolytica.skyviewor.team/download/install.sh \
+  | sh -s -- --version 0.1.1 --allow-downgrade
+```
+
+测试版同一版本可有多个修订。只指定版本时，取该版本最近一次通过发布验收的修订；
+要精确复现，额外指定完整的 40 位提交 SHA（不能用于生产环境）：
+
+```bash
+# 将下方 SHA 替换为实际发布的完整提交 SHA
+curl -LsSf https://aerolytica.skyviewor.team/download/install.sh \
+  | sh -s -- --version 0.1.2 --revision FULL_COMMIT_SHA
+```
+
+同版本不同测试修订也可通过 `--reinstall` 显式确认；不覆盖生产同版本产物。
+安装引导由当前官方入口提供，历史 wheel 和签名清单保持不可变；不同 Python 补丁版本
+会准备各自的私有解释器。已有客户端切换前，还要通过其内嵌可信公钥验证目标签名。
+
+**指定安装不是永久锁定更新。** 安装旧版后仍从同一环境的最新版入口检查更新，
+因此可以用于 A→B 升级测试。测试“对话内准备更新”时，A 自身必须已包含该功能；
+原始旧版不会因为更换安装入口而新增 Agent 工具。指定安装成功后会清除旧的待应用
+更新标记，避免第一次打开 chat 就跳回先前准备的新版本；不会删除已下载的版本环境。
+
 默认 CLI 入口是 `~/.local/bin/aero`；脚本在 `.zshrc` 或 `.bashrc` 追加 PATH，
 并显示当前终端应执行的 export。不会覆盖其他软件同名的 `aero` 入口。
 旧版 `uv tool` 安装若占用入口，先确认其为旧 Aerolytica，再由用户迁移/移除旧入口。
@@ -109,11 +154,24 @@ aero update --rollback
 ```
 
 正常 chat 和常驻 Agent 对话支持 `/update`。自动检查在后台进行、最多每 24 小时一次，
-网络失败也会缓存；空闲时用现有审批框提供“更新 / 稍后 / 跳过此版本”，不会在
+网络失败也会缓存；空闲时用现有审批框提供“准备更新 / 稍后 / 跳过此版本”，不会在
 生成回复、审批、用户输入或子任务执行中弹窗。源码开发安装不自动检查或改动环境。
 
+也可在对话中说“帮我检查客户端更新”或“帮我升级客户端”。前者只检查，后者授权
+准备官方签名发行版；Agent 不执行任意下载地址或升级 Shell。准备在独立本机进程
+进行，关闭聊天也不会中止；重复请求复用任务，不持续请求云端进度。
+
+**对话内更新只准备，不立即生效。** 当前对话、版本号和后台 Agent 保持不变。
+准备完成后由用户点击“重启并应用”或输入 `/restart`；也可退出后在交互式终端
+重新打开 `aero chat`。应用前保存会话、检查其他实例和后台任务，繁忙时保留旧版本，
+不会强杀。内部 daemon/Agent 拉起或非交互启动不自动应用待更新。
+
+独立命令 `aero update` 保留显式切换/回滚行为。测试版使用相应的 `aero-testing`；
+仅明确要求同版本测试修订重装时才允许 `--reinstall`，不会跨环境或覆盖生产同版本。
+
 官网安装使用 `~/.aero/client/versions/<版本>/`：新版本在最终路径安装、验签与冒烟，
-随后原子切换 `current`；`previous` 保留上一版本。不移动 venv，不修改旧环境。
+在独立 CLI 更新或手动应用时原子切换 `current`；`previous` 保留上一版本。
+不移动 venv，不修改旧环境。
 本机后台 Agent / daemon 先暂停接新任务，已有任务（包括等待审批/输入）完成后
 再正常退出、按原工作目录重启。新进程先暂停，全部启动成功后才恢复接单。
 启动失败自动回滚；恢复本身失败会保留私有更新日志，须运行 `aero update --rollback`。

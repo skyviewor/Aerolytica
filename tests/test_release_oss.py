@@ -28,6 +28,7 @@ def publisher(monkeypatch, tmp_path):
         objects[key] = Path(filename).read_bytes()
 
     bucket.put_object_from_file.side_effect = put
+    bucket.put_object.side_effect = lambda key, value, **kwargs: objects.__setitem__(key, value)
     sdk = ModuleType("oss2")
     sdk.Auth = Mock()
     sdk.Bucket = Mock(return_value=bucket)
@@ -130,3 +131,47 @@ def test_release_environment_and_download_mapping_still_checked(publisher, monke
     with pytest.raises((distribution.DistributionError, SystemExit)):
         module.main()
     bucket.put_object_from_file.assert_not_called()
+
+
+def test_promote_records_a_per_version_signed_pointer(publisher, monkeypatch, tmp_path):
+    module, _, bucket, objects = publisher
+    monkeypatch.setattr(sys, "argv", ["publish_oss.py", "promote", "--directory", str(tmp_path)])
+    module.main()
+    assert objects["download/releases/0.1.0/latest.json"] == objects["download/stable.json"]
+    assert objects["download/releases/0.1.0/latest.json"] == (tmp_path / "stable.json").read_bytes()
+    headers = bucket.put_object_from_file.call_args_list[0].kwargs["headers"]
+    assert "no-cache" in headers["Cache-Control"] and "immutable" not in headers["Cache-Control"]
+
+
+def test_older_version_pointer_does_not_downgrade_global_latest(publisher, monkeypatch, tmp_path):
+    module, _, _, objects = publisher
+    latest = json.loads((tmp_path / "stable.json").read_text())
+    latest["manifest"]["version"] = "0.2.0"
+    objects["download/stable.json"] = json.dumps(latest).encode()
+    before = objects["download/stable.json"]
+    monkeypatch.setattr(sys, "argv", ["publish_oss.py", "promote", "--directory", str(tmp_path)])
+    module.main()
+    assert objects["download/stable.json"] == before
+    assert objects["download/releases/0.1.0/latest.json"] == (tmp_path / "stable.json").read_bytes()
+
+
+def test_promote_preserves_legacy_stable_revision_for_later_install(
+    publisher, monkeypatch, tmp_path
+):
+    module, _, bucket, objects = publisher
+    previous = json.loads((tmp_path / "stable.json").read_text())
+    previous["manifest"]["version"] = "0.0.9"
+    previous["manifest"]["revision"] = "b" * 40
+    previous_bytes = json.dumps(previous).encode()
+    objects["download/stable.json"] = previous_bytes
+    monkeypatch.setattr(sys, "argv", ["publish_oss.py", "promote", "--directory", str(tmp_path)])
+    module.main()
+    assert objects["download/releases/0.0.9/latest.json"] == previous_bytes
+    assert objects["download/stable.json"] == (tmp_path / "stable.json").read_bytes()
+    bucket.put_object.assert_called_once()
+    # A later retry must not overwrite an already published version pointer.
+    objects["download/stable.json"] = previous_bytes
+    objects["download/releases/0.0.9/latest.json"] = b"existing accepted pointer"
+    module.main()
+    assert objects["download/releases/0.0.9/latest.json"] == b"existing accepted pointer"
+    bucket.put_object.assert_called_once()

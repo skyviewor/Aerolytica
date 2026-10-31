@@ -9,6 +9,23 @@ def approval_payload(data: dict) -> dict:
     from aero.toolbox.tools.runtime import _redact_shell_command
 
     tool = str(data.get("tool") or "operation")[:120]
+    if tool == "activate_my_coupon":
+        coupon = (data.get("args") or {}).get("_coupon_preview") or {}
+        storage = coupon.get("kind") == "storage"
+        return {
+            "tool": tool, "title": "激活我的券",
+            "description": ("仅批准本次激活，立即按服务端时间连续计时，与其他权益独立叠加。"
+                + ("空间券仅有效会员可激活；激活后会员到期不影响券有效期，不附赠会员或 Agent 名额。"
+                   if storage else "额度券不改变免费/付费身份，免费账户仍仅支持 qwen3.8-flash。")),
+            "details": [
+                {"label": "券", "value": str(coupon.get("name") or "")},
+                {"label": "权益", "value": (
+                    f"{coupon.get('capacity_bytes', 0)} 字节云空间" if storage
+                    else f"{coupon.get('credits', 0)} 点额度")},
+                {"label": "激活后有效期", "value": f"{coupon.get('validity_days', 0)} × 24 小时"},
+                {"label": "激活截止时间", "value": str(coupon.get("activation_deadline") or "")},
+            ], "details_truncated": False,
+        }
     if tool in {"set_cloud_sync_enabled", "sync_cloud_now"}:
         args = data.get("args") or {}
         action = args.get("action")

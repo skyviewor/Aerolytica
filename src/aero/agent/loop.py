@@ -293,6 +293,7 @@ def _runtime_tools_already_ready(args: dict) -> bool:
 
 _FRESH_APPROVAL_TOOLS = frozenset({
     "delete_cloud_files", "set_local_sync_directories", "set_cloud_sync_enabled", "sync_cloud_now",
+    "activate_my_coupon",
 })
 
 
@@ -1957,7 +1958,11 @@ class AgentLoop:
 
     async def _prepare_guarded_operation(self, call: ToolCall) -> bool:
         args = self._parse_tool_args(call)
-        if call.name == "delete_cloud_files":
+        if call.name == "activate_my_coupon":
+            from aero.toolbox.tools.benefits import prepare_coupon_activation
+
+            result = await prepare_coupon_activation(args.get("coupon_id"))
+        elif call.name == "delete_cloud_files":
             from aero.toolbox.tools.cloud import prepare_cloud_delete
 
             result = await prepare_cloud_delete(args.get("project_id"), args.get("files"))

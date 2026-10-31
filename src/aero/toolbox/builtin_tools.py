@@ -8,6 +8,11 @@ are migrated incrementally.
 from aero.toolbox.runtime_manager import (
     RUNTIME_TOOL_PACKAGES as _RUNTIME_TOOL_PACKAGES,
 )
+from aero.toolbox.tools.benefits import (
+    activate_my_coupon,
+    get_my_invitation,
+    list_my_coupons,
+)
 from aero.toolbox.tools.cams import (
     download_cams,
     get_cams_latest_forecast_cycle,
@@ -19,6 +24,11 @@ from aero.toolbox.tools.checkpoints import (
     list_checkpoints,
     rename_checkpoint,
     start_checkpoint_experiment,
+)
+from aero.toolbox.tools.client_update import (
+    check_client_update,
+    get_client_update_status,
+    prepare_client_update,
 )
 from aero.toolbox.tools.cloud import (
     delete_cloud_files,
@@ -202,6 +212,12 @@ from aero.toolbox.tools.vision import (
 from aero.toolbox.tools.web_search import check_web_search_status_tool, search_web
 
 __all__ = [
+    "activate_my_coupon",
+    "get_my_invitation",
+    "list_my_coupons",
+    "check_client_update",
+    "get_client_update_status",
+    "prepare_client_update",
     "get_cloud_sync_status",
     "set_cloud_sync_enabled",
     "sync_cloud_now",

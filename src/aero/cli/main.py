@@ -29,6 +29,7 @@ from textual.geometry import Offset
 from textual.screen import ModalScreen
 from textual.scrollbar import ScrollBarRender
 from textual.widgets import (
+    Button,
     Input,
     ListItem,
     ListView,
@@ -1671,6 +1672,18 @@ class ChatTuiApp(App):
         padding: 0 1;
     }
 
+    #restart-update {
+        display: none;
+        width: 18;
+        min-width: 18;
+        height: 1;
+        min-height: 1;
+        border: none;
+        padding: 0 1;
+        background: $primary;
+        color: $background;
+    }
+
     """
 
     def compose(self) -> ComposeResult:
@@ -1687,6 +1700,13 @@ class ChatTuiApp(App):
                         yield Static("", id="mode-label")
         with Horizontal(id="footer-bar"):
             yield Static("", id="footer-status")
+            yield Button("重启并应用", id="restart-update")
+
+    @on(Button.Pressed, "#restart-update")
+    async def restart_prepared_update(self) -> None:
+        from aero.cli.update_ui import request_restart
+
+        await request_restart(self)
 
 
 class AeroApp(ChatTuiApp):
@@ -2591,6 +2611,14 @@ class AeroApp(ChatTuiApp):
         if getattr(self, "_updating", False):
             self.notify("客户端正在更新，请稍候。")
             return
+        if text == "/restart":
+            if from_cloud:
+                self.notify("请在本机手动点击重启并应用或执行 /restart。")
+                return
+            from aero.cli.update_ui import request_restart
+
+            await request_restart(self)
+            return
         if text == "/update":
             if from_cloud:
                 self.notify("请在本机执行 /update 或 aero update。")
@@ -3352,7 +3380,8 @@ class AeroApp(ChatTuiApp):
             ("/provider", t("cmd.provider", self.config.language)),
             ("/ai-mode official|byok", "整体切换官方 / BYOK 推理模式"),
             ("/quit", t("cmd.quit", self.config.language)),
-            ("/update", "检查客户端更新，经确认后原地升级"),
+            ("/update", "检查并后台准备客户端更新"),
+            ("/restart", "重启并应用已准备的更新"),
             ("/revoke", t("cmd.revoke", self.config.language)),
             ("/set", t("cmd.set", self.config.language)),
             ("/theme", t("cmd.theme", self.config.language)),
@@ -6906,6 +6935,7 @@ class AeroApp(ChatTuiApp):
                 "set_local_sync_directories",
                 "set_cloud_sync_enabled",
                 "sync_cloud_now",
+                "activate_my_coupon",
             }:
                 labels = {
                     "record_memo": ("加入备忘录", "确认加入"),
@@ -6917,6 +6947,7 @@ class AeroApp(ChatTuiApp):
                     "set_local_sync_directories": ("修改同步范围", "批准本次修改"),
                     "set_cloud_sync_enabled": ("设置自动云同步", "批准本次设置"),
                     "sync_cloud_now": ("立即云同步", "批准本次同步"),
+                    "activate_my_coupon": ("激活我的券", "激活并开始计时"),
                 }
                 title, allow_label = labels[tool_name]
                 screen = ConfirmScreen(
@@ -7026,7 +7057,7 @@ class AeroApp(ChatTuiApp):
         lang = self.config.language
         action_label = _CONFIRM_ACTION_LABELS.get(tool_name, "执行操作")
         if tool_name in {"delete_cloud_files", "set_local_sync_directories",
-                         "set_cloud_sync_enabled", "sync_cloud_now"}:
+                         "set_cloud_sync_enabled", "sync_cloud_now", "activate_my_coupon"}:
             from aero.application.approval_details import approval_payload
 
             payload = approval_payload({"tool": tool_name, "args": args})

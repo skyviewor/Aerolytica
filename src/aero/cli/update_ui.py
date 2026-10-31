@@ -45,6 +45,9 @@ def idle(app) -> bool:
 
 
 def start_update_checks(app) -> None:
+    if managed_install():
+        app.set_interval(5, lambda: refresh_pending(app))
+        app.run_worker(refresh_pending(app), exclusive=False, group="pending-update")
     # Editable source has no signing keys, and must never contact the release
     # endpoint in development or during UI tests.
     from aero import distribution
@@ -59,12 +62,23 @@ def start_update_checks(app) -> None:
 
 async def offer_update(app, *, explicit: bool = False) -> None:
     from aero.cli.main import ConfirmScreen
-    from aero.cli.update import check_update, external_update_command, perform_update, skip_version
+    from aero.cli.pending_update import prepare_update, update_status
+    from aero.cli.update import check_update, external_update_command, skip_version
     from aero.version import get_version
 
     if explicit and not idle(app):
         app.notify("请等当前任务和审批完成后再更新。", severity="warning")
         return
+    if managed_install():
+        try:
+            state = await asyncio.to_thread(update_status)
+            if state["status"] in {"preparing", "ready"}:
+                if explicit:
+                    app.notify(state["message"], timeout=10)
+                await refresh_pending(app)
+                return
+        except (DistributionError, OSError, ValueError):
+            pass
     try:
         release = await asyncio.to_thread(check_update, force=explicit)
     except Exception as exc:
@@ -102,7 +116,8 @@ async def offer_update(app, *, explicit: bool = False) -> None:
     notes = str(release["manifest"].get("notes") or "")[:2000]
     message = (
         f"当前版本：{get_version()} → {version}\n"
-        "将在独立环境安装并校验。后台任务空闲后重启服务，当前对话会保存并重新打开。\n"
+        "将在后台独立环境安装并校验，当前对话和 Agent 继续运行，不切换版本。\n"
+        "准备好后由你手动点击「重启并应用」或执行 /restart。\n"
         "不会修改项目文件、账号配置或科学计算环境。\n" + notes
     )
 
@@ -110,16 +125,14 @@ async def offer_update(app, *, explicit: bool = False) -> None:
         if not idle(app):
             app.notify("任务状态已变化，请等任务结束后再更新。")
             return
-        app._updating = True
         footer = getattr(app, "_set_footer_status", None)
         if footer:
             footer("正在准备客户端更新…")
         app.notify("正在准备新版本，请稍候；当前版本仍保留。", timeout=8)
         try:
-            save = getattr(app, "_save_session_on_exit", None)
-            if save:
-                save()
-            await asyncio.to_thread(perform_update, release, exclude_pid=os.getpid())
+            state = await asyncio.to_thread(prepare_update)
+            app.notify(state.get("message", "更新正在后台准备。"), timeout=10)
+            await refresh_pending(app)
         except Exception as exc:
             app.notify(
                 str(exc)
@@ -128,13 +141,9 @@ async def offer_update(app, *, explicit: bool = False) -> None:
                 severity="error",
                 timeout=15,
             )
-            app._updating = False
             if footer:
                 footer("升级未完成；当前对话可以继续。")
             return
-        app._restart_for_update = True
-        cleanup = getattr(app, "_do_cleanup_exit", app.exit)
-        cleanup()
 
     def resolved(choice: str) -> None:
         if choice == "allow":
@@ -146,9 +155,61 @@ async def offer_update(app, *, explicit: bool = False) -> None:
         ConfirmScreen(
             message,
             title="客户端版本更新",
-            allow_label="更新",
+            allow_label="准备更新",
             always_label="稍后",
             deny_label="跳过此版本",
         ),
         resolved,
     )
+
+
+async def refresh_pending(app) -> None:
+    """A local-file check only; one notification per state transition."""
+    from textual.css.query import NoMatches
+    from textual.widgets import Button
+
+    from aero.cli.pending_update import update_status
+
+    try:
+        state = await asyncio.to_thread(update_status)
+        try:
+            app.query_one("#restart-update", Button).display = state["status"] == "ready"
+        except NoMatches:
+            pass
+        key = (state["status"], state.get("version"), state.get("revision"))
+        if key != getattr(app, "_last_update_state", None):
+            app._last_update_state = key
+            if state["status"] in {"ready", "error", "interrupted"}:
+                app.notify(state["message"], timeout=12)
+    except (DistributionError, OSError, ValueError, KeyError):
+        return
+
+
+async def request_restart(app) -> None:
+    """Invoked by the local user's button or slash command, never an Agent tool."""
+    from aero.cli.pending_update import apply_pending, update_status
+
+    if not idle(app):
+        app.notify("请先完成当前任务和审批，再重启应用更新。", severity="warning")
+        return
+    try:
+        state = await asyncio.to_thread(update_status)
+        if state["status"] != "ready":
+            app.notify(state.get("message", "没有准备好的更新。"))
+            return
+        app._updating = True
+        save = getattr(app, "_save_session_on_exit", None)
+        if save:
+            save()
+        await asyncio.to_thread(apply_pending, exclude_pid=os.getpid())
+        app._restart_for_update = True
+        getattr(app, "_do_cleanup_exit", app.exit)()
+    except Exception as exc:
+        app._updating = False
+        app.notify(
+            str(exc)
+            if isinstance(exc, DistributionError)
+            else "重启应用未完成，保留当前版本；请检查更新状态。",
+            severity="warning",
+            timeout=15,
+        )

@@ -183,6 +183,7 @@ class ResidentChatApp(ChatTuiApp):
         self._commands_list = [
             ("/login", "在官网授权登录官方账户"),
             ("/update", "检查客户端版本更新"),
+            ("/restart", "重启并应用已准备的更新"),
             ("/model", "选择后续请求使用的模型"),
             ("/mode", "选择执行、问答或规划模式"),
             ("/copy", "复制最后一条回复"),
@@ -454,6 +455,12 @@ class ResidentChatApp(ChatTuiApp):
             return
         editor = self.query_one(ResidentChatInput)
         text = editor.text.strip()
+        if text == "/restart":
+            from aero.cli.update_ui import request_restart
+
+            editor.load_text("")
+            self.run_worker(request_restart(self), exclusive=False)
+            return
         if text == "/update":
             from aero.cli.update_ui import offer_update
 
