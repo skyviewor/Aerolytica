@@ -55,6 +55,8 @@ def test_unconfigured_source_keeps_production_defaults(isolated):
     assert relay_llm_url() == dist.DEFAULT_RUNTIME_PROFILE["llm_url"]
     assert aero_home() == isolated / ".aero"
     assert dist.install_root() == isolated / ".aero/client"
+    assert platform_api_url() == "https://api.aerolytica.skyviewor.com"
+    assert relay_llm_url() == "https://llm.aerolytica.skyviewor.host/v1"
 
 
 def test_testing_wheel_pins_urls_state_and_command(isolated):

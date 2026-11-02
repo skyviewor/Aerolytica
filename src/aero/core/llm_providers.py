@@ -24,7 +24,7 @@ class LLMProviderPreset:
 OFFICIAL_LLM_PROVIDER = LLMProviderPreset(
     id="official",
     name="Aerolytica 官方",
-    base_url="https://llm.aerolytica.skyviewor.team/v1",
+    base_url="https://llm.aerolytica.skyviewor.host/v1",
     default_model="auto",
     models=("auto",),
     api_key_url="",

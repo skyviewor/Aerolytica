@@ -19,8 +19,8 @@ from aero.core.config import load_user_secrets, save_user_secrets, user_secrets_
 from aero.core.file_lock import lock_nonblocking, unlock
 from aero.release_environment import official_url
 
-DEFAULT_PLATFORM_API_URL = "https://api.aerolytica.skyviewor.team"
-DEFAULT_RELAY_LLM_URL = "https://llm.aerolytica.skyviewor.team/v1"
+DEFAULT_PLATFORM_API_URL = "https://api.aerolytica.skyviewor.com"
+DEFAULT_RELAY_LLM_URL = "https://llm.aerolytica.skyviewor.host/v1"
 _REFRESH_SKEW_SECONDS = 60
 
 

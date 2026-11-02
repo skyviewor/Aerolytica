@@ -26,8 +26,8 @@ MAX_MANIFEST = 1024 * 1024
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[a-zA-Z0-9.+-]*)?\Z")
 DEFAULT_RUNTIME_PROFILE = {
     "environment": "production",
-    "api_url": "https://api.aerolytica.skyviewor.team",
-    "llm_url": "https://llm.aerolytica.skyviewor.team/v1",
+    "api_url": "https://api.aerolytica.skyviewor.com",
+    "llm_url": "https://llm.aerolytica.skyviewor.host/v1",
     "download_base": DOWNLOAD_BASE,
 }
 

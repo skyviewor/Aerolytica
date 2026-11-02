@@ -72,8 +72,8 @@ Secrets，未配置时才读取 Variables。私钥与 OSS 访问凭据必须保�
 | `OSS_ENDPOINT` | bucket 区域 HTTPS endpoint |
 | `OSS_PREFIX` | 必填；两个独立 bucket 均填 `download`；不允许 bucket 根目录 |
 | `AERO_DOWNLOAD_BASE` | 必填；对应环境 bucket 的公网 HTTPS 下载地址，路径为 `/download` |
-| `AERO_OFFICIAL_API_URL` | 必填；该环境的平台 API HTTPS 地址（生产 `https://api.aerolytica.skyviewor.team`） |
-| `AERO_OFFICIAL_LLM_URL` | 必填；该环境的 LLM 网关 HTTPS 地址，含 `/v1`（生产 `https://llm.aerolytica.skyviewor.team/v1`） |
+| `AERO_OFFICIAL_API_URL` | 必填；该环境的平台 API HTTPS 地址（生产 `https://api.aerolytica.skyviewor.com`） |
+| `AERO_OFFICIAL_LLM_URL` | 必填；该环境的 LLM 网关 HTTPS 地址，含 `/v1`（生产 `https://llm.aerolytica.skyviewor.host/v1`） |
 | `RELEASE_PUBLIC_KEYS` | 可选，key-id → base64 公钥的 JSON；用于提前分发新公钥 |
 
 密钥必须由维护者在受控环境生成并直接保存为 Secret，不要提交或粘贴进 issue。
