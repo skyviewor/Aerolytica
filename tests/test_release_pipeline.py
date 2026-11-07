@@ -58,6 +58,18 @@ def test_upload_helpers_do_not_require_signing_dependencies():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize(
+    ("filename", "job"), [("ci.yml", "checks"), ("release.yml", "install-smoke")]
+)
+def test_checks_keep_four_supported_platform_runners(filename, job):
+    workflow = yaml.load(
+        (ROOT / ".github/workflows" / filename).read_text(), Loader=yaml.BaseLoader
+    )
+    assert set(workflow["jobs"][job]["strategy"]["matrix"]["os"]) == {
+        "ubuntu-22.04", "ubuntu-24.04-arm", "macos-15", "macos-15-intel"
+    }
+
+
 def test_release_order_secret_scope_and_immutable_actions():
     workflow = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(), Loader=yaml.BaseLoader
