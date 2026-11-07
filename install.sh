@@ -94,7 +94,7 @@ fetch_optional() {
     case "$OPTIONAL_STATUS" in
         200) return 0 ;;
         404|410) return 1 ;;
-        *) fail "读取发行清单失败（HTTP $OPTIONAL_STATUS），未回退到其他版本" ;;
+        *) fail "读取发行清单失败（HTTP ${OPTIONAL_STATUS}），未回退到其他版本" ;;
     esac
 }
 check_hash() {

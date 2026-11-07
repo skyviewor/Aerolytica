@@ -64,6 +64,20 @@ def main():
     if profile and os.environ.get("AERO_DOWNLOAD_BASE", "").rstrip("/") != profile["download_base"]:
         raise SystemExit("OSS download mapping does not match the signed release configuration")
     version = release["manifest"]["version"]
+    if profile and profile["environment"] == "production":
+        # A new build path must not allow replacing an already promoted version.
+        for pointer in (f"releases/{version}/latest.json", "stable.json"):
+            key = f"{prefix}/{pointer}"
+            if not bucket.object_exists(key):
+                continue
+            previous = json.loads(bucket.get_object(key).read())
+            module.validate_manifest(previous["manifest"])
+            module.assert_release_environment(previous["manifest"], "production")
+            if previous["manifest"]["version"] == version and (
+                module.canonical_manifest(previous["manifest"])
+                != module.canonical_manifest(release["manifest"])
+            ):
+                raise RuntimeError("Already published production version cannot be replaced")
     files = [path for path in directory.rglob("*") if path.is_file()]
     if args.action == "stage":
         for path in sorted(files):

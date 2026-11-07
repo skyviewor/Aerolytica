@@ -191,14 +191,15 @@ def test_missing_version_never_silently_installs_latest(installer):
     assert result.returncode != 0 and "指定版本不存在" in result.stderr
 
 
-def test_bad_pointer_or_server_error_does_not_fall_back(installer):
+@pytest.mark.parametrize("locale", ["C", "en_US.UTF-8"])
+def test_bad_pointer_or_server_error_does_not_fall_back(installer, locale):
     run, objects, log, release = installer
     key = BASE + "/releases/0.1.1/latest.json"
     objects[key] = release("0.1.3")
-    result = run("--version", "0.1.1")
+    result = run("--version", "0.1.1", LC_ALL=locale)
     assert result.returncode != 0 and "与指定版本不符" in result.stderr
     objects[key] = {"status": 503, "body": "unavailable"}
-    result = run("--version", "0.1.1")
+    result = run("--version", "0.1.1", LC_ALL=locale)
     assert result.returncode != 0 and "HTTP 503" in result.stderr
     assert "releases/0.1.1/release.json" not in log.read_text()
 

@@ -102,6 +102,25 @@ def test_existing_version_cannot_be_overwritten(publisher):
     bucket.put_object_from_file.assert_not_called()
 
 
+@pytest.mark.parametrize("action", ["stage", "promote"])
+@pytest.mark.parametrize("pointer", ["stable.json", "releases/0.1.0/latest.json"])
+def test_new_build_path_cannot_replace_published_production(
+    publisher, monkeypatch, tmp_path, action, pointer
+):
+    module, _, bucket, objects = publisher
+    release = json.loads((tmp_path / "stable.json").read_text())
+    release["manifest"]["runtime"]["environment"] = "production"
+    (tmp_path / "stable.json").write_text(json.dumps(release))
+    previous = json.loads(json.dumps(release))
+    previous["manifest"]["wheel"]["path"] = "releases/0.1.0/builds/old/client.whl"
+    objects["download/" + pointer] = json.dumps(previous).encode()
+    monkeypatch.setenv("AERO_ENVIRONMENT", "production")
+    monkeypatch.setattr(sys, "argv", ["publish_oss.py", action, "--directory", str(tmp_path)])
+    with pytest.raises(RuntimeError, match="cannot be replaced"):
+        module.main()
+    bucket.put_object_from_file.assert_not_called()
+
+
 def test_new_testing_revision_preserves_the_existing_flat_release(publisher, tmp_path):
     module, _, bucket, objects = publisher
     old_key = "download/releases/0.1.0/client.whl"

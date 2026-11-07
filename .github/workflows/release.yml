@@ -66,6 +66,9 @@ jobs:
           if [ "$RELEASE_ENVIRONMENT" = testing ]; then
             printf 'testing_revision=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             artifact_prefix="$artifact_prefix/revisions/$(git rev-parse HEAD)"
+          else
+            printf 'production_build=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            artifact_prefix="$artifact_prefix/builds/$(git rev-parse HEAD)"
           fi
           printf 'artifact_prefix=%s\n' "$artifact_prefix" >> "$GITHUB_OUTPUT"
           printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
@@ -85,6 +88,7 @@ jobs:
           AERO_OFFICIAL_LLM_URL: ${{ secrets.AERO_OFFICIAL_LLM_URL || vars.AERO_OFFICIAL_LLM_URL }}
           AERO_DOWNLOAD_BASE: ${{ secrets.AERO_DOWNLOAD_BASE || vars.AERO_DOWNLOAD_BASE }}
           AERO_RELEASE_REVISION: ${{ steps.release_identity.outputs.testing_revision }}
+          AERO_RELEASE_BUILD: ${{ steps.release_identity.outputs.production_build }}
         run: uv run --locked python scripts/release/prepare.py --tag "$RELEASE_TAG"
       - run: uv run --locked python scripts/release/validate_artifacts.py dist/release/pypi
       - name: Install the exact locked release

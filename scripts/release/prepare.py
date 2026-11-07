@@ -108,6 +108,11 @@ def build(output: Path, tag: str, *, mirror: bool = True) -> dict:
         profile["environment"] != "testing" or not re.fullmatch(r"[0-9a-f]{40}", revision)
     ):
         raise RuntimeError("Only testing releases may use a full commit SHA revision")
+    build_id = os.environ.get("AERO_RELEASE_BUILD", "")
+    if build_id and (
+        profile["environment"] != "production" or not re.fullmatch(r"[0-9a-f]{40}", build_id)
+    ):
+        raise RuntimeError("Production build paths require a full commit SHA")
     identifier, keys = signing_keys(key)
     toolchain = json.loads((ROOT / "scripts/release/toolchain.json").read_text())
     installer = (ROOT / "install.sh").read_text()
@@ -123,6 +128,8 @@ def build(output: Path, tag: str, *, mirror: bool = True) -> dict:
     release = downloads / "releases" / version
     if revision:
         release = release / "revisions" / revision
+    elif build_id:
+        release = release / "builds" / build_id
     pypi.mkdir(parents=True, exist_ok=True)
     release.mkdir(parents=True, exist_ok=True)
     if any(pypi.iterdir()):

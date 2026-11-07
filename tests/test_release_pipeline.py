@@ -196,10 +196,12 @@ def test_offline_build_test_dependencies_are_warmed_before_pytest(workflow_name)
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required for a real release build")
 @pytest.mark.parametrize(
-    "environment,revision", [("production", ""), ("testing", ""), ("testing", "a" * 40)]
+    "environment,revision,build_id",
+    [("production", "", ""), ("production", "", "b" * 40),
+     ("testing", "", ""), ("testing", "a" * 40, "")],
 )
 def test_real_signed_wheel_sdist_and_manifest_are_consistent(
-    monkeypatch, tmp_path, environment, revision
+    monkeypatch, tmp_path, environment, revision, build_id
 ):
     key = Ed25519PrivateKey.generate()
     seed = base64.b64encode(key.private_bytes_raw()).decode()
@@ -208,6 +210,7 @@ def test_real_signed_wheel_sdist_and_manifest_are_consistent(
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("AERO_ENVIRONMENT", environment)
     monkeypatch.setenv("AERO_RELEASE_REVISION", revision)
+    monkeypatch.setenv("AERO_RELEASE_BUILD", build_id)
     for variable in ("AERO_OFFICIAL_API_URL", "AERO_OFFICIAL_LLM_URL", "AERO_DOWNLOAD_BASE"):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.delenv("AERO_RELEASE_REQUIRE_CONFIG", raising=False)
@@ -226,6 +229,9 @@ def test_real_signed_wheel_sdist_and_manifest_are_consistent(
     if revision:
         assert envelope["manifest"]["revision"] == revision
         assert f"/revisions/{revision}/" in envelope["manifest"]["wheel"]["path"]
+    if build_id:
+        assert "revision" not in envelope["manifest"]
+        assert f"/builds/{build_id}/" in envelope["manifest"]["wheel"]["path"]
     wheel = next((output / "pypi").glob("*.whl"))
     assert wheel.name.endswith("-py3-none-any.whl")
     with zipfile.ZipFile(wheel) as bundle:
