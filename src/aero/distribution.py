@@ -30,6 +30,21 @@ DEFAULT_RUNTIME_PROFILE = {
     "llm_url": "https://llm.aerolytica.skyviewor.host/v1",
     "download_base": DOWNLOAD_BASE,
 }
+DEPENDENCY_MIRRORS = {
+    "https://mirrors.aliyun.com/pypi/simple": "阿里云",
+    "https://mirrors.cloud.tencent.com/pypi/simple": "腾讯云",
+    "https://repo.huaweicloud.com/repository/pypi/simple": "华为云",
+    "https://pypi.tuna.tsinghua.edu.cn/simple": "清华",
+    "https://pypi.org/simple": "官方 PyPI",
+}
+DEPENDENCY_SOURCE_VARIABLES = (
+    "UV_DEFAULT_INDEX",
+    "UV_INDEX_URL",
+    "UV_INDEX",
+    "UV_EXTRA_INDEX_URL",
+    "UV_FIND_LINKS",
+)
+DEPENDENCY_PROBE_TIMEOUT = 20
 
 
 class DistributionError(RuntimeError):
@@ -257,9 +272,8 @@ def validate_manifest(manifest: dict) -> dict:
         if "runtime" in manifest:
             validate_runtime_profile(manifest["runtime"])
         if "revision" in manifest:
-            if (
-                manifest.get("runtime", {}).get("environment") != "testing"
-                or not re.fullmatch(r"[0-9a-f]{40}", manifest["revision"])
+            if manifest.get("runtime", {}).get("environment") != "testing" or not re.fullmatch(
+                r"[0-9a-f]{40}", manifest["revision"]
             ):
                 raise ValueError
         for key in ("wheel", "requirements"):
@@ -343,7 +357,11 @@ def _command_failure(output: str) -> tuple[str, bool]:
     ):
         return "依赖源连接失败、超时或缺少锁定的软件包", True
     if "no solution found" in value:
-        return "锁定依赖无法解析", False
+        return "当前依赖源无法提供锁定依赖", True
+    if any(
+        text in value for text in ("invalid url", "invalid index", "relative url without a base")
+    ) or ("invalid value" in value and ("index" in value or "find-links" in value)):
+        return "依赖源地址无效", True
     return "子进程执行失败", False
 
 
@@ -352,12 +370,16 @@ def _run(
     *,
     timeout: int = 900,
     step: str = "准备客户端环境",
-    env: dict[str, str] | None = None,
+    env: dict[str, str | None] | None = None,
 ) -> None:
     environment = os.environ.copy()
     for name in ("VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONPATH", "PYTHONHOME"):
         environment.pop(name, None)
-    environment.update(env or {})
+    for name, value in (env or {}).items():
+        if value is None:
+            environment.pop(name, None)
+        else:
+            environment[name] = value
     try:
         result = subprocess.run(
             command,
@@ -383,16 +405,11 @@ def _run(
 
 
 def _dependency_indexes() -> list[str | None]:
-    # An explicitly configured registry must never silently send requests elsewhere.
-    overrides = (
-        "UV_DEFAULT_INDEX",
-        "UV_INDEX_URL",
-        "UV_INDEX",
-        "UV_EXTRA_INDEX_URL",
-        "UV_FIND_LINKS",
-        "UV_NO_INDEX",
-    )
-    if any(os.environ.get(name) for name in overrides):
+    # Explicit offline/no-index operation is not an unavailable registry.
+    if any(
+        os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
+        for name in ("UV_OFFLINE", "UV_NO_INDEX")
+    ):
         return [None]
     region = os.environ.get("AERO_NETWORK_REGION")
     if not region:
@@ -400,8 +417,34 @@ def _dependency_indexes() -> list[str | None]:
     mainland = region.lower() in {"cn", "china", "mainland", "mainland_china"} or any(
         city in region for city in ("Asia/Shanghai", "Asia/Chongqing", "Asia/Harbin")
     )
-    mirrors = ["https://mirrors.aliyun.com/pypi/simple", "https://pypi.org/simple"]
-    return ["https://pypi.tuna.tsinghua.edu.cn/simple", *mirrors] if mainland else mirrors[::-1]
+    mirrors = list(DEPENDENCY_MIRRORS)
+    if not mainland:
+        mirrors.insert(0, mirrors.pop())
+    # Try the complete user configuration first, including named/authenticated indexes.
+    # These are the official client's signed, public dependencies, not a user project.
+    if any(os.environ.get(name) for name in DEPENDENCY_SOURCE_VARIABLES):
+        return [None, *mirrors]
+    return mirrors
+
+
+def _dependency_environment(index: str | None) -> dict[str, str | None]:
+    environment: dict[str, str | None] = {"UV_HTTP_TIMEOUT": "10", "UV_HTTP_RETRIES": "0"}
+    if index is not None:
+        # A stale extra index/find-links setting must not poison the fallback attempt.
+        # Credentials and unsafe-host exceptions must never follow us to a public mirror.
+        for name in (
+            *DEPENDENCY_SOURCE_VARIABLES,
+            "UV_NO_INDEX",
+            "UV_INDEX_STRATEGY",
+            "UV_INSECURE_HOST",
+        ):
+            environment[name] = None
+        for name in os.environ:
+            if name.startswith("UV_INDEX_") and name.endswith(("_USERNAME", "_PASSWORD")):
+                environment[name] = None
+        environment["UV_KEYRING_PROVIDER"] = "disabled"
+        environment["UV_DEFAULT_INDEX"] = index
+    return environment
 
 
 def _sync_dependencies(uv: Path, python: Path, requirements: Path) -> None:
@@ -417,19 +460,45 @@ def _sync_dependencies(uv: Path, python: Path, requirements: Path) -> None:
         ":all:",
         str(requirements),
     ]
+    print("正在检查依赖源可用性…", flush=True)
+    last_install_error = None
     indexes = _dependency_indexes()
-    for attempt, index in enumerate(indexes):
-        # Bound each source attempt; do not multiply uv's internal HTTP retries.
-        environment = {"UV_HTTP_TIMEOUT": "20", "UV_HTTP_RETRIES": "0"}
-        if index:
-            environment["UV_DEFAULT_INDEX"] = index
+    for index in indexes:
+        environment = _dependency_environment(index)
+        # Resolve the actual locked dependencies with uv (including authentication,
+        # platform markers and wheel availability), without changing the environment.
+        # A reachable index homepage alone does not prove that installation will work.
+        probe = [*command, "--dry-run"]
+        if indexes != [None]:
+            # Recheck registry metadata rather than treating an old cached index as online.
+            # Explicit offline/no-index operation must keep its normal cache semantics.
+            probe.append("--refresh")
+        try:
+            _run(
+                probe,
+                timeout=DEPENDENCY_PROBE_TIMEOUT,
+                step="检查依赖源",
+                env=environment,
+            )
+        except InstallCommandError as exc:
+            if not exc.retryable:
+                raise
+            continue
+        label = DEPENDENCY_MIRRORS[index] if index else "环境变量指定的源"
+        print(f"已选择依赖源：{label}；正在安装客户端依赖…", flush=True)
         try:
             _run(command, timeout=180, step="安装锁定依赖", env=environment)
             return
         except InstallCommandError as exc:
-            if not exc.retryable or attempt == len(indexes) - 1:
+            if not exc.retryable:
                 raise
-            print(f"{exc} 正在切换备用依赖源…", file=sys.stderr, flush=True)
+            last_install_error = exc
+            print("依赖源连接中断，正在重新选择可用源…", flush=True)
+    if last_install_error is not None:
+        raise last_install_error
+    raise InstallCommandError(
+        "暂时没有可用的依赖源，请检查网络或代理后重试；旧版本未被覆盖。", retryable=True
+    )
 
 
 def interpreter_version() -> str:
