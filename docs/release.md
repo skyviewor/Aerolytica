@@ -84,7 +84,8 @@ macOS/Linux 的交互式本地终端与 SSH TTY 均从 `/dev/tty` 读取安装�
 不执行或自动 source 用户 rc 文件，也不启动嵌套 shell。
 
 子进程不能修改当前父 shell 的环境：配置完成后提示准确的 `source` 命令，
-或重新打开同类终端即可；拒绝配置则提示临时 PATH 和完整命令路径。
+完成加载或重新打开同类终端后直接使用 `aero setup/init/chat`（测试环境为
+`aero-testing`）；拒绝配置或配置失败则提示完整命令路径。
 无 TTY、CI 或 `--yes` 模式默认不修改 rc 文件。
 
 无人值守可显式指定路径与配置授权，例如：

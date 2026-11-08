@@ -138,7 +138,27 @@ def setup_env(tmp_path, **extra):
 def test_noninteractive_or_refusal_does_not_write_rc(helper, tmp_path, capsys, extra):
     helper["main"](setup_env(tmp_path, **extra))
     assert not (tmp_path / ".zshrc").exists()
-    assert "未修改 shell" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "未修改 shell" in output
+    assert "未配置 PATH，以下命令使用完整路径" in output
+    assert f"  {tmp_path}/bin/aero setup" in output
+    assert "  aero setup" not in output
+
+
+@pytest.mark.parametrize("environment,command", [("production", "aero"),
+                                               ("testing", "aero-testing")])
+def test_configured_path_guides_loading_before_short_commands(
+    helper, tmp_path, capsys, environment, command
+):
+    helper["main"](setup_env(tmp_path, AERO_SHELL_INIT="yes", AERO_ENVIRONMENT=environment))
+    output = capsys.readouterr().out
+    assert f"  source {tmp_path}/.zshrc" in output
+    assert "完成上述配置加载，或重新打开 zsh 终端后执行" in output
+    assert output.index("  source ") < output.index(f"  {command} setup")
+    for action in ("setup", "init", "chat"):
+        assert f"  {command} {action}" in output
+        assert f"{tmp_path}/bin/{command} {action}" not in output
+    assert "完整路径也可直接运行" not in output
 
 
 def test_explicit_automation_consent_and_bash_both_startup_modes(helper, tmp_path):
@@ -157,12 +177,15 @@ def test_ci_never_opens_terminal_or_modifies_rc(helper, tmp_path, monkeypatch):
 
 
 def test_relative_zdotdir_is_not_silently_written_into_current_project(
-    helper, tmp_path, monkeypatch
+    helper, tmp_path, monkeypatch, capsys
 ):
     monkeypatch.chdir(tmp_path)
     helper["main"](setup_env(tmp_path, AERO_SHELL_INIT="yes", ZDOTDIR="relative"))
     assert not (tmp_path / ".zshrc").exists()
     assert not (tmp_path / "relative").exists()
+    output = capsys.readouterr().out
+    assert f"  {tmp_path}/bin/aero setup" in output
+    assert "  aero setup" not in output
 
 
 def test_noninteractive_install_paths_are_configurable_without_downloads(tmp_path):
@@ -183,7 +206,7 @@ def test_noninteractive_install_paths_are_configurable_without_downloads(tmp_pat
 @pytest.mark.parametrize("answers,created", [("\n\n", ".zshrc"), ("bash\n\n", ".bashrc"),
                                             ("\nn\n", None)])
 def test_interactive_default_shell_override_and_consent(
-    helper, tmp_path, monkeypatch, answers, created
+    helper, tmp_path, monkeypatch, capsys, answers, created
 ):
     original_open = builtins.open
     prompts = []
@@ -203,8 +226,10 @@ def test_interactive_default_shell_override_and_consent(
     assert "检测到当前 shell：zsh" in "".join(prompts)
     if created:
         assert (tmp_path / created).is_file()
+        assert "  aero setup" in capsys.readouterr().out
     else:
         assert not (tmp_path / ".zshrc").exists()
+        assert f"  {tmp_path}/bin/aero setup" in capsys.readouterr().out
 
 
 def test_piped_script_reads_path_confirmation_from_controlling_terminal(tmp_path):
@@ -257,6 +282,7 @@ def _piped_installer_probe(tmp_path):
                 sent_yes = True
             if b"SELECTED=" in output:
                 break
+        assert "请输入安装地址".encode() in output, output.decode()
         assert ("SELECTED=" + str(tmp_path / "aero/bin")).encode() in output, output.decode()
     finally:
         os.close(master)

@@ -82,7 +82,7 @@ AERO_HOME="$(expand_install_path "$AERO_HOME")"
 # /dev/tty is independent of stdin, which may still contain the piped installer.
 if [ "$AERO_INSTALL_YES" != 1 ] && [ -z "${CI:-}${GITHUB_ACTIONS:-}" ] &&
     ( : </dev/tty ) 2>/dev/null; then
-    printf '安装主目录 [%s]（回车使用默认值）: ' "$AERO_HOME" >/dev/tty
+    printf '请输入安装地址（绝对路径，回车使用默认值）[%s]: ' "$AERO_HOME" >/dev/tty
     IFS= read -r INSTALL_REPLY </dev/tty || fail "已取消安装"
     [ -z "$INSTALL_REPLY" ] || AERO_HOME="$(expand_install_path "$INSTALL_REPLY")"
     printf '将在 %s 安装客户端，原有其他目录不会自动迁移。继续？[Y/n] ' "$AERO_HOME" >/dev/tty
@@ -355,6 +355,7 @@ def main(environ=None):
     current_shell = env.get("AERO_CURRENT_SHELL", shell)
     mode = env.get("AERO_SHELL_INIT", "auto")
     tty = None
+    path_configured = False
     if env.get("AERO_INSTALL_YES") != "1" and not (env.get("CI") or env.get("GITHUB_ACTIONS")):
         try:
             tty = open("/dev/tty", "r", buffering=1)
@@ -395,8 +396,9 @@ def main(environ=None):
                 backup = update_rc(path, block, env["AERO_ENVIRONMENT"])
                 if backup:
                     print("原配置已备份：", backup)
+            path_configured = True
             print(f"已配置。重新打开 {shell} 终端即可使用。")
-            print("当前终端可执行：" if current_shell == shell else f"在 {shell} 中可执行：")
+            print("当前终端先执行：" if current_shell == shell else f"在 {shell} 中先执行：")
             print(
                 "  source " + quote(str(paths[0]), shell)
                 if shell in {"bash", "zsh", "fish"}
@@ -410,16 +412,19 @@ def main(environ=None):
                 else f'export PATH={quote(str(directory), shell)}:"$PATH"'
             )
             print("  " + line)
-        print("完整路径也可直接运行：", quote(str(directory / command), shell))
     except (OSError, UnicodeError, ValueError) as exc:
         print(f"客户端已安装，但 shell 配置未完成：{exc}")
         print("请使用完整路径：", directory / command)
     finally:
         if tty:
             tty.close()
-        executable = quote(str(directory / command), shell)
+        executable = command if path_configured else quote(str(directory / command), shell)
+        if path_configured:
+            print(f"\n完成上述配置加载，或重新打开 {shell} 终端后执行：")
+        else:
+            print("\n未配置 PATH，以下命令使用完整路径：")
         print(
-            f"\n然后执行：\n  {executable} setup\n\n进入研究目录后：\n  {executable} init\n  {executable} chat"
+            f"  {executable} setup\n\n进入研究目录后：\n  {executable} init\n  {executable} chat"
         )
 
 
