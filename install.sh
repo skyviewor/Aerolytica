@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Install only the CLI. Interactive onboarding is explicitly aero setup.
+# Install only the CLI; account/scientific onboarding remains aero setup.
 set -eu
 umask 077
 fail() { printf '\n安装失败：%s\n' "$*" >&2; exit 1; }
@@ -7,6 +7,12 @@ AERO_VERSION="${AERO_VERSION:-}"
 AERO_INSTALL_REVISION="${AERO_INSTALL_REVISION:-}"
 AERO_ALLOW_DOWNGRADE="${AERO_ALLOW_DOWNGRADE:-0}"
 AERO_REINSTALL="${AERO_REINSTALL:-0}"
+INSTALL_PREFIX=""
+INSTALL_BIN=""
+AERO_INSTALL_YES="${AERO_INSTALL_YES:-0}"
+AERO_SHELL_INIT="${AERO_SHELL_INIT:-auto}"
+AERO_INSTALL_SHELL="${AERO_INSTALL_SHELL:-}"
+AERO_SHELL_RC_FILE="${AERO_SHELL_RC_FILE:-}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version|--revision)
@@ -16,9 +22,24 @@ while [ "$#" -gt 0 ]; do
             shift 2 ;;
         --allow-downgrade) AERO_ALLOW_DOWNGRADE=1; shift ;;
         --reinstall) AERO_REINSTALL=1; shift ;;
+        --prefix|--bin-dir|--shell|--rc-file)
+            [ "$#" -ge 2 ] || fail "$1 后需要指定值"
+            case "$2" in ''|--*) fail "$1 后需要指定值" ;; esac
+            case "$1" in
+                --prefix) INSTALL_PREFIX="$2" ;;
+                --bin-dir) INSTALL_BIN="$2" ;;
+                --shell) AERO_INSTALL_SHELL="$2" ;;
+                --rc-file) AERO_SHELL_RC_FILE="$2" ;;
+            esac
+            shift 2 ;;
+        --yes|-y) AERO_INSTALL_YES=1; shift ;;
+        --shell-init) AERO_SHELL_INIT=yes; shift ;;
+        --no-shell-init) AERO_SHELL_INIT=no; shift ;;
         --help|-h)
             printf '%s\n' '用法：sh install.sh [--version 0.1.1] [--revision 完整测试提交SHA] [--allow-downgrade] [--reinstall]'
             printf '%s\n' '不指定版本则安装最新版；降级必须显式允许，不删除账号、项目或科研环境。'
+            printf '%s\n' '路径：--prefix 绝对安装目录 --bin-dir 命令目录；终端：--shell zsh|bash|fish|sh --rc-file 配置文件'
+            printf '%s\n' '--yes 使用默认路径；无人值守不改 shell，除非明确指定 --shell-init；--no-shell-init 永不修改 shell。'
             exit 0 ;;
         *) fail "未知安装参数：$1（使用 --help 查看）" ;;
     esac
@@ -53,9 +74,39 @@ esac
 if [ -n "$AERO_INSTALL_REVISION" ] && [ "$AERO_ENVIRONMENT" != testing ]; then
     fail "指定提交修订只适用于 testing 环境"
 fi
-AERO_HOME="${AERO_HOME:-$DEFAULT_AERO_HOME}"
+AERO_HOME="${INSTALL_PREFIX:-${AERO_HOME:-$DEFAULT_AERO_HOME}}"
+expand_install_path() {
+    case "$1" in '~') printf '%s\n' "$HOME" ;; '~/'*) printf '%s/%s\n' "$HOME" "${1#\~/}" ;; *) printf '%s\n' "$1" ;; esac
+}
+AERO_HOME="$(expand_install_path "$AERO_HOME")"
+# /dev/tty is independent of stdin, which may still contain the piped installer.
+if [ "$AERO_INSTALL_YES" != 1 ] && [ -z "${CI:-}${GITHUB_ACTIONS:-}" ] &&
+    ( : </dev/tty ) 2>/dev/null; then
+    printf '安装主目录 [%s]（回车使用默认值）: ' "$AERO_HOME" >/dev/tty
+    IFS= read -r INSTALL_REPLY </dev/tty || fail "已取消安装"
+    [ -z "$INSTALL_REPLY" ] || AERO_HOME="$(expand_install_path "$INSTALL_REPLY")"
+    printf '将在 %s 安装客户端，原有其他目录不会自动迁移。继续？[Y/n] ' "$AERO_HOME" >/dev/tty
+    IFS= read -r INSTALL_REPLY </dev/tty || fail "已取消安装"
+    case "$INSTALL_REPLY" in ''|y|Y|yes|YES) ;; *) fail "已取消安装，未开始下载" ;; esac
+fi
+case "$AERO_HOME" in /*) ;; *) fail "安装主目录必须是绝对路径" ;; esac
+[ -z "$INSTALL_PREFIX" ] || AERO_INSTALL_ROOT="$AERO_HOME/client"
 AERO_INSTALL_ROOT="${AERO_INSTALL_ROOT:-$AERO_HOME/client}"
-AERO_BIN_DIR="${AERO_BIN_DIR:-$HOME/.local/bin}"
+AERO_INSTALL_ROOT="$(expand_install_path "$AERO_INSTALL_ROOT")"
+AERO_BIN_DIR="$(expand_install_path "${INSTALL_BIN:-${AERO_BIN_DIR:-$AERO_HOME/bin}}")"
+case "$AERO_BIN_DIR" in /*) ;; *) fail "命令目录必须是绝对路径" ;; esac
+case "$AERO_HOME$AERO_INSTALL_ROOT$AERO_BIN_DIR" in *:*|*'
+'*) fail "安装路径不能包含冒号或换行" ;; esac
+case "$AERO_SHELL_INIT" in auto|yes|no) ;; *) fail "shell 配置选项必须为 auto、yes 或 no" ;; esac
+case "$AERO_INSTALL_YES" in 0|1) ;; *) fail "AERO_INSTALL_YES 只能为 0 或 1" ;; esac
+AERO_PARENT_SHELL="$(ps -p "$PPID" -o comm= 2>/dev/null || true)"
+AERO_PARENT_SHELL="${AERO_PARENT_SHELL##*/}"
+AERO_PARENT_SHELL="${AERO_PARENT_SHELL#-}"
+case "$AERO_PARENT_SHELL" in bash|zsh|fish) AERO_CURRENT_SHELL="$AERO_PARENT_SHELL" ;;
+    *) AERO_CURRENT_SHELL="${SHELL:-}"; AERO_CURRENT_SHELL="${AERO_CURRENT_SHELL##*/}" ;;
+esac
+AERO_INSTALL_SHELL="${AERO_INSTALL_SHELL:-$AERO_CURRENT_SHELL}"
+export AERO_INSTALL_YES AERO_SHELL_INIT AERO_INSTALL_SHELL AERO_SHELL_RC_FILE AERO_CURRENT_SHELL
 export AERO_INSTALL_ROOT AERO_BIN_DIR AERO_HOME AERO_ENVIRONMENT
 UV_VERSION="0.12.23"
 PYTHON_VERSION="3.12.12"
@@ -196,13 +247,184 @@ done
 printf '安装并验证客户端发行版…\n'
 "$PYTHON" "$TEMP_DIR/bootstrap" --base "$AERO_DOWNLOAD_BASE" \
     --uv "$UV_DIR/uv" --manifest "$TEMP_DIR/stable.json" --wheel "$TEMP_DIR/wheel"
-PROFILE_LINE="$("$PYTHON" -c 'import os,shlex; print("export PATH=" + shlex.quote(os.environ["AERO_BIN_DIR"]) + ":\"$PATH\" # Aerolytica")')"
-case "${SHELL:-}" in */zsh) PROFILE="$HOME/.zshrc" ;; *) PROFILE="$HOME/.bashrc" ;; esac
-if [ -L "$PROFILE" ]; then
-    printf '未修改符号链接形式的 shell 配置：%s\n' "$PROFILE"
-elif ! grep -F "$PROFILE_LINE" "$PROFILE" >/dev/null 2>&1; then
-    printf '\n%s\n' "$PROFILE_LINE" >> "$PROFILE"
-fi
-printf '\n安装完成。当前终端先执行：\n  %s\n' "$PROFILE_LINE"
-printf '\n然后执行：\n  %s setup\n\n进入研究目录后：\n  %s init\n  %s chat\n' \
-    "$AERO_COMMAND" "$AERO_COMMAND" "$AERO_COMMAND"
+PROFILE_LINE="" # Keep post-install shell setup separate from version-selection smoke tests.
+"$PYTHON" - <<'AERO_SHELL_PY'
+# BEGIN AERO SHELL SETUP
+import os
+import re
+import shlex
+import stat
+import tempfile
+from pathlib import Path
+
+
+def rc_files(shell, home, environ):
+    override = environ.get("AERO_SHELL_RC_FILE")
+    if override:
+        path = Path(override).expanduser()
+        if not path.is_absolute():
+            raise ValueError("--rc-file 必须为绝对路径")
+        return [path]
+    if shell == "zsh":
+        return [Path(environ.get("ZDOTDIR") or home) / ".zshrc"]
+    if shell == "bash":
+        login = next(
+            (
+                home / name
+                for name in (".bash_profile", ".bash_login", ".profile")
+                if (home / name).is_file() and os.access(home / name, os.R_OK)
+            ),
+            home / ".bash_profile",
+        )
+        return [home / ".bashrc", login]
+    if shell == "fish":
+        return [Path(environ.get("XDG_CONFIG_HOME") or home / ".config") / "fish/config.fish"]
+    if shell in {"sh", "dash", "ksh"}:
+        return [home / ".profile"]
+    return []
+
+
+def quote(value, shell):
+    if shell == "fish":
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    return shlex.quote(value)
+
+
+def path_block(directory, shell, environment):
+    value = quote(str(directory), shell)
+    if shell == "fish":
+        body = f"if not contains -- {value} $PATH\n    set -gx PATH {value} $PATH\nend"
+    else:
+        body = (
+            f'case ":$PATH:" in\n    *:{value}:*) ;;\n    *) export PATH={value}:"$PATH" ;;\nesac'
+        )
+    return (
+        f"# >>> Aerolytica {environment} PATH >>>\n{body}\n# <<< Aerolytica {environment} PATH <<<"
+    )
+
+
+def update_rc(path, block, environment):
+    target = path.resolve(strict=True) if path.is_symlink() else path
+    if target.exists() and (not target.is_file() or target.stat().st_uid != os.getuid()):
+        raise ValueError(f"配置不是当前用户拥有的普通文件：{path}")
+    if target.exists() and not target.stat().st_mode & stat.S_IWUSR:
+        raise ValueError(f"配置为只读文件，未修改：{path}")
+    old = target.read_text() if target.exists() else ""
+    start = f"# >>> Aerolytica {environment} PATH >>>"
+    end = f"# <<< Aerolytica {environment} PATH <<<"
+    if old.count(start) != old.count(end) or old.count(start) > 1:
+        raise ValueError(f"配置标记不完整，请手动检查：{path}")
+    if start in old and old.index(end) < old.index(start):
+        raise ValueError(f"配置标记顺序错误，请手动检查：{path}")
+    pattern = re.escape(start) + r".*?" + re.escape(end)
+    new = (
+        re.sub(pattern, lambda _: block, old, count=1, flags=re.S)
+        if start in old
+        else (old + ("\n" if old and not old.endswith("\n") else "") + "\n" + block + "\n")
+    )
+    if new == old:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    backup = None
+    if target.exists():
+        fd, backup = tempfile.mkstemp(prefix=target.name + ".aerolytica-backup-", dir=target.parent)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(old)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
+    fd, temporary = tempfile.mkstemp(prefix=".aerolytica-rc-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(new)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        if (target.read_text() if target.exists() else "") != old:
+            raise ValueError(f"配置在安装期间发生变化，未覆盖：{path}")
+        os.replace(temporary, target)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return backup
+
+
+def main(environ=None):
+    env = os.environ if environ is None else environ
+    home = Path(env["HOME"])
+    directory = Path(env["AERO_BIN_DIR"])
+    command = "aero-testing" if env["AERO_ENVIRONMENT"] == "testing" else "aero"
+    shell = env.get("AERO_INSTALL_SHELL", "")
+    current_shell = env.get("AERO_CURRENT_SHELL", shell)
+    mode = env.get("AERO_SHELL_INIT", "auto")
+    tty = None
+    if env.get("AERO_INSTALL_YES") != "1" and not (env.get("CI") or env.get("GITHUB_ACTIONS")):
+        try:
+            tty = open("/dev/tty", "r", buffering=1)
+        except OSError:
+            pass
+
+    def ask(prompt, default):
+        with open("/dev/tty", "w", buffering=1) as output:
+            output.write(prompt)
+        response = tty.readline()
+        if not response:
+            raise ValueError("已取消 shell 配置")
+        return response.strip() or default
+
+    try:
+        if tty and mode != "no":
+            shell = ask(
+                f"\n检测到当前 shell：{current_shell or '不确定'}。选择要配置的 shell（zsh/bash/fish/sh）[{shell or '不确定'}]: ",
+                shell,
+            )
+        if shell not in {"zsh", "bash", "fish", "sh", "dash", "ksh"}:
+            print("未识别 shell，未修改任何配置；请使用完整路径：", directory / command)
+            return
+        paths = rc_files(shell, home, env)
+        if any(not path.is_absolute() or "\n" in str(path) or "\r" in str(path) for path in paths):
+            raise ValueError("shell 配置路径必须为不含换行的绝对路径；可用 --rc-file 指定")
+        print("\n命令入口：", directory / command)
+        for path in paths:
+            print("建议配置：", str(path) + (f" → {path.resolve()}" if path.is_symlink() else ""))
+        approved = mode == "yes"
+        if tty and mode == "auto":
+            approved = ask(
+                "是否将命令目录写入 " + "、".join(map(str, paths)) + "？[Y/n] ", "y"
+            ).lower() in {"y", "yes"}
+        if approved:
+            block = path_block(directory, shell, env["AERO_ENVIRONMENT"])
+            for path in paths:
+                backup = update_rc(path, block, env["AERO_ENVIRONMENT"])
+                if backup:
+                    print("原配置已备份：", backup)
+            print(f"已配置。重新打开 {shell} 终端即可使用。")
+            print("当前终端可执行：" if current_shell == shell else f"在 {shell} 中可执行：")
+            print(
+                "  source " + quote(str(paths[0]), shell)
+                if shell in {"bash", "zsh", "fish"}
+                else ". " + quote(str(paths[0]), shell)
+            )
+        else:
+            print(f"未修改 shell 配置。可在 {shell} 中临时执行（不写入文件）：")
+            line = (
+                f"set -gx PATH {quote(str(directory), shell)} $PATH"
+                if shell == "fish"
+                else f'export PATH={quote(str(directory), shell)}:"$PATH"'
+            )
+            print("  " + line)
+        print("完整路径也可直接运行：", quote(str(directory / command), shell))
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"客户端已安装，但 shell 配置未完成：{exc}")
+        print("请使用完整路径：", directory / command)
+    finally:
+        if tty:
+            tty.close()
+        executable = quote(str(directory / command), shell)
+        print(
+            f"\n然后执行：\n  {executable} setup\n\n进入研究目录后：\n  {executable} init\n  {executable} chat"
+        )
+
+
+if __name__ == "__main__":
+    main()
+# END AERO SHELL SETUP
+AERO_SHELL_PY
+printf '\n安装完成。\n'

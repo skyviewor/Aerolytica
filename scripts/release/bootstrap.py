@@ -192,10 +192,11 @@ def main() -> None:
                 if module.current_environment() != current:
                     raise module.DistributionError("当前安装已变化，请重新执行安装命令。")
                 environment = module.stage_release(envelope, args.uv, args.base, bootstrap=True)
+                launcher = module.install_launcher(
+                    Path(os.environ.get("AERO_BIN_DIR") or module.install_root().parent / "bin")
+                    .expanduser()
+                )
                 if replacement is None:
-                    launcher = module.install_launcher(
-                        Path(os.environ.get("AERO_BIN_DIR", "~/.local/bin")).expanduser()
-                    )
                     module.activate(environment)
                     print(f"客户端已安装：{launcher}")
         except module.DistributionError as exc:
@@ -205,6 +206,7 @@ def main() -> None:
         # Recheck the exact selected signed manifest after staging, not stable:
         # stable may already have advanced to another version or revision.
         handoff(replacement, environment, args.manifest, check=False)
+        print(f"客户端入口已更新：{launcher}")
 
 
 if __name__ == "__main__":

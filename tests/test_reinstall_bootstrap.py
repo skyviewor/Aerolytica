@@ -182,6 +182,15 @@ def test_confirmed_testing_reinstall_uses_installed_updater_after_unlock(bootstr
     assert b.switch.call_args.kwargs == {"wait": 0}
 
 
+def test_replacement_also_creates_the_selected_command_entry(bootstrap, monkeypatch, tmp_path):
+    b = bootstrap
+    directory = tmp_path / "selected bin"
+    monkeypatch.setenv("AERO_REINSTALL", "1")
+    monkeypatch.setenv("AERO_BIN_DIR", str(directory))
+    b.module.main()
+    b.installed.install_launcher.assert_called_once_with(directory)
+
+
 @pytest.mark.parametrize("change", ["production", "other_version", "production_current"])
 def test_reinstall_flag_cannot_replace_production_or_another_version(
     bootstrap, monkeypatch, change

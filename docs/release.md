@@ -67,6 +67,36 @@ flowchart TB
 不以换源掩盖。所有候选保持版本锁定、哈希检查、仅二进制依赖及 TLS 校验。
 同一逻辑用于首次安装和托管更新准备；安装失败不覆盖正在使用的旧版本。
 
+### 安装目录与 shell 初始化
+
+macOS/Linux 的交互式本地终端与 SSH TTY 均从 `/dev/tty` 读取安装确认，
+因此 `curl … | sh` 的脚本标准输入不会被误当成用户回答。默认主目录为
+`~/.aero`（测试环境 `~/.aero-testing`），固定命令入口在主目录的 `bin/`，
+不会将具体版本的 Python 环境目录加入 PATH。用户可以回车接受默认值，
+也可以自定义目录；旧安装和旧 `.local/bin` 入口不自动删除或迁移。
+
+安装后询问配置哪个 shell，优先推荐识别出的父终端 shell，无法识别时参考
+`SHELL`，最终以用户选择为准。Bash 同时覆盖 `.bashrc` 和已生效的登录配置文件，
+不新建 `.bash_profile` 遮挡已有 `.profile`；Zsh 尊重 `ZDOTDIR`，Fish 尊重
+`XDG_CONFIG_HOME` 并使用 Fish 语法。未知 shell 不当作 Bash 自动写入。
+写入前列出具体配置文件并征求同意，修改使用独立的生产/测试标记块，可重复运行；
+保留原内容并生成备份，符号链接保留、修改其已确认的目标，只读文件不覆盖。
+不执行或自动 source 用户 rc 文件，也不启动嵌套 shell。
+
+子进程不能修改当前父 shell 的环境：配置完成后提示准确的 `source` 命令，
+或重新打开同类终端即可；拒绝配置则提示临时 PATH 和完整命令路径。
+无 TTY、CI 或 `--yes` 模式默认不修改 rc 文件。
+
+无人值守可显式指定路径与配置授权，例如：
+
+```sh
+curl -LsSf https://aero.skyviewor.com/download/install.sh | sh -s -- \
+  --yes --prefix /absolute/path/aero --shell bash --shell-init
+```
+
+`--bin-dir` 可单独指定命令目录，`--rc-file` 可指定配置文件；
+`--no-shell-init` 禁止写入任何 shell 配置。`--yes` 本身不等于同意修改 rc。
+
 测试失败、格式检查失败、依赖缺 wheel 或 OSS 失败均阻止稳定入口推进，
 没有忽略错误的生产分支。现有仓库测试/格式问题需先处理，不能用跳过检查上线。
 一般开发 wheel 构建不需要签名密钥；正式发行构建在临时源码副本嵌入公钥。
