@@ -424,7 +424,16 @@ def main(environ=None):
         else:
             print("\n未配置 PATH，以下命令使用完整路径：")
         print(
-            f"  {executable} setup\n\n进入研究目录后：\n  {executable} init\n  {executable} chat"
+            "\n1. 准备科研运行环境（首次使用时执行，已准备好可跳过）：\n"
+            "   前面安装的是客户端本身；此步骤为数据处理、分析和绘图准备独立运行环境，\n"
+            "   不是重新安装客户端，无需登录，也不会修改系统 Python 或你的 Conda 环境。\n"
+            f"  {executable} setup\n"
+            "\n2. 初始化研究项目（每个新研究目录执行一次，已初始化可跳过）：\n"
+            "   请先进入你的研究目录，再运行此命令，创建项目配置及数据、图表等工作目录。\n"
+            f"  {executable} init\n"
+            "\n3. 开始 AI 科研对话（每次开始工作时执行）：\n"
+            "   打开交互对话界面，用自然语言描述你要完成的任务。\n"
+            f"  {executable} chat"
         )
 
 

@@ -161,6 +161,32 @@ def test_configured_path_guides_loading_before_short_commands(
     assert "完整路径也可直接运行" not in output
 
 
+@pytest.mark.parametrize("environment,command", [("production", "aero"),
+                                               ("testing", "aero-testing")])
+@pytest.mark.parametrize("configured", [True, False])
+def test_next_steps_explain_purpose_and_when_each_command_is_needed(
+    helper, tmp_path, capsys, environment, command, configured
+):
+    helper["main"](setup_env(
+        tmp_path, AERO_SHELL_INIT="yes" if configured else "no", AERO_ENVIRONMENT=environment
+    ))
+    output = capsys.readouterr().out
+    executable = command if configured else str(tmp_path / "bin" / command)
+    assert "前面安装的是客户端本身" in output
+    assert "不是重新安装客户端，无需登录" in output
+    assert "不会修改系统 Python 或你的 Conda 环境" in output
+    assert "首次使用时执行，已准备好可跳过" in output
+    assert "每个新研究目录执行一次，已初始化可跳过" in output
+    assert "请先进入你的研究目录" in output
+    assert "创建项目配置及数据、图表等工作目录" in output
+    assert "打开交互对话界面，用自然语言描述你要完成的任务" in output
+    assert (
+        output.index("1. 准备科研运行环境") < output.index(f"  {executable} setup")
+        < output.index("2. 初始化研究项目") < output.index(f"  {executable} init")
+        < output.index("3. 开始 AI 科研对话") < output.index(f"  {executable} chat")
+    )
+
+
 def test_explicit_automation_consent_and_bash_both_startup_modes(helper, tmp_path):
     helper["main"](setup_env(tmp_path, AERO_SHELL_INIT="yes", AERO_INSTALL_SHELL="bash"))
     assert (tmp_path / ".bashrc").is_file()
